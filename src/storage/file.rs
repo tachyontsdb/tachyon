@@ -1,3 +1,4 @@
+use crate::common::{Timestamp, Value};
 use std::{
     fs::File,
     io::{Error, Read, Seek, Write},
@@ -7,9 +8,6 @@ use std::{
 };
 
 const MAGIC: [u8; 4] = [b'T', b'a', b'c', b'h'];
-
-pub type Timestamp = u64;
-pub type Value = u64;
 
 pub struct Cursor {
     file: File,

@@ -1,6 +1,5 @@
+use crate::{common::Timestamp, storage::file::Cursor};
 use std::{path::PathBuf, sync::Arc};
-
-use crate::storage::file::{Cursor, Timestamp};
 
 #[non_exhaustive]
 #[repr(u8)]
