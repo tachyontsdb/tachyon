@@ -1,4 +1,5 @@
 use crate::common::{Timestamp, Value};
+use crate::storage::compression::CompressionEngine;
 use std::{
     fs::File,
     io::{Error, Read, Seek, Write},
@@ -99,7 +100,7 @@ impl Cursor {
         Some((new_timestamp, new_value))
     }
 
-    pub fn fetch(&mut self) -> (Timestamp, Value) {
+    pub fn fetch(&self) -> (Timestamp, Value) {
         (self.current_timestamp, self.value)
     }
 }
@@ -235,14 +236,24 @@ impl TimeDataFile {
 
         self.header.write(&mut file).unwrap();
 
+        let mut body = Vec::<u64>::new();
         // write timestamps & values deltas
         for i in 1usize..(self.header.count as usize) {
-            file.write_all(&(self.timestamps[i] - self.timestamps[i - 1]).to_le_bytes())
-                .unwrap();
+            body.push(self.timestamps[i] - self.timestamps[i - 1]);
+            body.push(self.values[i] - self.values[i - 1]);
+            // file.write_all(&(self.timestamps[i] - self.timestamps[i - 1]).to_le_bytes())
+            //     .unwrap();
 
-            file.write_all(&(self.values[i] - self.values[i - 1]).to_le_bytes())
-                .unwrap();
+            // file.write_all(&(self.values[i] - self.values[i - 1]).to_le_bytes())
+            //     .unwrap();
         }
+        let body_compressed = CompressionEngine::compress(&body);
+        println!(
+            "Original {}, compressed: {}",
+            (8 * body.len()),
+            (body_compressed.len()),
+        );
+        file.write_all(&body_compressed).unwrap();
     }
 
     pub fn write_data_to_file_in_mem(&mut self, timestamp: Timestamp, value: Value) {
@@ -447,5 +458,18 @@ mod tests {
         for path in file_paths.iter() {
             std::fs::remove_file(&path);
         }
+    }
+
+    #[test]
+    fn test_compression() {
+        let mut timestamps = Vec::<u64>::new();
+        let mut values = Vec::<u64>::new();
+
+        for i in 0..10u64 {
+            timestamps.push(i.into());
+            values.push((i + 10).into());
+        }
+
+        generate_ty_file("./tmp/compressed_file.ty".into(), &timestamps, &values);
     }
 }
