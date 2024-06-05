@@ -210,18 +210,63 @@ impl TimeDataFile {
 
         let header = Header::parse(&mut file);
 
-        let mut buf = [0x00u8; size_of::<Timestamp>()];
-        let mut timestamps = Vec::<Timestamp>::new();
-        for _ in 0..header.count {
-            file.read_exact(&mut buf).unwrap();
-            timestamps.push(Timestamp::from_le_bytes(buf));
+        let mut length = [0u8; 1];
+
+        let mut int_val = [0u8; 8];
+
+        let mut i = 0;
+
+        let mut timestamp = header.min_timestamp;
+        let mut value = header.first_value;
+
+        let mut timestamps = Vec::new();
+        let mut values = Vec::new();
+        timestamps.push(timestamp);
+        values.push(value);
+
+        let exponents = [1, 2, 4, 8];
+        while (i < (header.count - 1) / 2 * 4) {
+            file.read_exact(&mut length).unwrap();
+            for j in 0..4 {
+                let int_length = exponents[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
+                file.read_exact(&mut int_val[0..int_length as usize]);
+
+                let mut butter = [0u8; 8];
+                for q in 0..int_length {
+                    butter[q] = int_val[q];
+                }
+
+                if j % 2 == 0 {
+                    timestamp += u64::from_le_bytes(butter);
+                    timestamps.push(timestamp);
+                } else {
+                    value += u64::from_le_bytes(butter);
+                    values.push(value);
+                }
+            }
+            i += 4;
         }
 
-        let mut buf = [0x00u8; size_of::<Value>()];
-        let mut values = Vec::<Value>::new();
-        for _ in 0..header.count {
-            file.read_exact(&mut buf).unwrap();
-            values.push(Value::from_le_bytes(buf));
+        if header.count % 2 == 0 {
+            file.read_exact(&mut length).unwrap();
+            for j in 0..2 {
+                let int_length = exponents[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
+                file.read_exact(&mut int_val[0..int_length as usize]);
+
+                let mut butter = [0u8; 8];
+                for q in 0..int_length {
+                    butter[q] = int_val[q];
+                }
+
+                if j % 2 == 0 {
+                    timestamp += u64::from_le_bytes(butter);
+                    timestamps.push(timestamp);
+                } else {
+                    value += u64::from_le_bytes(butter);
+                    values.push(value);
+                }
+            }
+            i += 2;
         }
 
         Self {
@@ -465,11 +510,18 @@ mod tests {
         let mut timestamps = Vec::<u64>::new();
         let mut values = Vec::<u64>::new();
 
-        for i in 0..10u64 {
+        for i in 1..100000u64 {
             timestamps.push(i.into());
-            values.push((i + 10).into());
+            values.push((i * 200000).into());
         }
 
         generate_ty_file("./tmp/compressed_file.ty".into(), &timestamps, &values);
+
+        let res = TimeDataFile::read_data_file("./tmp/compressed_file.ty".into());
+
+        assert_eq!(res.timestamps.len(), timestamps.len());
+
+        assert!(res.timestamps == timestamps);
+        assert!(res.values == values);
     }
 }

@@ -31,32 +31,34 @@ impl CompressionEngine {
     pub fn compress(mut values: &Vec<u64>) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::new();
 
-        let val_buf = [0u8; 8];
-
         let mut i = 0;
         while (i < values.len() / 4 * 4) {
             let mut length = 0u8;
+            let mut bytes_needed: u8;
             for j in 0..4 {
-                let bytes_needed = CompressionEngine::bytes_needed_u64(values[i + j]);
-                length |= CompressionEngine::length_encoding(bytes_needed);
-                length <<= 2;
+                bytes_needed = CompressionEngine::bytes_needed_u64(values[i + j]);
+                length |= CompressionEngine::length_encoding(bytes_needed) << (6 - 2 * j);
             }
+
             result.push(length);
             for j in 0..4 {
-                result.extend_from_slice(&values[i + j].to_le_bytes());
+                CompressionEngine::encode_value(values[i + j], &mut result);
             }
             i += 4;
         }
 
-        let mut length = 0u8;
-        for i in (values.len() - (values.len() % 4))..values.len() {
-            let bytes_needed = CompressionEngine::bytes_needed_u64(values[i]);
-            length |= CompressionEngine::length_encoding(bytes_needed);
-            length <<= 2;
+        if values.len() % 4 > 0 {
+            let mut length = 0u8;
+            for i in (values.len() - (values.len() % 4))..values.len() {
+                let bytes_needed = CompressionEngine::bytes_needed_u64(values[i]);
+                length |= CompressionEngine::length_encoding(bytes_needed)
+                    << (6 - 2 * (i - (values.len() - (values.len() % 4))));
+            }
+            result.push(length);
         }
-        result.push(length);
+
         for i in (values.len() - (values.len() % 4))..values.len() {
-            result.extend_from_slice(&values[i].to_le_bytes());
+            CompressionEngine::encode_value(values[i], &mut result);
         }
 
         result
@@ -75,9 +77,12 @@ impl CompressionEngine {
             panic!("Integer greater than 8 bytes: {}.", n);
         }
     }
-
-    fn encode_value(n: u64, &mut val_buf: &mut [u8; 8]) {
+    fn encode_value(n: u64, result: &mut Vec<u8>) {
+        const EXPONENTS: [u8; 4] = [1, 2, 4, 8];
         let n_bytes = CompressionEngine::bytes_needed_u64(n);
+        let n_bytes = EXPONENTS[CompressionEngine::length_encoding(n_bytes) as usize];
+        let bytes = n.to_le_bytes();
+        result.extend_from_slice(&bytes[0..n_bytes as usize]);
     }
 
     fn bytes_needed_u64(n: u64) -> u8 {
