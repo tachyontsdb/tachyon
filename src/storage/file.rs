@@ -3,6 +3,7 @@ use std::{
     io::{Error, Read, Seek, Write},
     mem::size_of,
     path::PathBuf,
+    sync::Arc,
 };
 
 const MAGIC: [u8; 4] = [b'T', b'a', b'c', b'h'];
@@ -10,7 +11,7 @@ const MAGIC: [u8; 4] = [b'T', b'a', b'c', b'h'];
 pub type Timestamp = u64;
 pub type Value = u64;
 
-pub struct Cursor<'a> {
+pub struct Cursor {
     file: File,
     file_index: usize,
     header: Header,
@@ -19,12 +20,16 @@ pub struct Cursor<'a> {
     value: Value,
     values_read: u64,
 
-    file_paths: &'a [PathBuf],
+    file_paths: Arc<[PathBuf]>,
 }
 
-impl<'a> Cursor<'a> {
+impl Cursor {
     // pre: file_paths[0] contains at least one timestamp t such that start <= t
-    pub fn new(file_paths: &'a [PathBuf], start: Timestamp, end: Timestamp) -> Result<Self, Error> {
+    pub fn new(
+        file_paths: Arc<[PathBuf]>,
+        start: Timestamp,
+        end: Timestamp,
+    ) -> Result<Self, Error> {
         assert!(file_paths.len() > 0);
         assert!(start <= end);
 
@@ -41,6 +46,7 @@ impl<'a> Cursor<'a> {
             values_read: 1,
             file_paths,
         };
+        println!("HERE: {}", cursor.value);
 
         while cursor.current_timestamp < start {
             if let Some((timestamp, value)) = cursor.next() {
@@ -70,7 +76,7 @@ impl<'a> Cursor<'a> {
 
             // this should never be triggered
             if self.current_timestamp > self.end {
-                panic!("Unexpected file change!");
+                panic!("Unexpected file change! Cursor timestamp is greater then end timestamp.");
             }
             return Some((self.current_timestamp, self.value));
         }
@@ -181,7 +187,7 @@ impl Header {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TimeDataFile {
     header: Header,
     timestamps: Vec<Timestamp>,
@@ -310,7 +316,7 @@ mod tests {
         model.write("./tmp/test_cursor.ty".into());
 
         let file_paths = [PathBuf::from_str("./tmp/test_cursor.ty").unwrap()];
-        let cursor = Cursor::new(&file_paths, 0, 100);
+        let cursor = Cursor::new(Arc::new(file_paths), 0, 100);
         assert!(!cursor.is_err());
 
         let mut cursor = cursor.unwrap();
@@ -326,5 +332,71 @@ mod tests {
         }
 
         std::fs::remove_file("./tmp/test_cursor.ty");
+    }
+
+    fn generate_ty_file(path: PathBuf, timestamps: &Vec<Timestamp>, values: &Vec<Value>) {
+        assert!(timestamps.len() == values.len());
+        let mut model = TimeDataFile::new();
+
+        for i in 0..timestamps.len() {
+            model.write_data_to_file_in_mem(timestamps[i], values[i])
+        }
+        model.write(path)
+    }
+
+    #[test]
+    fn test_cursor_multiple_files() {
+        let file_paths = [
+            "./tmp/test_cursor_multiple_files_1.ty",
+            "./tmp/test_cursor_multiple_files_2.ty",
+            "./tmp/test_cursor_multiple_files_3.ty",
+        ];
+
+        let mut timestamp = 0;
+        let mut timestamps = Vec::new();
+        let mut values = Vec::new();
+
+        // for file_path in file_paths {
+        //     generate_ty_file(path, 10);
+        // }
+
+        for file_path in file_paths {
+            // let mut model = TimeDataFile::new();
+            let mut local_timestamps = Vec::new();
+            let mut local_values = Vec::new();
+            for i in 0..10u64 {
+                // model.write_data_to_file_in_mem(timestamp, timestamp + 10);
+                local_timestamps.push(timestamp);
+                local_values.push(timestamp + 10);
+                timestamp += 1;
+            }
+
+            generate_ty_file(file_path.into(), &local_timestamps, &local_values);
+            timestamps.append(&mut local_timestamps);
+            values.append(&mut local_values);
+        }
+
+        let file_paths = file_paths.map(|path| PathBuf::from_str(path).unwrap());
+        let file_paths = Arc::new(file_paths);
+        let cursor = Cursor::new(file_paths.clone(), 0, 100);
+        assert!(!cursor.is_err());
+
+        let mut cursor = cursor.unwrap();
+        let mut i = 0;
+
+        loop {
+            let (timestamp, value) = cursor.fetch();
+            println!("{} {}", timestamp, value);
+            assert_eq!(timestamp, timestamps[i]);
+            assert_eq!(value, values[i]);
+            i += 1;
+            if cursor.next().is_none() {
+                break;
+            }
+        }
+
+        for path in file_paths.iter() {
+            std::fs::remove_file(&path);
+        }
     }
 }
