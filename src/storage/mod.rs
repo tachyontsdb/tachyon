@@ -1,8 +1,6 @@
-mod file;
+pub mod file;
 
-pub struct StorageLayer {
-    
-}
+pub struct StorageLayer {}
 
 impl StorageLayer {
     fn open_file() {}
@@ -13,6 +11,4 @@ impl StorageLayer {
 }
 
 #[cfg(test)]
-mod test {
-    
-}
+mod test {}

@@ -1,3 +1,7 @@
+use std::{path::PathBuf, sync::Arc};
+
+use crate::storage::file::{Cursor, Timestamp};
+
 #[non_exhaustive]
 #[repr(u8)]
 pub enum OperationCode {
@@ -6,23 +10,22 @@ pub enum OperationCode {
     Init,
     Halt,
 
-    OpenReadCursor, // { register_index: u64, stream_id: u64, from_timestamp: u64, to_timestamp: u64 } returns cursor,
-    CloseReadCursor, // { cursor: u64 },
+    OpenRead, // { register_index: u64, stream_id: u64, from_timestamp: u64, to_timestamp: u64 } returns cursor,
+    CloseRead, // { cursor: u64 },
 
-    GoNextEntry, // { cursor: u64 },
-    GoPrevEntry, // { cursor: u64 },
+    Next, // { cursor: u64 },
 
-    GoGreaterTimestampEntry, // Seek { cursor: u64, timestamp: u64 }, (might not need)
-
-    FetchVectorDiscardTimestamp, // { cursor: u64, to_register: u64 }
+    // GoPrevEntry, // { cursor: u64 },
+    // GoGreaterTimestampEntry, // Seek { cursor: u64, timestamp: u64 }, (might not need)
+    FetchScalar, // { cursor: u64, to_register: u64 }
     FetchVector, // { cursor: u64, to_register_timestamp: u64, to_register_value: u64 },
 
     Goto,    // { address: u64 }
     GotoEq,  // { address: u64, register_1: u64, register_2: u64 }
     GotoNeq, // { address: u64, register_1: u64, register_2: u64 }
 
-    AddToOutputScalar, // { from_register: u64 }
-    AddToOutputVector, // { from_register_timestamp: u64, from_register_value: u64 }
+    OutputScalar, // { from_register: u64 }
+    OutputVector, // { from_register_timestamp: u64, from_register_value: u64 }
 
     LogicalNot,        // { to_register: u64, from_register: u64 }
     LogicalAnd,        // { to_register: u64, from_register_1: u64, from_register_2: u64 }
@@ -43,8 +46,23 @@ pub enum OperationCode {
     ArithmeticRemainderImmediate, // { to_register: u64, from_register: u64, immediate_value: u64 }
 }
 
+const NUM_REGS: usize = 10;
+
 #[repr(C, packed)]
 pub struct Context {
-    pub pc: u64,
-    pub regs: [u64; 8],
+    pc: u64,
+    regs: [u64; NUM_REGS],
+    cursor: Cursor,
+    file_paths: Arc<[PathBuf]>,
+}
+
+impl Context {
+    pub fn new(file_paths: Arc<[PathBuf]>, start: Timestamp, end: Timestamp) -> Self {
+        Self {
+            pc: 0,
+            regs: [0x00u64; NUM_REGS],
+            cursor: Cursor::new(file_paths.clone(), start, end).unwrap(),
+            file_paths,
+        }
+    }
 }
