@@ -68,6 +68,8 @@ impl Cursor {
             self.file = File::open(&self.file_paths[self.file_index]).unwrap();
             self.header = Header::parse(&mut self.file);
 
+            println!("New file: {:#?}", self.header);
+
             self.current_timestamp = self.header.min_timestamp;
             self.value = self.header.first_value;
             self.values_read = 1;
@@ -246,6 +248,10 @@ impl TimeDataFile {
     pub fn write_data_to_file_in_mem(&mut self, timestamp: Timestamp, value: Value) {
         if self.header.count == 0 {
             self.header.first_value = value;
+            self.header.min_timestamp = timestamp;
+            self.header.max_timestamp = timestamp;
+            self.header.min_value = value;
+            self.header.max_value = value;
         }
 
         self.header.count += 1;
@@ -354,16 +360,10 @@ mod tests {
         let mut timestamps = Vec::new();
         let mut values = Vec::new();
 
-        // for file_path in file_paths {
-        //     generate_ty_file(path, 10);
-        // }
-
         for file_path in file_paths {
-            // let mut model = TimeDataFile::new();
             let mut local_timestamps = Vec::new();
             let mut local_values = Vec::new();
             for i in 0..10u64 {
-                // model.write_data_to_file_in_mem(timestamp, timestamp + 10);
                 local_timestamps.push(timestamp);
                 local_values.push(timestamp + 10);
                 timestamp += 1;
@@ -392,6 +392,57 @@ mod tests {
                 break;
             }
         }
+
+        for path in file_paths.iter() {
+            std::fs::remove_file(&path);
+        }
+    }
+
+    #[test]
+    fn test_cursor_multiple_files_partial() {
+        let file_paths = [
+            "./tmp/test_cursor_multiple_files_1.ty",
+            "./tmp/test_cursor_multiple_files_2.ty",
+            "./tmp/test_cursor_multiple_files_3.ty",
+        ];
+
+        let mut timestamp = 0;
+        let mut timestamps = Vec::new();
+        let mut values = Vec::new();
+
+        for file_path in file_paths {
+            let mut local_timestamps = Vec::new();
+            let mut local_values = Vec::new();
+            for i in 0..10u64 {
+                local_timestamps.push(timestamp);
+                local_values.push(timestamp + 10);
+                timestamp += 1;
+            }
+
+            generate_ty_file(file_path.into(), &local_timestamps, &local_values);
+            timestamps.append(&mut local_timestamps);
+            values.append(&mut local_values);
+        }
+
+        let file_paths = file_paths.map(|path| PathBuf::from_str(path).unwrap());
+        let file_paths = Arc::new(file_paths);
+        let cursor = Cursor::new(file_paths.clone(), 5, 23);
+        assert!(!cursor.is_err());
+
+        let mut cursor = cursor.unwrap();
+        let mut i = 5;
+
+        loop {
+            let (timestamp, value) = cursor.fetch();
+            println!("{} {}", timestamp, value);
+            assert_eq!(timestamp, timestamps[i]);
+            assert_eq!(value, values[i]);
+            i += 1;
+            if cursor.next().is_none() {
+                break;
+            }
+        }
+        assert_eq!(i, 24);
 
         for path in file_paths.iter() {
             std::fs::remove_file(&path);
