@@ -9,6 +9,7 @@ use std::{
 };
 
 const MAGIC: [u8; 4] = [b'T', b'a', b'c', b'h'];
+const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
 
 pub struct Cursor {
     file: File,
@@ -19,6 +20,8 @@ pub struct Cursor {
     value: Value,
     values_read: u64,
 
+    // length byte
+    cur_length_byte: u8,
     file_paths: Arc<[PathBuf]>,
 }
 
@@ -43,9 +46,9 @@ impl Cursor {
             header,
             end,
             values_read: 1,
+            cur_length_byte: 0,
             file_paths,
         };
-        println!("HERE: {}", cursor.value);
 
         while cursor.current_timestamp < start {
             if let Some((timestamp, value)) = cursor.next() {
@@ -82,15 +85,25 @@ impl Cursor {
             return Some((self.current_timestamp, self.value));
         }
 
-        let mut ts_buf: [u8; size_of::<Timestamp>()] = [0x00; size_of::<Timestamp>()];
-        self.file.read_exact(&mut ts_buf).unwrap();
+        if self.values_read % 2 == 1 {
+            let mut l_buf = [0u8; 1];
+            self.file.read_exact(&mut l_buf);
+            self.cur_length_byte = l_buf[0];
+        }
+
+        let int_length =
+            EXPONENTS[(self.cur_length_byte >> (6 - 4 * (self.values_read % 2)) & 0b11) as usize];
+        let mut ts_buf = [0x00; size_of::<Timestamp>()];
+        self.file.read_exact(&mut ts_buf[0..int_length]).unwrap();
         let new_timestamp = self.current_timestamp + Timestamp::from_le_bytes(ts_buf);
         if new_timestamp > self.end {
             return None;
         }
 
+        let int_length = EXPONENTS
+            [(self.cur_length_byte >> (6 - 4 * (self.values_read % 2) - 2) & 0b11) as usize];
         let mut v_buf = [0x00u8; size_of::<Value>()];
-        self.file.read_exact(&mut v_buf).unwrap();
+        self.file.read_exact(&mut v_buf[0..int_length]).unwrap();
         let new_value = self.value + Value::from_le_bytes(v_buf);
 
         self.current_timestamp = new_timestamp;
@@ -106,7 +119,6 @@ impl Cursor {
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
-#[repr(C, packed)]
 struct Header {
     version: u16,
 
@@ -122,8 +134,7 @@ struct Header {
 
     first_value: Value,
 }
-
-const HEADER_SIZE: usize = size_of::<Header>();
+const HEADER_SIZE: usize = 62;
 
 struct FileReaderUtil;
 
@@ -224,11 +235,10 @@ impl TimeDataFile {
         timestamps.push(timestamp);
         values.push(value);
 
-        let exponents = [1, 2, 4, 8];
         while (i < (header.count - 1) / 2 * 4) {
             file.read_exact(&mut length).unwrap();
             for j in 0..4 {
-                let int_length = exponents[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
+                let int_length = EXPONENTS[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
                 file.read_exact(&mut int_val[0..int_length as usize]);
 
                 let mut butter = [0u8; 8];
@@ -250,7 +260,7 @@ impl TimeDataFile {
         if header.count % 2 == 0 {
             file.read_exact(&mut length).unwrap();
             for j in 0..2 {
-                let int_length = exponents[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
+                let int_length = EXPONENTS[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
                 file.read_exact(&mut int_val[0..int_length as usize]);
 
                 let mut butter = [0u8; 8];
@@ -286,11 +296,6 @@ impl TimeDataFile {
         for i in 1usize..(self.header.count as usize) {
             body.push(self.timestamps[i] - self.timestamps[i - 1]);
             body.push(self.values[i] - self.values[i - 1]);
-            // file.write_all(&(self.timestamps[i] - self.timestamps[i - 1]).to_le_bytes())
-            //     .unwrap();
-
-            // file.write_all(&(self.values[i] - self.values[i - 1]).to_le_bytes())
-            //     .unwrap();
         }
         let body_compressed = CompressionEngine::compress(&body);
         println!(
@@ -338,15 +343,6 @@ mod tests {
         }
         model.write("./tmp/cool.ty".into());
     }
-
-    // #[test]
-    // fn test_read() {
-    //     let model = TimeDataFile::read_data_file("./tmp/cool.ty".into());
-    //     assert_eq!(model.header.count, 10);
-    //     assert_eq!(model.timestamps[0], 0);
-    //     assert_eq!(model.values[0], 10);
-    //     println!("FILE: {:#?}", model);
-    // }
 
     #[test]
     fn test_header_write_parse() {
@@ -523,5 +519,22 @@ mod tests {
 
         assert!(res.timestamps == timestamps);
         assert!(res.values == values);
+
+        let mut cursor =
+            Cursor::new(Arc::new(["./tmp/compressed_file.ty".into()]), 1, 100000).unwrap();
+
+        let mut i = 0;
+        loop {
+            let (timestamp, value) = cursor.fetch();
+            assert_eq!(timestamp, timestamps[i]);
+            assert_eq!(value, values[i]);
+            i += 1;
+            if cursor.next().is_none() {
+                break;
+            }
+        }
+        assert_eq!(i, 99999);
+
+        std::fs::remove_file("./tmp/compressed_file.ty");
     }
 }
