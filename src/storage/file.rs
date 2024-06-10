@@ -8,46 +8,67 @@ use std::{
     sync::Arc,
 };
 
-const MAGIC: [u8; 4] = [b'T', b'a', b'c', b'h'];
+use super::page_cache::{self, PageCache};
+
+const MAGIC_SIZE: usize = 4;
+const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
 
-pub struct Cursor {
-    file: File,
+pub struct Cursor<'a> {
+    // file: File,
+    file_id: usize,
     file_index: usize,
     header: Header,
     end: Timestamp,
     current_timestamp: Timestamp,
     value: Value,
     values_read: u64,
+    offset: usize,
 
     // length byte
     cur_length_byte: u8,
     file_paths: Arc<[PathBuf]>,
+
+    page_cache: &'a mut PageCache,
 }
 
-impl Cursor {
+// TODO: Remove this
+impl<'a> Iterator for Cursor<'a> {
+    type Item = (Timestamp, Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
+    }
+}
+
+impl<'a> Cursor<'a> {
     // pre: file_paths[0] contains at least one timestamp t such that start <= t
     pub fn new(
         file_paths: Arc<[PathBuf]>,
         start: Timestamp,
         end: Timestamp,
+        page_cache: &'a mut PageCache,
     ) -> Result<Self, Error> {
         assert!(file_paths.len() > 0);
         assert!(start <= end);
 
-        let mut file = File::open(&file_paths[0])?;
-        let header = Header::parse(&mut file);
+        // let mut file = File::open(&file_paths[0])?;
+        let file_id =
+            page_cache.register_or_get_file_id(&file_paths[0].to_str().unwrap().to_owned());
+        let header = Header::parse(file_id, page_cache);
 
         let mut cursor = Self {
-            file,
+            file_id,
             file_index: 0,
             current_timestamp: header.min_timestamp,
             value: header.first_value,
             header,
             end,
             values_read: 1,
+            offset: MAGIC_SIZE + HEADER_SIZE,
             cur_length_byte: 0,
             file_paths,
+            page_cache,
         };
 
         while cursor.current_timestamp < start {
@@ -69,8 +90,14 @@ impl Cursor {
             }
 
             self.file_index += 1;
-            self.file = File::open(&self.file_paths[self.file_index]).unwrap();
-            self.header = Header::parse(&mut self.file);
+            self.file_id = self.page_cache.register_or_get_file_id(
+                &self.file_paths[self.file_index]
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+            );
+            self.header = Header::parse(self.file_id, self.page_cache);
+            self.offset = MAGIC_SIZE + HEADER_SIZE;
 
             println!("New file: {:#?}", self.header);
 
@@ -87,14 +114,17 @@ impl Cursor {
 
         if self.values_read % 2 == 1 {
             let mut l_buf = [0u8; 1];
-            self.file.read_exact(&mut l_buf);
+            self.offset += self.page_cache.read(self.file_id, self.offset, &mut l_buf);
+            // self.file.read_exact(&mut l_buf);
             self.cur_length_byte = l_buf[0];
         }
 
         let int_length =
             EXPONENTS[(self.cur_length_byte >> (6 - 4 * (self.values_read % 2)) & 0b11) as usize];
         let mut ts_buf = [0x00; size_of::<Timestamp>()];
-        self.file.read_exact(&mut ts_buf[0..int_length]).unwrap();
+        self.offset += self
+            .page_cache
+            .read(self.file_id, self.offset, &mut ts_buf[0..int_length]);
         let new_timestamp = self.current_timestamp + Timestamp::from_le_bytes(ts_buf);
         if new_timestamp > self.end {
             return None;
@@ -103,7 +133,9 @@ impl Cursor {
         let int_length = EXPONENTS
             [(self.cur_length_byte >> (6 - 4 * (self.values_read % 2) - 2) & 0b11) as usize];
         let mut v_buf = [0x00u8; size_of::<Value>()];
-        self.file.read_exact(&mut v_buf[0..int_length]).unwrap();
+        self.offset += self
+            .page_cache
+            .read(self.file_id, self.offset, &mut v_buf[0..int_length]);
         let new_value = self.value + Value::from_le_bytes(v_buf);
 
         self.current_timestamp = new_timestamp;
@@ -155,16 +187,16 @@ impl FileReaderUtil {
 }
 
 impl Header {
-    fn parse(file: &mut File) -> Self {
+    fn parse(file_id: usize, page_cache: &mut PageCache) -> Self {
         let mut magic = [0x00u8; 4];
-        file.read_exact(&mut magic).unwrap();
+        page_cache.read(file_id, 0, &mut magic);
 
         if magic != MAGIC {
             panic!("Corrupted file - invalid magic for .ty file (uh oh stinky)");
         }
 
         let mut buffer = [0x00u8; HEADER_SIZE];
-        file.read_exact(&mut buffer).unwrap();
+        page_cache.read(file_id, 4, &mut buffer);
 
         Self {
             version: FileReaderUtil::read_u16(&buffer[0..2]),
@@ -179,7 +211,7 @@ impl Header {
         }
     }
 
-    fn write(&self, file: &mut File) -> Result<(), std::io::Error> {
+    fn write(&self, file: &mut File) -> Result<usize, std::io::Error> {
         file.write_all(&MAGIC)?;
 
         file.write_all(&self.version.to_le_bytes())?;
@@ -195,15 +227,15 @@ impl Header {
 
         file.write_all(&self.first_value.to_le_bytes())?;
 
-        Ok(())
+        Ok(HEADER_SIZE + MAGIC_SIZE)
     }
 }
 
 #[derive(Debug, Default)]
 pub struct TimeDataFile {
-    header: Header,
-    timestamps: Vec<Timestamp>,
-    values: Vec<Value>,
+    pub header: Header,
+    pub timestamps: Vec<Timestamp>,
+    pub values: Vec<Value>,
 }
 
 impl TimeDataFile {
@@ -217,9 +249,11 @@ impl TimeDataFile {
 
     pub fn read_data_file(path: PathBuf) -> Self {
         // TODO: remove unwraps
-        let mut file = File::open(path).unwrap();
-
-        let header = Header::parse(&mut file);
+        let mut page_cache = PageCache::new(100);
+        let file_id =
+            page_cache.register_or_get_file_id(&path.into_os_string().into_string().unwrap());
+        let header = Header::parse(file_id, &mut page_cache);
+        let mut offset = MAGIC_SIZE + HEADER_SIZE;
 
         let mut length = [0u8; 1];
 
@@ -236,10 +270,10 @@ impl TimeDataFile {
         values.push(value);
 
         while (i < (header.count - 1) / 2 * 4) {
-            file.read_exact(&mut length).unwrap();
+            offset += page_cache.read(file_id, offset, &mut length);
             for j in 0..4 {
                 let int_length = EXPONENTS[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
-                file.read_exact(&mut int_val[0..int_length as usize]);
+                offset += page_cache.read(file_id, offset, &mut int_val[0..int_length as usize]);
 
                 let mut butter = [0u8; 8];
                 for q in 0..int_length {
@@ -258,10 +292,10 @@ impl TimeDataFile {
         }
 
         if header.count % 2 == 0 {
-            file.read_exact(&mut length).unwrap();
+            offset += page_cache.read(file_id, offset, &mut length);
             for j in 0..2 {
                 let int_length = EXPONENTS[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
-                file.read_exact(&mut int_val[0..int_length as usize]);
+                offset += page_cache.read(file_id, offset, &mut int_val[0..int_length as usize]);
 
                 let mut butter = [0u8; 8];
                 for q in 0..int_length {
@@ -286,10 +320,10 @@ impl TimeDataFile {
         }
     }
 
-    pub fn write(&self, path: PathBuf) {
+    pub fn write(&self, path: PathBuf) -> usize {
         let mut file = File::create(path).unwrap();
 
-        self.header.write(&mut file).unwrap();
+        let header_bytes = self.header.write(&mut file).unwrap();
 
         let mut body = Vec::<u64>::new();
         // write timestamps & values deltas
@@ -304,6 +338,7 @@ impl TimeDataFile {
             (body_compressed.len()),
         );
         file.write_all(&body_compressed).unwrap();
+        body_compressed.len() + header_bytes
     }
 
     pub fn write_data_to_file_in_mem(&mut self, timestamp: Timestamp, value: Value) {
@@ -331,9 +366,8 @@ impl TimeDataFile {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_write() {
@@ -357,7 +391,9 @@ mod tests {
         t_header.write(&mut temp_file);
 
         let mut temp_file: File = File::open("./tmp/temp_file").unwrap();
-        let parsed_header = Header::parse(&mut temp_file);
+        let mut page_cache = PageCache::new(100);
+        let file_id = page_cache.register_or_get_file_id(&"./tmp/temp_file".to_owned());
+        let parsed_header = Header::parse(file_id, &mut page_cache);
         assert!(t_header == parsed_header);
 
         std::fs::remove_file("./tmp/temp_file");
@@ -372,7 +408,9 @@ mod tests {
         model.write("./tmp/test_cursor.ty".into());
 
         let file_paths = [PathBuf::from_str("./tmp/test_cursor.ty").unwrap()];
-        let cursor = Cursor::new(Arc::new(file_paths), 0, 100);
+
+        let mut page_cache = PageCache::new(10);
+        let cursor = Cursor::new(Arc::new(file_paths), 0, 100, &mut page_cache);
         assert!(!cursor.is_err());
 
         let mut cursor = cursor.unwrap();
@@ -397,7 +435,7 @@ mod tests {
         for i in 0..timestamps.len() {
             model.write_data_to_file_in_mem(timestamps[i], values[i])
         }
-        model.write(path)
+        model.write(path);
     }
 
     #[test]
@@ -428,7 +466,8 @@ mod tests {
 
         let file_paths = file_paths.map(|path| PathBuf::from_str(path).unwrap());
         let file_paths = Arc::new(file_paths);
-        let cursor = Cursor::new(file_paths.clone(), 0, 100);
+        let mut page_cache = PageCache::new(10);
+        let cursor = Cursor::new(file_paths.clone(), 0, 100, &mut page_cache);
         assert!(!cursor.is_err());
 
         let mut cursor = cursor.unwrap();
@@ -478,7 +517,8 @@ mod tests {
 
         let file_paths = file_paths.map(|path| PathBuf::from_str(path).unwrap());
         let file_paths = Arc::new(file_paths);
-        let cursor = Cursor::new(file_paths.clone(), 5, 23);
+        let mut page_cache = PageCache::new(10);
+        let cursor = Cursor::new(file_paths.clone(), 5, 23, &mut page_cache);
         assert!(!cursor.is_err());
 
         let mut cursor = cursor.unwrap();
@@ -520,8 +560,14 @@ mod tests {
         assert!(res.timestamps == timestamps);
         assert!(res.values == values);
 
-        let mut cursor =
-            Cursor::new(Arc::new(["./tmp/compressed_file.ty".into()]), 1, 100000).unwrap();
+        let mut page_cache = PageCache::new(100);
+        let mut cursor = Cursor::new(
+            Arc::new(["./tmp/compressed_file.ty".into()]),
+            1,
+            100000,
+            &mut page_cache,
+        )
+        .unwrap();
 
         let mut i = 0;
         loop {
