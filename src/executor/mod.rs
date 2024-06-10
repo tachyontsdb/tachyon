@@ -1,6 +1,6 @@
 use crate::{
     common::{Timestamp, Value},
-    storage::file::Cursor,
+    storage::{file::Cursor, page_cache::PageCache},
 };
 use std::{
     collections::{HashMap, VecDeque},
@@ -59,22 +59,24 @@ pub enum OutputValue {
     Vector((Timestamp, Value)),
 }
 
-pub struct Context {
+pub struct Context<'a> {
     pc: usize,
     regs: [u64; NUM_REGS],
     file_paths_array: Arc<[Arc<[PathBuf]>]>,
-    cursors: HashMap<usize, Cursor>,
+    cursors: HashMap<usize, Cursor<'a>>,
     outputs: VecDeque<OutputValue>,
+    page_cache: &'a mut PageCache,
 }
 
-impl Context {
-    pub fn new(file_paths_array: Arc<[Arc<[PathBuf]>]>) -> Self {
+impl<'a> Context<'a> {
+    pub fn new(file_paths_array: Arc<[Arc<[PathBuf]>]>, page_cache: &'a mut PageCache) -> Self {
         Self {
             pc: 0,
             regs: [0x00u64; NUM_REGS],
             file_paths_array,
             cursors: HashMap::new(),
             outputs: VecDeque::new(),
+            page_cache: page_cache,
         }
     }
 
@@ -83,13 +85,15 @@ impl Context {
             panic!("Cursor key already used!");
         }
 
-        let cursor = Cursor::new(
-            self.file_paths_array[file_paths_array_idx as usize].clone(),
-            start,
-            end,
-        )
-        .unwrap();
-        self.cursors.insert(cursor_idx as usize, cursor);
+        // let cursor = Cursor::<'a>::new(
+        //     self.file_paths_array[file_paths_array_idx as usize].clone(),
+        //     start,
+        //     end,
+        //     self.page_cache,
+        // )
+        // .unwrap();
+        // self.cursors.insert(cursor_idx as usize, cursor);
+        todo!()
     }
 
     fn close_read(&mut self, cursor_idx: u64) {

@@ -4,6 +4,29 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+rusqlite = "0.31.0"
+
+[dev-dependencies]
+pprof = { version = "0.13.0", features = ["criterion", "flamegraph"] }
+criterion = { version = "0.4", features = ["html_reports"] }
+
+[[bench]]
+name = "write"
+harness = false
+
+[[bench]]
+name = "read"
+harness = false
+
+[profile.release]
+codegen-units = 1
+opt-level = 3
+lto = "fat"
+
+[profile.bench]
+codegen-units = 1
+opt-level = 3
+lto = "fat"
