@@ -76,7 +76,7 @@ impl<'a> Context<'a> {
             file_paths_array,
             cursors: HashMap::new(),
             outputs: VecDeque::new(),
-            page_cache: page_cache,
+            page_cache,
         }
     }
 

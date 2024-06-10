@@ -49,7 +49,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     // setup tachyon benchmark
     let mut model = TimeDataFile::new();
     for i in 0..NUM_ITEMS {
-        model.write_data_to_file_in_mem(i.into(), i + (i % 100));
+        model.write_data_to_file_in_mem(i, i + (i % 100));
     }
     model.write("./tmp/bench_sequential_read.ty".into());
     let mut page_cache = PageCache::new(1000);

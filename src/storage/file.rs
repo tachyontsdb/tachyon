@@ -151,7 +151,7 @@ impl<'a> Cursor<'a> {
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
-struct Header {
+pub struct Header {
     version: u16,
 
     stream_id: u64,
@@ -273,7 +273,7 @@ impl TimeDataFile {
             offset += page_cache.read(file_id, offset, &mut length);
             for j in 0..4 {
                 let int_length = EXPONENTS[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
-                offset += page_cache.read(file_id, offset, &mut int_val[0..int_length as usize]);
+                offset += page_cache.read(file_id, offset, &mut int_val[0..int_length]);
 
                 let mut butter = [0u8; 8];
                 for q in 0..int_length {
@@ -295,7 +295,7 @@ impl TimeDataFile {
             offset += page_cache.read(file_id, offset, &mut length);
             for j in 0..2 {
                 let int_length = EXPONENTS[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
-                offset += page_cache.read(file_id, offset, &mut int_val[0..int_length as usize]);
+                offset += page_cache.read(file_id, offset, &mut int_val[0..int_length]);
 
                 let mut butter = [0u8; 8];
                 for q in 0..int_length {
@@ -373,7 +373,7 @@ mod tests {
     fn test_write() {
         let mut model = TimeDataFile::new();
         for i in 0..10u64 {
-            model.write_data_to_file_in_mem(i.into(), i + 10);
+            model.write_data_to_file_in_mem(i, i + 10);
         }
         model.write("./tmp/cool.ty".into());
     }
@@ -403,7 +403,7 @@ mod tests {
     fn test_cursor() {
         let mut model = TimeDataFile::new();
         for i in 0..10u64 {
-            model.write_data_to_file_in_mem(i.into(), i + 10);
+            model.write_data_to_file_in_mem(i, i + 10);
         }
         model.write("./tmp/test_cursor.ty".into());
 
@@ -411,7 +411,7 @@ mod tests {
 
         let mut page_cache = PageCache::new(10);
         let cursor = Cursor::new(Arc::new(file_paths), 0, 100, &mut page_cache);
-        assert!(!cursor.is_err());
+        assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
         let mut i = 0;
@@ -468,7 +468,7 @@ mod tests {
         let file_paths = Arc::new(file_paths);
         let mut page_cache = PageCache::new(10);
         let cursor = Cursor::new(file_paths.clone(), 0, 100, &mut page_cache);
-        assert!(!cursor.is_err());
+        assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
         let mut i = 0;
@@ -485,16 +485,16 @@ mod tests {
         }
 
         for path in file_paths.iter() {
-            std::fs::remove_file(&path);
+            std::fs::remove_file(path);
         }
     }
 
     #[test]
     fn test_cursor_multiple_files_partial() {
         let file_paths = [
-            "./tmp/test_cursor_multiple_files_1.ty",
-            "./tmp/test_cursor_multiple_files_2.ty",
-            "./tmp/test_cursor_multiple_files_3.ty",
+            "./tmp/test_cursor_multiple_files_partial_1.ty",
+            "./tmp/test_cursor_multiple_files_partial_2.ty",
+            "./tmp/test_cursor_multiple_files_partial_3.ty",
         ];
 
         let mut timestamp = 0;
@@ -519,7 +519,7 @@ mod tests {
         let file_paths = Arc::new(file_paths);
         let mut page_cache = PageCache::new(10);
         let cursor = Cursor::new(file_paths.clone(), 5, 23, &mut page_cache);
-        assert!(!cursor.is_err());
+        assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
         let mut i = 5;
@@ -537,7 +537,7 @@ mod tests {
         assert_eq!(i, 24);
 
         for path in file_paths.iter() {
-            std::fs::remove_file(&path);
+            std::fs::remove_file(path);
         }
     }
 
@@ -547,8 +547,8 @@ mod tests {
         let mut values = Vec::<u64>::new();
 
         for i in 1..100000u64 {
-            timestamps.push(i.into());
-            values.push((i * 200000).into());
+            timestamps.push(i);
+            values.push((i * 200000));
         }
 
         generate_ty_file("./tmp/compressed_file.ty".into(), &timestamps, &values);

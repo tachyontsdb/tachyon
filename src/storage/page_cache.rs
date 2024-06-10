@@ -77,9 +77,9 @@ impl PageCache {
                 frame_id = *frame;
             } else {
                 // check that file is open
-                if !self.open_files.contains_key(&file_id) {
+                if let std::collections::hash_map::Entry::Vacant(e) = self.open_files.entry(file_id) {
                     let path = self.file_id_to_path.get(&file_id).unwrap();
-                    self.open_files.insert(file_id, File::open(path).unwrap());
+                    e.insert(File::open(path).unwrap());
                 }
 
                 // find next available frame
@@ -152,7 +152,7 @@ mod tests {
         let mut page_cache = PageCache::new(10);
         let mut model = TimeDataFile::new();
         for i in 0..100000u64 {
-            model.write_data_to_file_in_mem(i.into(), i + 10);
+            model.write_data_to_file_in_mem(i, i + 10);
         }
         let file_size = model.write("./tmp/page_cache_read.ty".into());
         // start the test

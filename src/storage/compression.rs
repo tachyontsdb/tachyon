@@ -66,7 +66,7 @@ impl CompressionEngine {
 
     fn length_encoding(n: u8) -> u8 {
         if n == 1 {
-            return 0;
+            0
         } else if n == 2 {
             return 1;
         } else if n <= 4 {
