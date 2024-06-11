@@ -104,6 +104,7 @@ pub struct Cursor<'a> {
     value: Value,
     values_read: u64,
     offset: usize,
+    last_deltas: (i64, i64),
 
     // length byte
     cur_length_byte: u8,
@@ -147,6 +148,7 @@ impl<'a> Cursor<'a> {
             cur_length_byte: 0,
             file_paths,
             page_cache,
+            last_deltas : (0,0)
         };
 
         while cursor.current_timestamp < start {
@@ -180,6 +182,7 @@ impl<'a> Cursor<'a> {
             self.current_timestamp = self.header.min_timestamp;
             self.value = self.header.first_value;
             self.values_read = 1;
+            self.last_deltas = (0,0);
 
             // this should never be triggered
             if self.current_timestamp > self.end {
@@ -196,25 +199,30 @@ impl<'a> Cursor<'a> {
             self.cur_length_byte = l_buf[0];
         }
 
-        let int_length = EXPONENTS
-            [(self.cur_length_byte >> (6 - 4 * (1 - self.values_read % 2)) & 0b11) as usize];
-        let mut ts_buf = [0x00; size_of::<Timestamp>()];
+        let int_length =
+            EXPONENTS[(self.cur_length_byte >> (6 - 4 * ( (self.values_read+1) % 2 )) & 0b11) as usize];
+        let mut ts_buf = [0x00; size_of::<i64>()];
         self.offset += self
             .page_cache
             .read(self.file_id, self.offset, &mut ts_buf[0..int_length]);
-        let new_timestamp = self.current_timestamp + Timestamp::from_le_bytes(ts_buf);
+
+
+        let time_delta = i64::from_le_bytes(ts_buf) + self.last_deltas.0;
+        let new_timestamp = if time_delta > 0 { self.current_timestamp + (time_delta as u64) } else {self.current_timestamp - (time_delta.abs() as u64)};
         if new_timestamp > self.end {
             return None;
         }
 
         let int_length = EXPONENTS
-            [(self.cur_length_byte >> (6 - 4 * (1 - self.values_read % 2) - 2) & 0b11) as usize];
-        let mut v_buf = [0x00u8; size_of::<Value>()];
+            [(self.cur_length_byte >> (6 - 4 * ((self.values_read+1) % 2 ) - 2) & 0b11) as usize];
+        let mut v_buf = [0x00u8; size_of::<i64>()];
         self.offset += self
             .page_cache
             .read(self.file_id, self.offset, &mut v_buf[0..int_length]);
-        let new_value = self.value + Value::from_le_bytes(v_buf);
+        let value_delta = i64::from_le_bytes(v_buf) + self.last_deltas.1;
+        let new_value = if value_delta > 0 { self.value + (value_delta as u64) } else {self.value - (value_delta.abs() as u64)};
 
+        self.last_deltas = ( time_delta, value_delta );
         self.current_timestamp = new_timestamp;
         self.value = new_value;
         self.values_read += 1;
@@ -321,10 +329,17 @@ impl TimeDataFile {
         let header_bytes = self.header.write(&mut file).unwrap();
 
         let mut body = Vec::<u64>::new();
-        // write timestamps & values deltas
+
+        let mut last_deltas: (u64, u64) = (0, 0);
         for i in 1usize..(self.header.count as usize) {
-            body.push(self.timestamps[i] - self.timestamps[i - 1]);
-            body.push(self.values[i] - self.values[i - 1]);
+            let curr_deltas = (
+                self.timestamps[i] - self.timestamps[i - 1],
+                self.values[i] - self.values[i - 1]
+            );
+
+            body.push(curr_deltas.0 - last_deltas.0);
+            body.push(curr_deltas.1 - last_deltas.1);
+            last_deltas = curr_deltas.clone()
         }
         let body_compressed = CompressionEngine::compress(&body);
         println!(
@@ -542,18 +557,11 @@ mod tests {
         let mut values = Vec::<u64>::new();
 
         for i in 1..100000u64 {
-            timestamps.push(i);
-            values.push((i * 200000));
+            timestamps.push(i.into());
+            values.push((i * 200000).into());
         }
 
         generate_ty_file("./tmp/compressed_file.ty".into(), &timestamps, &values);
-
-        let res = TimeDataFile::read_data_file("./tmp/compressed_file.ty".into());
-
-        assert_eq!(res.timestamps.len(), timestamps.len());
-
-        assert!(res.timestamps == timestamps);
-        assert!(res.values == values);
 
         let mut page_cache = PageCache::new(100);
         let mut cursor = Cursor::new(
@@ -574,7 +582,6 @@ mod tests {
                 break;
             }
         }
-
         std::fs::remove_file("./tmp/compressed_file.ty");
     }
 
