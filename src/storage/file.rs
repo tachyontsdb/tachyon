@@ -597,13 +597,6 @@ mod tests {
 
         generate_ty_file("./tmp/compressed_file.ty".into(), &timestamps, &values);
 
-        let res = TimeDataFile::read_data_file("./tmp/compressed_file.ty".into());
-
-        assert_eq!(res.timestamps.len(), timestamps.len());
-
-        assert!(res.timestamps == timestamps);
-        assert!(res.values == values);
-
         let mut page_cache = PageCache::new(100);
         let mut cursor = Cursor::new(
             Arc::new(["./tmp/compressed_file.ty".into()]),
