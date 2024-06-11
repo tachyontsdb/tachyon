@@ -1,6 +1,7 @@
 use promql_parser::parser::{self, AggregateExpr, BinaryExpr, Call, Expr, Extension, MatrixSelector, NumberLiteral, ParenExpr, StringLiteral, SubqueryExpr, UnaryExpr, VectorSelector};
 
-use crate::common::Value;
+use crate::executor::{self, Context, OperationCode::*};
+use crate::common::{Timestamp, Value};
 
 fn handle_aggregate_expr(expr: &AggregateExpr) -> Result<Vec<Value>, &'static str> {
     return Err("Aggregate expressions currently not supported.");
@@ -32,6 +33,13 @@ fn handle_string_literal_expr(expr: &StringLiteral) -> Result<Vec<Value>, &'stat
 }
 
 fn handle_vector_selector_expr(expr: &VectorSelector) -> Result<Vec<Value>, &'static str> {
+    let name = expr.name.as_ref().unwrap();
+
+    // Create the context with the files
+
+    let buffer = [Init, OpenRead, FetchVector, Next, Halt, OutputVector];
+    
+    // executor::execute(context, buffer);
     todo!()
 }
 
@@ -63,15 +71,10 @@ fn exec_expr(expr: &Expr) -> Result<Vec<Value>, &'static str> {
     }
 }
 
-fn query(s: &str) {
-    let expr = parser::parse(s).unwrap();
-    print!("{}", expr.prettify());
+fn query(s: &str, start: Option<Timestamp>, end: Option<Timestamp>) {
+    let ast = parser::parse(s).unwrap();
+    println!("{:#?}", ast);
     // exec_expr(&expr);
-}
-
-fn main() {
-    let query_string = r#"http_requests_total{job="prometheus",group="canary"}"#;
-    query(&query_string);
 }
 
 #[cfg(test)]
@@ -80,7 +83,9 @@ mod tests {
     
     #[test]
     fn test_query() {
-        let query_string = r#"http_requests_total{job="prometheus",group="canary"}"#;
-        query(&query_string);
+        let query_string = r#"http_requests_total"#;
+        let start = None;
+        let end = None;
+        query(&query_string, start, end);
     }
 }
