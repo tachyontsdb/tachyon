@@ -148,7 +148,7 @@ impl<'a> Cursor<'a> {
             cur_length_byte: 0,
             file_paths,
             page_cache,
-            last_deltas : (0,0)
+            last_deltas: (0, 0),
         };
 
         while cursor.current_timestamp < start {
@@ -177,12 +177,10 @@ impl<'a> Cursor<'a> {
             self.header = Header::parse(self.file_id, self.page_cache);
             self.offset = MAGIC_SIZE + HEADER_SIZE;
 
-            println!("New file: {:#?}", self.header);
-
             self.current_timestamp = self.header.min_timestamp;
             self.value = self.header.first_value;
             self.values_read = 1;
-            self.last_deltas = (0,0);
+            self.last_deltas = (0, 0);
 
             // this should never be triggered
             if self.current_timestamp > self.end {
@@ -199,30 +197,32 @@ impl<'a> Cursor<'a> {
             self.cur_length_byte = l_buf[0];
         }
 
-        let int_length =
-            EXPONENTS[(self.cur_length_byte >> (6 - 4 * ( (self.values_read+1) % 2 )) & 0b11) as usize];
-        let mut ts_buf = [0x00; size_of::<i64>()];
+        let int_length = EXPONENTS
+            [((self.cur_length_byte >> (6 - 4 * (1 - (self.values_read % 2)))) & 0b11) as usize];
+        let mut ts_buf = [0x00; size_of::<u64>()];
         self.offset += self
             .page_cache
             .read(self.file_id, self.offset, &mut ts_buf[0..int_length]);
 
-
-        let time_delta = i64::from_le_bytes(ts_buf) + self.last_deltas.0;
-        let new_timestamp = if time_delta > 0 { self.current_timestamp + (time_delta as u64) } else {self.current_timestamp - (time_delta.abs() as u64)};
+        let time_delta =
+            CompressionEngine::zig_zag_decode(u64::from_le_bytes(ts_buf)) + self.last_deltas.0;
+        let new_timestamp = self.current_timestamp.wrapping_add_signed(time_delta);
         if new_timestamp > self.end {
             return None;
         }
 
-        let int_length = EXPONENTS
-            [(self.cur_length_byte >> (6 - 4 * ((self.values_read+1) % 2 ) - 2) & 0b11) as usize];
+        let int_length = EXPONENTS[((self.cur_length_byte
+            >> (6 - 4 * (1 - (self.values_read % 2)) - 2))
+            & 0b11) as usize];
         let mut v_buf = [0x00u8; size_of::<i64>()];
         self.offset += self
             .page_cache
             .read(self.file_id, self.offset, &mut v_buf[0..int_length]);
-        let value_delta = i64::from_le_bytes(v_buf) + self.last_deltas.1;
-        let new_value = if value_delta > 0 { self.value + (value_delta as u64) } else {self.value - (value_delta.abs() as u64)};
+        let value_delta =
+            CompressionEngine::zig_zag_decode(u64::from_le_bytes(v_buf)) + self.last_deltas.1;
+        let new_value = self.value.wrapping_add_signed(value_delta);
 
-        self.last_deltas = ( time_delta, value_delta );
+        self.last_deltas = (time_delta, value_delta);
         self.current_timestamp = new_timestamp;
         self.value = new_value;
         self.values_read += 1;
@@ -283,15 +283,20 @@ impl TimeDataFile {
 
         let mut body = Vec::<u64>::new();
 
-        let mut last_deltas: (u64, u64) = (0, 0);
+        let mut last_deltas: (i64, i64) = (0, 0);
         for i in 1usize..(self.header.count as usize) {
+            // Assumption: difference will never exceed i64
             let curr_deltas = (
-                self.timestamps[i] - self.timestamps[i - 1],
-                self.values[i] - self.values[i - 1]
+                (self.timestamps[i].wrapping_sub(self.timestamps[i - 1])) as i64,
+                (self.values[i].wrapping_sub(self.values[i - 1])) as i64,
             );
 
-            body.push(curr_deltas.0 - last_deltas.0);
-            body.push(curr_deltas.1 - last_deltas.1);
+            body.push(CompressionEngine::zig_zag_encode(
+                curr_deltas.0 - last_deltas.0,
+            ));
+            body.push(CompressionEngine::zig_zag_encode(
+                curr_deltas.1 - last_deltas.1,
+            ));
             last_deltas = curr_deltas.clone()
         }
         let body_compressed = CompressionEngine::compress(&body);
@@ -540,21 +545,15 @@ mod tests {
 
     #[test]
     fn test_compression_2() {
-        let mut timestamps = Vec::<u64>::new();
-        let mut values = Vec::<u64>::new();
-
-        for i in 1..100000u64 {
-            timestamps.push(i);
-            values.push((i * 200000));
-        }
-
-        generate_ty_file("./tmp/compressed_file.ty".into(), &timestamps, &values);
+        let mut timestamps: Vec<u64> = vec![1, 257, 69000, (u32::MAX as u64) + 69000];
+        let mut values = vec![1, 257, 69000, (u32::MAX as u64) + 69000];
+        generate_ty_file("./tmp/compressed_file_2.ty".into(), &timestamps, &values);
 
         let mut page_cache = PageCache::new(100);
         let mut cursor = Cursor::new(
-            Arc::new(["./tmp/compressed_file.ty".into()]),
+            Arc::new(["./tmp/compressed_file_2.ty".into()]),
             1,
-            100000,
+            timestamps[timestamps.len() - 1],
             &mut page_cache,
         )
         .unwrap();
@@ -569,6 +568,64 @@ mod tests {
                 break;
             }
         }
-        std::fs::remove_file("./tmp/compressed_file.ty");
+        assert_eq!(i, timestamps.len());
+        std::fs::remove_file("./tmp/compressed_file_2.ty");
+    }
+
+    #[test]
+    fn test_compression_negative_deltas() {
+        let mut timestamps: Vec<u64> = vec![
+            1,
+            25,
+            27,
+            35,
+            (u32::MAX as u64),
+            (u32::MAX as u64) + 69000,
+            (u32::MAX as u64) + 69001,
+        ];
+        let mut values = vec![100, 3, 23, 0, 100, (u32::MAX as u64), 1];
+        generate_ty_file(
+            "./tmp/compressed_file_neg_deltas.ty".into(),
+            &timestamps,
+            &values,
+        );
+
+        let mut page_cache = PageCache::new(100);
+        let mut cursor = Cursor::new(
+            Arc::new(["./tmp/compressed_file_neg_deltas.ty".into()]),
+            1,
+            timestamps[timestamps.len() - 1],
+            &mut page_cache,
+        )
+        .unwrap();
+
+        let mut i = 0;
+        loop {
+            let (timestamp, value) = cursor.fetch();
+            assert_eq!(timestamp, timestamps[i]);
+            assert_eq!(value, values[i]);
+            i += 1;
+            if cursor.next().is_none() {
+                break;
+            }
+        }
+        assert_eq!(i, timestamps.len());
+        std::fs::remove_file("./tmp/compressed_file_neg_deltas.ty");
+    }
+
+    #[test]
+    fn test_shift_dependent() {
+        let mut values_read = 1;
+        assert_eq!(6, (6 - 4 * (1 - (values_read % 2))));
+        assert_eq!(4, (6 - 4 * (1 - (values_read % 2)) - 2));
+        values_read += 1;
+        assert_eq!(2, (6 - 4 * (1 - (values_read % 2))));
+        assert_eq!(0, (6 - 4 * (1 - (values_read % 2)) - 2));
+        values_read += 1;
+        assert_eq!(6, (6 - 4 * (1 - (values_read % 2))));
+        assert_eq!(4, (6 - 4 * (1 - (values_read % 2)) - 2));
+        values_read += 1;
+        assert_eq!(2, (6 - 4 * (1 - (values_read % 2))));
+        assert_eq!(0, (6 - 4 * (1 - (values_read % 2)) - 2));
     }
 }

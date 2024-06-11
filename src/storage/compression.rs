@@ -1,3 +1,5 @@
+use std::mem::size_of;
+
 pub struct CompressionEngine;
 
 impl CompressionEngine {
@@ -98,13 +100,83 @@ impl CompressionEngine {
         bytes
     }
 
-    // fn bytes_needed_i64(n: i64) -> u8 {
-    //     if n == 0 {
-    //         return 1;
-    //     }
-    //     let mut bytes = 0;
-    //     let mut temp = if n < 0 { !n as u64 + 1 } else { n as u64 }; // Two's complement representation for negative numbers
+    pub fn zig_zag_decode(n: u64) -> i64 {
+        (((n >> 1) as i64) ^ -((n & 1) as i64)) as i64
+    }
+    pub fn zig_zag_encode(n: i64) -> u64 {
+        ((n >> (size_of::<i64>() * 8 - 1)) ^ (n << 1)) as u64
+    }
+}
 
-    //     CompressionEngine::bytes_needed_u64(temp.into())
-    // }
+#[cfg(test)]
+mod tests {
+    use crate::storage::compression::CompressionEngine;
+
+    #[test]
+    fn test_zig_zag() {
+        assert_eq!(0, CompressionEngine::zig_zag_encode(0));
+        assert_eq!(1, CompressionEngine::zig_zag_encode(-1));
+        assert_eq!(2, CompressionEngine::zig_zag_encode(1));
+        assert_eq!(3, CompressionEngine::zig_zag_encode(-2));
+        assert_eq!(4, CompressionEngine::zig_zag_encode(2));
+        assert_eq!(80, CompressionEngine::zig_zag_encode(40));
+        assert_eq!(254, CompressionEngine::zig_zag_encode(127));
+        assert_eq!(256, CompressionEngine::zig_zag_encode(128));
+
+        assert_eq!(0, CompressionEngine::zig_zag_decode(0));
+        assert_eq!(-1, CompressionEngine::zig_zag_decode(1));
+        assert_eq!(1, CompressionEngine::zig_zag_decode(2));
+        assert_eq!(-2, CompressionEngine::zig_zag_decode(3));
+        assert_eq!(2, CompressionEngine::zig_zag_decode(4));
+        assert_eq!(-5, CompressionEngine::zig_zag_decode(9));
+        assert_eq!(-18, CompressionEngine::zig_zag_decode(35));
+
+        assert_eq!(
+            64,
+            CompressionEngine::zig_zag_decode(CompressionEngine::zig_zag_encode(64))
+        );
+
+        assert_eq!(
+            0,
+            CompressionEngine::zig_zag_decode(CompressionEngine::zig_zag_encode(0))
+        );
+
+        assert_eq!(
+            -17,
+            CompressionEngine::zig_zag_decode(CompressionEngine::zig_zag_encode(-17))
+        );
+
+        assert_eq!(
+            -12,
+            CompressionEngine::zig_zag_decode(CompressionEngine::zig_zag_encode(-12))
+        );
+
+        println!("{}", CompressionEngine::zig_zag_encode(130));
+        assert_eq!(
+            130,
+            CompressionEngine::zig_zag_decode(CompressionEngine::zig_zag_encode(130))
+        );
+
+        assert_eq!(
+            (i32::MAX) as i64,
+            CompressionEngine::zig_zag_decode(CompressionEngine::zig_zag_encode((i32::MAX) as i64))
+        );
+
+        assert_eq!(
+            i32::MAX as i64 + 3,
+            CompressionEngine::zig_zag_decode(CompressionEngine::zig_zag_encode(
+                (i32::MAX as i64) + 3
+            ))
+        );
+
+        assert_eq!(
+            i64::MAX,
+            CompressionEngine::zig_zag_decode(CompressionEngine::zig_zag_encode(i64::MAX))
+        );
+
+        assert_eq!(
+            i64::MIN,
+            CompressionEngine::zig_zag_decode(CompressionEngine::zig_zag_encode(i64::MIN))
+        );
+    }
 }

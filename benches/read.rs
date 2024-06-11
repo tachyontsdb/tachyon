@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use pprof::criterion::{Output, PProfProfiler};
 use rusqlite::Connection;
-use std::sync::Arc;
+use std::{fs::File, path::Path, sync::Arc};
 use tachyon::storage::{file::*, page_cache::PageCache};
 
 const NUM_ITEMS: u64 = 100000;
@@ -57,29 +57,32 @@ fn criterion_benchmark(c: &mut Criterion) {
     // setup SQLite benchmark
     let conn = Connection::open("./tmp/bench_sql.sqlite").unwrap();
 
-    // conn.execute(
-    //     "
-    //         CREATE TABLE Item (
-    //             timestamp INTEGER,
-    //             value INTEGER
-    //         )
-    //     ",
-    //     (),
-    // )
-    // .unwrap();
-    // for i in 0..NUM_ITEMS {
-    //     let item = Item {
-    //         timestamp: i,
-    //         value: i + (i % 100),
-    //     };
-    //     conn.execute(
-    //         "
-    //             INSERT INTO Item (timestamp, value) VALUES (?1, ?2);
-    //         ",
-    //         (&item.timestamp, &item.value),
-    //     )
-    //     .unwrap();
-    // }
+    if !Path::new("./tmp/bench_sql.exists").exists() {
+        conn.execute(
+            "
+            CREATE TABLE Item (
+                timestamp INTEGER,
+                value INTEGER
+            )
+            ",
+            (),
+        )
+        .unwrap();
+        for i in 0..NUM_ITEMS {
+            let item = Item {
+                timestamp: i,
+                value: i + (i % 100),
+            };
+            conn.execute(
+                "
+            INSERT INTO Item (timestamp, value) VALUES (?1, ?2);
+            ",
+                (&item.timestamp, &item.value),
+            )
+            .unwrap();
+        }
+        File::create("./tmp/bench_sql.exists").unwrap();
+    }
 
     c.bench_function(&format!("SQLite: read sequential 0-{}", NUM_ITEMS), |b| {
         b.iter(|| bench_read_sqlite(&conn))

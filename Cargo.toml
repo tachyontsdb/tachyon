@@ -21,6 +21,10 @@ harness = false
 name = "write"
 harness = false
 
+[[bench]]
+name = "micro"
+harness = false
+
 [profile.release]
 codegen-units = 1
 opt-level = 3
