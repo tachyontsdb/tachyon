@@ -1,3 +1,5 @@
 /target
 /tmp
 .DS_STORE
+*.o
+*.out

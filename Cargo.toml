@@ -10,15 +10,15 @@ crate-type = ["rlib", "cdylib"]
 rusqlite = "0.31.0"
 
 [dev-dependencies]
-pprof = { version = "0.13.0", features = ["criterion", "flamegraph"] }
-criterion = { version = "0.4", features = ["html_reports"] }
-
-[[bench]]
-name = "write"
-harness = false
+pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
+criterion = { version = "0.5.1", features = ["html_reports"] }
 
 [[bench]]
 name = "read"
+harness = false
+
+[[bench]]
+name = "write"
 harness = false
 
 [profile.release]

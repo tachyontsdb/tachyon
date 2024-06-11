@@ -65,11 +65,11 @@ pub struct Context<'a> {
     file_paths_array: Arc<[Arc<[PathBuf]>]>,
     cursors: HashMap<usize, Cursor<'a>>,
     outputs: VecDeque<OutputValue>,
-    page_cache: &'a mut PageCache,
+    page_cache: Arc<PageCache>,
 }
 
 impl<'a> Context<'a> {
-    pub fn new(file_paths_array: Arc<[Arc<[PathBuf]>]>, page_cache: &'a mut PageCache) -> Self {
+    pub fn new(file_paths_array: Arc<[Arc<[PathBuf]>]>, page_cache: Arc<PageCache>) -> Self {
         Self {
             pc: 0,
             regs: [0x00u64; NUM_REGS],

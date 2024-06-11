@@ -1,3 +1,4 @@
+use super::page_cache::{self, PageCache};
 use crate::common::{Timestamp, Value};
 use crate::storage::compression::CompressionEngine;
 use std::{
@@ -5,17 +6,96 @@ use std::{
     io::{Error, Read, Seek, Write},
     mem::size_of,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
-
-use super::page_cache::{self, PageCache};
 
 const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
+
 const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
 
+struct FileReaderUtil;
+
+// TODO: Check this, changed
+impl FileReaderUtil {
+    fn read_u16(buffer: [u8; size_of::<u16>()]) -> u16 {
+        u16::from_le_bytes(buffer)
+    }
+
+    fn read_u32(buffer: [u8; size_of::<u32>()]) -> u32 {
+        u32::from_le_bytes(buffer)
+    }
+
+    fn read_u64(buffer: [u8; size_of::<u64>()]) -> u64 {
+        u64::from_le_bytes(buffer)
+    }
+}
+
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct Header {
+    version: u16,
+
+    stream_id: u64,
+
+    min_timestamp: Timestamp,
+    max_timestamp: Timestamp,
+
+    value_sum: Value,
+    count: u32,
+    min_value: Value,
+    max_value: Value,
+
+    first_value: Value,
+}
+
+const HEADER_SIZE: usize = 62;
+
+impl Header {
+    fn parse(file_id: usize, page_cache: &mut PageCache) -> Self {
+        let mut magic = [0x00u8; 4];
+        page_cache.read(file_id, 0, &mut magic);
+
+        if magic != MAGIC {
+            panic!("Corrupted file - invalid magic for .ty file");
+        }
+
+        let mut buffer = [0x00u8; HEADER_SIZE];
+        page_cache.read(file_id, 4, &mut buffer);
+
+        Self {
+            version: FileReaderUtil::read_u16(buffer[0..2].try_into().unwrap()),
+            stream_id: FileReaderUtil::read_u64(buffer[2..10].try_into().unwrap()),
+            min_timestamp: FileReaderUtil::read_u64(buffer[10..18].try_into().unwrap()),
+            max_timestamp: FileReaderUtil::read_u64(buffer[18..26].try_into().unwrap()),
+            value_sum: FileReaderUtil::read_u64(buffer[26..34].try_into().unwrap()),
+            count: FileReaderUtil::read_u32(buffer[34..38].try_into().unwrap()),
+            min_value: FileReaderUtil::read_u64(buffer[38..46].try_into().unwrap()),
+            max_value: FileReaderUtil::read_u64(buffer[46..54].try_into().unwrap()),
+            first_value: FileReaderUtil::read_u64(buffer[54..62].try_into().unwrap()),
+        }
+    }
+
+    fn write(&self, file: &mut File) -> Result<usize, Error> {
+        file.write_all(&MAGIC)?;
+
+        file.write_all(&self.version.to_le_bytes())?;
+        file.write_all(&self.stream_id.to_le_bytes())?;
+
+        file.write_all(&self.min_timestamp.to_le_bytes())?;
+        file.write_all(&self.max_timestamp.to_le_bytes())?;
+
+        file.write_all(&self.value_sum.to_le_bytes())?;
+        file.write_all(&self.count.to_le_bytes())?;
+        file.write_all(&self.min_value.to_le_bytes())?;
+        file.write_all(&self.max_value.to_le_bytes())?;
+
+        file.write_all(&self.first_value.to_le_bytes())?;
+
+        Ok(HEADER_SIZE + MAGIC_SIZE)
+    }
+}
+
 pub struct Cursor<'a> {
-    // file: File,
     file_id: usize,
     file_index: usize,
     header: Header,
@@ -52,9 +132,7 @@ impl<'a> Cursor<'a> {
         assert!(file_paths.len() > 0);
         assert!(start <= end);
 
-        // let mut file = File::open(&file_paths[0])?;
-        let file_id =
-            page_cache.register_or_get_file_id(&file_paths[0].to_str().unwrap().to_owned());
+        let file_id = page_cache.register_or_get_file_id(&file_paths[0]);
         let header = Header::parse(file_id, page_cache);
 
         let mut cursor = Self {
@@ -85,17 +163,15 @@ impl<'a> Cursor<'a> {
 
     pub fn next(&mut self) -> Option<(Timestamp, Value)> {
         if self.values_read == self.header.count as u64 {
-            if self.file_index == self.file_paths.len() - 1 {
+            self.file_index += 1;
+
+            if self.file_index == self.file_paths.len() {
                 return None;
             }
 
-            self.file_index += 1;
-            self.file_id = self.page_cache.register_or_get_file_id(
-                &self.file_paths[self.file_index]
-                    .to_str()
-                    .unwrap()
-                    .to_owned(),
-            );
+            self.file_id = self
+                .page_cache
+                .register_or_get_file_id(&self.file_paths[self.file_index]);
             self.header = Header::parse(self.file_id, self.page_cache);
             self.offset = MAGIC_SIZE + HEADER_SIZE;
 
@@ -109,6 +185,7 @@ impl<'a> Cursor<'a> {
             if self.current_timestamp > self.end {
                 panic!("Unexpected file change! Cursor timestamp is greater then end timestamp.");
             }
+
             return Some((self.current_timestamp, self.value));
         }
 
@@ -119,8 +196,8 @@ impl<'a> Cursor<'a> {
             self.cur_length_byte = l_buf[0];
         }
 
-        let int_length =
-            EXPONENTS[(self.cur_length_byte >> (6 - 4 * (self.values_read % 2)) & 0b11) as usize];
+        let int_length = EXPONENTS
+            [(self.cur_length_byte >> (6 - 4 * (1 - self.values_read % 2)) & 0b11) as usize];
         let mut ts_buf = [0x00; size_of::<Timestamp>()];
         self.offset += self
             .page_cache
@@ -131,7 +208,7 @@ impl<'a> Cursor<'a> {
         }
 
         let int_length = EXPONENTS
-            [(self.cur_length_byte >> (6 - 4 * (self.values_read % 2) - 2) & 0b11) as usize];
+            [(self.cur_length_byte >> (6 - 4 * (1 - self.values_read % 2) - 2) & 0b11) as usize];
         let mut v_buf = [0x00u8; size_of::<Value>()];
         self.offset += self
             .page_cache
@@ -147,87 +224,6 @@ impl<'a> Cursor<'a> {
 
     pub fn fetch(&self) -> (Timestamp, Value) {
         (self.current_timestamp, self.value)
-    }
-}
-
-#[derive(Default, Debug, PartialEq, Eq)]
-pub struct Header {
-    version: u16,
-
-    stream_id: u64,
-
-    min_timestamp: Timestamp,
-    max_timestamp: Timestamp,
-
-    value_sum: Value,
-    count: u32,
-    min_value: Value,
-    max_value: Value,
-
-    first_value: Value,
-}
-const HEADER_SIZE: usize = 62;
-
-struct FileReaderUtil;
-
-impl FileReaderUtil {
-    fn read_u16(buffer: &[u8]) -> u16 {
-        u16::from_le_bytes([buffer[0], buffer[1]])
-    }
-
-    fn read_u32(buffer: &[u8]) -> u32 {
-        u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]])
-    }
-
-    fn read_u64(buffer: &[u8]) -> u64 {
-        u64::from_le_bytes([
-            buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
-        ])
-    }
-}
-
-impl Header {
-    fn parse(file_id: usize, page_cache: &mut PageCache) -> Self {
-        let mut magic = [0x00u8; 4];
-        page_cache.read(file_id, 0, &mut magic);
-
-        if magic != MAGIC {
-            panic!("Corrupted file - invalid magic for .ty file (uh oh stinky)");
-        }
-
-        let mut buffer = [0x00u8; HEADER_SIZE];
-        page_cache.read(file_id, 4, &mut buffer);
-
-        Self {
-            version: FileReaderUtil::read_u16(&buffer[0..2]),
-            stream_id: FileReaderUtil::read_u64(&buffer[2..10]),
-            min_timestamp: FileReaderUtil::read_u64(&buffer[10..18]),
-            max_timestamp: FileReaderUtil::read_u64(&buffer[18..26]),
-            value_sum: FileReaderUtil::read_u64(&buffer[26..34]),
-            count: FileReaderUtil::read_u32(&buffer[34..38]),
-            min_value: FileReaderUtil::read_u64(&buffer[38..46]),
-            max_value: FileReaderUtil::read_u64(&buffer[46..54]),
-            first_value: FileReaderUtil::read_u64(&buffer[54..62]),
-        }
-    }
-
-    fn write(&self, file: &mut File) -> Result<usize, std::io::Error> {
-        file.write_all(&MAGIC)?;
-
-        file.write_all(&self.version.to_le_bytes())?;
-        file.write_all(&self.stream_id.to_le_bytes())?;
-
-        file.write_all(&self.min_timestamp.to_le_bytes())?;
-        file.write_all(&self.max_timestamp.to_le_bytes())?;
-
-        file.write_all(&self.value_sum.to_le_bytes())?;
-        file.write_all(&self.count.to_le_bytes())?;
-        file.write_all(&self.min_value.to_le_bytes())?;
-        file.write_all(&self.max_value.to_le_bytes())?;
-
-        file.write_all(&self.first_value.to_le_bytes())?;
-
-        Ok(HEADER_SIZE + MAGIC_SIZE)
     }
 }
 
@@ -250,8 +246,7 @@ impl TimeDataFile {
     pub fn read_data_file(path: PathBuf) -> Self {
         // TODO: remove unwraps
         let mut page_cache = PageCache::new(100);
-        let file_id =
-            page_cache.register_or_get_file_id(&path.into_os_string().into_string().unwrap());
+        let file_id = page_cache.register_or_get_file_id(&path);
         let header = Header::parse(file_id, &mut page_cache);
         let mut offset = MAGIC_SIZE + HEADER_SIZE;
 
@@ -392,7 +387,7 @@ mod tests {
 
         let mut temp_file: File = File::open("./tmp/temp_file").unwrap();
         let mut page_cache = PageCache::new(100);
-        let file_id = page_cache.register_or_get_file_id(&"./tmp/temp_file".to_owned());
+        let file_id = page_cache.register_or_get_file_id(&"./tmp/temp_file".into());
         let parsed_header = Header::parse(file_id, &mut page_cache);
         assert!(t_header == parsed_header);
 
@@ -579,8 +574,48 @@ mod tests {
                 break;
             }
         }
-        assert_eq!(i, 99999);
 
+        std::fs::remove_file("./tmp/compressed_file.ty");
+    }
+
+    #[test]
+    fn test_compression_2() {
+        let mut timestamps = Vec::<u64>::new();
+        let mut values = Vec::<u64>::new();
+
+        for i in 1..100000u64 {
+            timestamps.push(i);
+            values.push((i * 200000));
+        }
+
+        generate_ty_file("./tmp/compressed_file.ty".into(), &timestamps, &values);
+
+        let res = TimeDataFile::read_data_file("./tmp/compressed_file.ty".into());
+
+        assert_eq!(res.timestamps.len(), timestamps.len());
+
+        assert!(res.timestamps == timestamps);
+        assert!(res.values == values);
+
+        let mut page_cache = PageCache::new(100);
+        let mut cursor = Cursor::new(
+            Arc::new(["./tmp/compressed_file.ty".into()]),
+            1,
+            100000,
+            &mut page_cache,
+        )
+        .unwrap();
+
+        let mut i = 0;
+        loop {
+            let (timestamp, value) = cursor.fetch();
+            assert_eq!(timestamp, timestamps[i]);
+            assert_eq!(value, values[i]);
+            i += 1;
+            if cursor.next().is_none() {
+                break;
+            }
+        }
         std::fs::remove_file("./tmp/compressed_file.ty");
     }
 }

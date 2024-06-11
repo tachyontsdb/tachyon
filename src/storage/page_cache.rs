@@ -29,8 +29,8 @@ pub struct PageCache {
     mapping: HashMap<(usize, usize), usize>,
     open_files: HashMap<usize, File>,
 
-    file_path_to_id: HashMap<String, usize>,
-    file_id_to_path: HashMap<usize, String>,
+    file_path_to_id: HashMap<PathBuf, usize>,
+    file_id_to_path: HashMap<usize, PathBuf>,
     cur_file_id: usize,
 
     root_free: usize,
@@ -54,13 +54,15 @@ impl PageCache {
         }
     }
 
-    pub fn register_or_get_file_id(&mut self, path: &String) -> usize {
+    pub fn register_or_get_file_id(&mut self, path: &PathBuf) -> usize {
         if let Some(id) = self.file_path_to_id.get(path) {
             return *id;
         }
+
         self.file_path_to_id.insert(path.clone(), self.cur_file_id);
         self.file_id_to_path.insert(self.cur_file_id, path.clone());
         self.cur_file_id += 1;
+
         self.cur_file_id - 1
     }
 
@@ -77,7 +79,8 @@ impl PageCache {
                 frame_id = *frame;
             } else {
                 // check that file is open
-                if let std::collections::hash_map::Entry::Vacant(e) = self.open_files.entry(file_id) {
+                if let std::collections::hash_map::Entry::Vacant(e) = self.open_files.entry(file_id)
+                {
                     let path = self.file_id_to_path.get(&file_id).unwrap();
                     e.insert(File::open(path).unwrap());
                 }
@@ -156,7 +159,7 @@ mod tests {
         }
         let file_size = model.write("./tmp/page_cache_read.ty".into());
         // start the test
-        let file_id = page_cache.register_or_get_file_id(&"./tmp/page_cache_read.ty".to_owned());
+        let file_id = page_cache.register_or_get_file_id(&"./tmp/page_cache_read.ty".into());
         assert_eq!(file_id, 0);
 
         let mut buffer = vec![0; file_size];
@@ -165,8 +168,7 @@ mod tests {
         let mut new_file = File::create("./tmp/page_cache_test.ty").unwrap();
         new_file.write_all(&buffer);
 
-        let data_file =
-            TimeDataFile::read_data_file(PathBuf::from_str("./tmp/page_cache_test.ty").unwrap());
+        let data_file = TimeDataFile::read_data_file("./tmp/page_cache_test.ty".into());
 
         assert_eq!(data_file.timestamps.len(), 100000);
         for i in 0..data_file.timestamps.len() {
