@@ -1,12 +1,13 @@
 use core::num;
 use std::{
-    collections::HashMap,
     fs::File,
     io::{Empty, Read, Seek},
     iter::Map,
     mem::MaybeUninit,
     path::PathBuf,
 };
+
+use rustc_hash::FxHashMap;
 
 const FILE_SIZE: usize = 1_000_000;
 const PAGE_SIZE: usize = 4_000;
@@ -26,11 +27,11 @@ pub struct PageCache {
     frames: Vec<Frame>,
 
     // fileId, pageid -> frameId
-    mapping: HashMap<(usize, usize), usize>,
-    open_files: HashMap<usize, File>,
+    mapping: FxHashMap<(usize, usize), usize>,
+    open_files: FxHashMap<usize, File>,
 
-    file_path_to_id: HashMap<PathBuf, usize>,
-    file_id_to_path: HashMap<usize, PathBuf>,
+    file_path_to_id: FxHashMap<PathBuf, usize>,
+    file_id_to_path: FxHashMap<usize, PathBuf>,
     cur_file_id: usize,
 
     root_free: usize,
@@ -45,10 +46,10 @@ impl PageCache {
 
         PageCache {
             frames,
-            mapping: HashMap::with_capacity(num_frames),
-            open_files: HashMap::with_capacity(num_frames * PAGE_SIZE / FILE_SIZE),
-            file_path_to_id: HashMap::with_capacity(num_frames * PAGE_SIZE / FILE_SIZE),
-            file_id_to_path: HashMap::with_capacity(num_frames * PAGE_SIZE / FILE_SIZE),
+            mapping: FxHashMap::default(),
+            open_files: FxHashMap::default(),
+            file_path_to_id: FxHashMap::default(),
+            file_id_to_path: FxHashMap::default(),
             cur_file_id: 0,
             root_free: 0,
         }
