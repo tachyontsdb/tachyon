@@ -252,72 +252,25 @@ impl TimeDataFile {
     }
 
     pub fn read_data_file(path: PathBuf) -> Self {
-        // TODO: remove unwraps
         let mut page_cache = PageCache::new(100);
-        let file_id = page_cache.register_or_get_file_id(&path);
-        let header = Header::parse(file_id, &mut page_cache);
-        let mut offset = MAGIC_SIZE + HEADER_SIZE;
 
-        let mut length = [0u8; 1];
-
-        let mut int_val = [0u8; 8];
-
-        let mut i = 0;
-
-        let mut timestamp = header.min_timestamp;
-        let mut value = header.first_value;
+        let mut cursor = Cursor::new(Arc::new([path]), 0, u64::MAX, &mut page_cache).unwrap();
 
         let mut timestamps = Vec::new();
         let mut values = Vec::new();
-        timestamps.push(timestamp);
-        values.push(value);
 
-        while (i < (header.count - 1) / 2 * 4) {
-            offset += page_cache.read(file_id, offset, &mut length);
-            for j in 0..4 {
-                let int_length = EXPONENTS[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
-                offset += page_cache.read(file_id, offset, &mut int_val[0..int_length]);
+        loop {
+            let (timestamp, value) = cursor.fetch();
+            timestamps.push(timestamp);
+            values.push(value);
 
-                let mut butter = [0u8; 8];
-                for q in 0..int_length {
-                    butter[q] = int_val[q];
-                }
-
-                if j % 2 == 0 {
-                    timestamp += u64::from_le_bytes(butter);
-                    timestamps.push(timestamp);
-                } else {
-                    value += u64::from_le_bytes(butter);
-                    values.push(value);
-                }
+            if (cursor.next().is_none()) {
+                break;
             }
-            i += 4;
-        }
-
-        if header.count % 2 == 0 {
-            offset += page_cache.read(file_id, offset, &mut length);
-            for j in 0..2 {
-                let int_length = EXPONENTS[((length[0] >> (6 - (j * 2))) & 0b11) as usize];
-                offset += page_cache.read(file_id, offset, &mut int_val[0..int_length]);
-
-                let mut butter = [0u8; 8];
-                for q in 0..int_length {
-                    butter[q] = int_val[q];
-                }
-
-                if j % 2 == 0 {
-                    timestamp += u64::from_le_bytes(butter);
-                    timestamps.push(timestamp);
-                } else {
-                    value += u64::from_le_bytes(butter);
-                    values.push(value);
-                }
-            }
-            i += 2;
         }
 
         Self {
-            header,
+            header: cursor.header,
             timestamps,
             values,
         }

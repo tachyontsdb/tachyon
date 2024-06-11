@@ -150,32 +150,32 @@ mod tests {
 
     use super::PageCache;
 
-    // #[test]
-    // fn test_read_whole_file() {
-    //     let mut page_cache = PageCache::new(10);
-    //     let mut model = TimeDataFile::new();
-    //     for i in 0..100000u64 {
-    //         model.write_data_to_file_in_mem(i, i + 10);
-    //     }
-    //     let file_size = model.write("./tmp/page_cache_read.ty".into());
-    //     // start the test
-    //     let file_id = page_cache.register_or_get_file_id(&"./tmp/page_cache_read.ty".into());
-    //     assert_eq!(file_id, 0);
+    #[test]
+    fn test_read_whole_file() {
+        let mut page_cache = PageCache::new(10);
+        let mut model = TimeDataFile::new();
+        for i in 0..100000u64 {
+            model.write_data_to_file_in_mem(i, i + 10);
+        }
+        let file_size = model.write("./tmp/page_cache_read.ty".into());
+        // start the test
+        let file_id = page_cache.register_or_get_file_id(&"./tmp/page_cache_read.ty".into());
+        assert_eq!(file_id, 0);
 
-    //     let mut buffer = vec![0; file_size];
-    //     page_cache.read(file_id, 0, &mut buffer);
+        let mut buffer = vec![0; file_size];
+        page_cache.read(file_id, 0, &mut buffer);
 
-    //     let mut new_file = File::create("./tmp/page_cache_test.ty").unwrap();
-    //     new_file.write_all(&buffer);
+        let mut new_file = File::create("./tmp/page_cache_test.ty").unwrap();
+        new_file.write_all(&buffer);
 
-    //     let data_file = TimeDataFile::read_data_file("./tmp/page_cache_test.ty".into());
+        let data_file = TimeDataFile::read_data_file("./tmp/page_cache_test.ty".into());
 
-    //     assert_eq!(data_file.timestamps.len(), 100000);
-    //     for i in 0..data_file.timestamps.len() {
-    //         assert_eq!(data_file.timestamps[i], i as Timestamp);
-    //         assert_eq!(data_file.values[i], (i + 10) as Value);
-    //     }
-    //     std::fs::remove_file("./tmp/page_cache_read.ty");
-    //     std::fs::remove_file("./tmp/page_cache_test.ty");
-    // }
+        assert_eq!(data_file.timestamps.len(), 100000);
+        for i in 0..data_file.timestamps.len() {
+            assert_eq!(data_file.timestamps[i], i as Timestamp);
+            assert_eq!(data_file.values[i], (i + 10) as Value);
+        }
+        std::fs::remove_file("./tmp/page_cache_read.ty");
+        std::fs::remove_file("./tmp/page_cache_test.ty");
+    }
 }
