@@ -95,7 +95,7 @@ impl Header {
     }
 }
 
-pub struct Cursor<'a> {
+pub struct Cursor {
     file_id: FileId,
     file_index: usize,
     header: Header,
@@ -110,31 +110,33 @@ pub struct Cursor<'a> {
     cur_length_byte: u8,
     file_paths: Arc<[PathBuf]>,
 
-    page_cache: &'a mut PageCache,
+    page_cache: Arc<Mutex<PageCache>>,
 }
 
 // TODO: Remove this
-impl<'a> Iterator for Cursor<'a> {
+impl Iterator for Cursor {
     type Item = (Timestamp, Value);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next()
+        self.next_vector()
     }
 }
 
-impl<'a> Cursor<'a> {
+impl Cursor {
     // pre: file_paths[0] contains at least one timestamp t such that start <= t
     pub fn new(
         file_paths: Arc<[PathBuf]>,
         start: Timestamp,
         end: Timestamp,
-        page_cache: &'a mut PageCache,
+        page_cache: Arc<Mutex<PageCache>>,
     ) -> Result<Self, Error> {
         assert!(file_paths.len() > 0);
         assert!(start <= end);
 
-        let file_id = page_cache.register_or_get_file_id(&file_paths[0]);
-        let header = Header::parse(file_id, page_cache);
+        let mut page_cache_lock = page_cache.lock().unwrap();
+        let file_id = page_cache_lock.register_or_get_file_id(&file_paths[0]);
+        let header = Header::parse(file_id, &mut page_cache_lock);
+        drop(page_cache_lock);
 
         let mut cursor = Self {
             file_id,
@@ -163,7 +165,9 @@ impl<'a> Cursor<'a> {
         Ok(cursor)
     }
 
-    pub fn next(&mut self) -> Option<(Timestamp, Value)> {
+    pub fn next_vector(&mut self) -> Option<(Timestamp, Value)> {
+        let mut page_cache_lock = self.page_cache.lock().unwrap();
+
         if self.values_read == self.header.count as u64 {
             self.file_index += 1;
 
@@ -171,10 +175,9 @@ impl<'a> Cursor<'a> {
                 return None;
             }
 
-            self.file_id = self
-                .page_cache
-                .register_or_get_file_id(&self.file_paths[self.file_index]);
-            self.header = Header::parse(self.file_id, self.page_cache);
+            self.file_id =
+                page_cache_lock.register_or_get_file_id(&self.file_paths[self.file_index]);
+            self.header = Header::parse(self.file_id, &mut page_cache_lock);
             self.offset = MAGIC_SIZE + HEADER_SIZE;
 
             self.current_timestamp = self.header.min_timestamp;
@@ -192,7 +195,7 @@ impl<'a> Cursor<'a> {
 
         if self.values_read % 2 == 1 {
             let mut l_buf = [0u8; 1];
-            self.offset += self.page_cache.read(self.file_id, self.offset, &mut l_buf);
+            self.offset += page_cache_lock.read(self.file_id, self.offset, &mut l_buf);
             // self.file.read_exact(&mut l_buf);
             self.cur_length_byte = l_buf[0];
         }
@@ -200,9 +203,7 @@ impl<'a> Cursor<'a> {
         let int_length = EXPONENTS
             [((self.cur_length_byte >> (6 - 4 * (1 - (self.values_read % 2)))) & 0b11) as usize];
         let mut ts_buf = [0x00; size_of::<u64>()];
-        self.offset += self
-            .page_cache
-            .read(self.file_id, self.offset, &mut ts_buf[0..int_length]);
+        self.offset += page_cache_lock.read(self.file_id, self.offset, &mut ts_buf[0..int_length]);
 
         let time_delta =
             CompressionEngine::zig_zag_decode(u64::from_le_bytes(ts_buf)) + self.last_deltas.0;
@@ -215,9 +216,7 @@ impl<'a> Cursor<'a> {
             >> (6 - 4 * (1 - (self.values_read % 2)) - 2))
             & 0b11) as usize];
         let mut v_buf = [0x00u8; size_of::<i64>()];
-        self.offset += self
-            .page_cache
-            .read(self.file_id, self.offset, &mut v_buf[0..int_length]);
+        self.offset += page_cache_lock.read(self.file_id, self.offset, &mut v_buf[0..int_length]);
         let value_delta =
             CompressionEngine::zig_zag_decode(u64::from_le_bytes(v_buf)) + self.last_deltas.1;
         let new_value = self.value.wrapping_add_signed(value_delta);
@@ -254,7 +253,13 @@ impl TimeDataFile {
     pub fn read_data_file(path: PathBuf) -> Self {
         let mut page_cache = PageCache::new(100);
 
-        let mut cursor = Cursor::new(Arc::new([path]), 0, u64::MAX, &mut page_cache).unwrap();
+        let mut cursor = Cursor::new(
+            Arc::new([path]),
+            0,
+            u64::MAX,
+            Arc::new(Mutex::new(page_cache)),
+        )
+        .unwrap();
 
         let mut timestamps = Vec::new();
         let mut values = Vec::new();
@@ -378,7 +383,12 @@ mod tests {
         let file_paths = [PathBuf::from_str("./tmp/test_cursor.ty").unwrap()];
 
         let mut page_cache = PageCache::new(10);
-        let cursor = Cursor::new(Arc::new(file_paths), 0, 100, &mut page_cache);
+        let cursor = Cursor::new(
+            Arc::new(file_paths),
+            0,
+            100,
+            Arc::new(Mutex::new(page_cache)),
+        );
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
@@ -435,7 +445,7 @@ mod tests {
         let file_paths = file_paths.map(|path| PathBuf::from_str(path).unwrap());
         let file_paths = Arc::new(file_paths);
         let mut page_cache = PageCache::new(10);
-        let cursor = Cursor::new(file_paths.clone(), 0, 100, &mut page_cache);
+        let cursor = Cursor::new(file_paths.clone(), 0, 100, Arc::new(Mutex::new(page_cache)));
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
@@ -486,7 +496,7 @@ mod tests {
         let file_paths = file_paths.map(|path| PathBuf::from_str(path).unwrap());
         let file_paths = Arc::new(file_paths);
         let mut page_cache = PageCache::new(10);
-        let cursor = Cursor::new(file_paths.clone(), 5, 23, &mut page_cache);
+        let cursor = Cursor::new(file_paths.clone(), 5, 23, Arc::new(Mutex::new(page_cache)));
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
@@ -526,7 +536,7 @@ mod tests {
             Arc::new(["./tmp/compressed_file.ty".into()]),
             1,
             100000,
-            &mut page_cache,
+            Arc::new(Mutex::new(page_cache)),
         )
         .unwrap();
 
@@ -554,7 +564,7 @@ mod tests {
             Arc::new(["./tmp/compressed_file_2.ty".into()]),
             1,
             timestamps[timestamps.len() - 1],
-            &mut page_cache,
+            Arc::new(Mutex::new(page_cache)),
         )
         .unwrap();
 
@@ -595,7 +605,7 @@ mod tests {
             Arc::new(["./tmp/compressed_file_neg_deltas.ty".into()]),
             1,
             timestamps[timestamps.len() - 1],
-            &mut page_cache,
+            Arc::new(Mutex::new(page_cache)),
         )
         .unwrap();
 
