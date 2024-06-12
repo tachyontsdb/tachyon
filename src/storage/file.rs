@@ -1,4 +1,4 @@
-use super::page_cache::{self, PageCache};
+use super::page_cache::{self, FileId, PageCache};
 use crate::common::{Timestamp, Value};
 use crate::storage::compression::CompressionEngine;
 use std::{
@@ -51,7 +51,7 @@ pub struct Header {
 const HEADER_SIZE: usize = 62;
 
 impl Header {
-    fn parse(file_id: usize, page_cache: &mut PageCache) -> Self {
+    fn parse(file_id: FileId, page_cache: &mut PageCache) -> Self {
         let mut magic = [0x00u8; 4];
         page_cache.read(file_id, 0, &mut magic);
 
@@ -96,7 +96,7 @@ impl Header {
 }
 
 pub struct Cursor<'a> {
-    file_id: usize,
+    file_id: FileId,
     file_index: usize,
     header: Header,
     end: Timestamp,
