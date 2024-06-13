@@ -1,12 +1,13 @@
 use super::page_cache::{self, FileId, PageCache};
 use crate::common::{Timestamp, Value};
 use crate::storage::compression::CompressionEngine;
+use std::cell::RefCell;
 use std::{
     fs::File,
     io::{Error, Read, Seek, Write},
     mem::size_of,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 const MAGIC_SIZE: usize = 4;
@@ -110,7 +111,7 @@ pub struct Cursor {
     cur_length_byte: u8,
     file_paths: Arc<[PathBuf]>,
 
-    page_cache: Arc<Mutex<PageCache>>,
+    page_cache: Arc<RefCell<PageCache>>,
 }
 
 // TODO: Remove this
@@ -128,12 +129,12 @@ impl Cursor {
         file_paths: Arc<[PathBuf]>,
         start: Timestamp,
         end: Timestamp,
-        page_cache: Arc<Mutex<PageCache>>,
+        page_cache: Arc<RefCell<PageCache>>,
     ) -> Result<Self, Error> {
         assert!(file_paths.len() > 0);
         assert!(start <= end);
 
-        let mut page_cache_lock = page_cache.lock().unwrap();
+        let mut page_cache_lock = page_cache.try_borrow_mut().unwrap();
         let file_id = page_cache_lock.register_or_get_file_id(&file_paths[0]);
         let header = Header::parse(file_id, &mut page_cache_lock);
         drop(page_cache_lock);
@@ -166,7 +167,7 @@ impl Cursor {
     }
 
     pub fn next_vector(&mut self) -> Option<(Timestamp, Value)> {
-        let mut page_cache_lock = self.page_cache.lock().unwrap();
+        let mut page_cache_lock = self.page_cache.try_borrow_mut().unwrap();
 
         if self.values_read == self.header.count as u64 {
             self.file_index += 1;
@@ -257,7 +258,7 @@ impl TimeDataFile {
             Arc::new([path]),
             0,
             u64::MAX,
-            Arc::new(Mutex::new(page_cache)),
+            Arc::new(RefCell::new(page_cache)),
         )
         .unwrap();
 
@@ -387,7 +388,7 @@ mod tests {
             Arc::new(file_paths),
             0,
             100,
-            Arc::new(Mutex::new(page_cache)),
+            Arc::new(RefCell::new(page_cache)),
         );
         assert!(cursor.is_ok());
 
@@ -445,7 +446,12 @@ mod tests {
         let file_paths = file_paths.map(|path| PathBuf::from_str(path).unwrap());
         let file_paths = Arc::new(file_paths);
         let mut page_cache = PageCache::new(10);
-        let cursor = Cursor::new(file_paths.clone(), 0, 100, Arc::new(Mutex::new(page_cache)));
+        let cursor = Cursor::new(
+            file_paths.clone(),
+            0,
+            100,
+            Arc::new(RefCell::new(page_cache)),
+        );
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
@@ -496,7 +502,12 @@ mod tests {
         let file_paths = file_paths.map(|path| PathBuf::from_str(path).unwrap());
         let file_paths = Arc::new(file_paths);
         let mut page_cache = PageCache::new(10);
-        let cursor = Cursor::new(file_paths.clone(), 5, 23, Arc::new(Mutex::new(page_cache)));
+        let cursor = Cursor::new(
+            file_paths.clone(),
+            5,
+            23,
+            Arc::new(RefCell::new(page_cache)),
+        );
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
@@ -536,7 +547,7 @@ mod tests {
             Arc::new(["./tmp/compressed_file.ty".into()]),
             1,
             100000,
-            Arc::new(Mutex::new(page_cache)),
+            Arc::new(RefCell::new(page_cache)),
         )
         .unwrap();
 
@@ -564,7 +575,7 @@ mod tests {
             Arc::new(["./tmp/compressed_file_2.ty".into()]),
             1,
             timestamps[timestamps.len() - 1],
-            Arc::new(Mutex::new(page_cache)),
+            Arc::new(RefCell::new(page_cache)),
         )
         .unwrap();
 

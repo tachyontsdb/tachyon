@@ -3,9 +3,10 @@ use crate::{
     storage::{file::Cursor, page_cache::PageCache},
 };
 use std::{
+    cell::RefCell,
     collections::{HashMap, VecDeque},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 #[non_exhaustive]
@@ -61,11 +62,14 @@ pub struct Context {
     file_paths_array: Arc<[Arc<[PathBuf]>]>,
     cursors: HashMap<usize, Cursor>,
     outputs: VecDeque<OutputValue>,
-    page_cache: Arc<Mutex<PageCache>>,
+    page_cache: Arc<RefCell<PageCache>>,
 }
 
 impl Context {
-    pub fn new(file_paths_array: Arc<[Arc<[PathBuf]>]>, page_cache: Arc<Mutex<PageCache>>) -> Self {
+    pub fn new(
+        file_paths_array: Arc<[Arc<[PathBuf]>]>,
+        page_cache: Arc<RefCell<PageCache>>,
+    ) -> Self {
         Self {
             pc: 0,
             regs: [0x00u64; NUM_REGS],
