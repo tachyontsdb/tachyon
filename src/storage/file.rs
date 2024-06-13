@@ -134,10 +134,10 @@ impl Cursor {
         assert!(file_paths.len() > 0);
         assert!(start <= end);
 
-        let mut page_cache_lock = page_cache.try_borrow_mut().unwrap();
-        let file_id = page_cache_lock.register_or_get_file_id(&file_paths[0]);
-        let header = Header::parse(file_id, &mut page_cache_lock);
-        drop(page_cache_lock);
+        let mut page_cache_ref = page_cache.try_borrow_mut().unwrap();
+        let file_id = page_cache_ref.register_or_get_file_id(&file_paths[0]);
+        let header = Header::parse(file_id, &mut page_cache_ref);
+        drop(page_cache_ref);
 
         let mut cursor = Self {
             file_id,
@@ -167,7 +167,7 @@ impl Cursor {
     }
 
     pub fn next_vector(&mut self) -> Option<(Timestamp, Value)> {
-        let mut page_cache_lock = self.page_cache.try_borrow_mut().unwrap();
+        let mut page_cache_ref = self.page_cache.try_borrow_mut().unwrap();
 
         if self.values_read == self.header.count as u64 {
             self.file_index += 1;
@@ -177,8 +177,8 @@ impl Cursor {
             }
 
             self.file_id =
-                page_cache_lock.register_or_get_file_id(&self.file_paths[self.file_index]);
-            self.header = Header::parse(self.file_id, &mut page_cache_lock);
+                page_cache_ref.register_or_get_file_id(&self.file_paths[self.file_index]);
+            self.header = Header::parse(self.file_id, &mut page_cache_ref);
             self.offset = MAGIC_SIZE + HEADER_SIZE;
 
             self.current_timestamp = self.header.min_timestamp;
@@ -196,7 +196,7 @@ impl Cursor {
 
         if self.values_read % 2 == 1 {
             let mut l_buf = [0u8; 1];
-            self.offset += page_cache_lock.read(self.file_id, self.offset, &mut l_buf);
+            self.offset += page_cache_ref.read(self.file_id, self.offset, &mut l_buf);
             // self.file.read_exact(&mut l_buf);
             self.cur_length_byte = l_buf[0];
         }
@@ -204,7 +204,7 @@ impl Cursor {
         let int_length = EXPONENTS
             [((self.cur_length_byte >> (6 - 4 * (1 - (self.values_read % 2)))) & 0b11) as usize];
         let mut ts_buf = [0x00; size_of::<u64>()];
-        self.offset += page_cache_lock.read(self.file_id, self.offset, &mut ts_buf[0..int_length]);
+        self.offset += page_cache_ref.read(self.file_id, self.offset, &mut ts_buf[0..int_length]);
 
         let time_delta =
             CompressionEngine::zig_zag_decode(u64::from_le_bytes(ts_buf)) + self.last_deltas.0;
@@ -217,7 +217,7 @@ impl Cursor {
             >> (6 - 4 * (1 - (self.values_read % 2)) - 2))
             & 0b11) as usize];
         let mut v_buf = [0x00u8; size_of::<i64>()];
-        self.offset += page_cache_lock.read(self.file_id, self.offset, &mut v_buf[0..int_length]);
+        self.offset += page_cache_ref.read(self.file_id, self.offset, &mut v_buf[0..int_length]);
         let value_delta =
             CompressionEngine::zig_zag_decode(u64::from_le_bytes(v_buf)) + self.last_deltas.1;
         let new_value = self.value.wrapping_add_signed(value_delta);
@@ -616,7 +616,7 @@ mod tests {
             Arc::new(["./tmp/compressed_file_neg_deltas.ty".into()]),
             1,
             timestamps[timestamps.len() - 1],
-            Arc::new(Mutex::new(page_cache)),
+            Arc::new(RefCell::new(page_cache)),
         )
         .unwrap();
 

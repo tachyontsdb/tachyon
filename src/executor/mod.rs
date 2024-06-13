@@ -116,7 +116,7 @@ impl Context {
     }
 }
 
-fn read_u64(context: &mut Context, buffer: &[u8]) -> u64 {
+fn read_u64_pc(context: &mut Context, buffer: &[u8]) -> u64 {
     let ret = u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
     context.pc += 8;
     ret
@@ -136,26 +136,26 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
             }
 
             OperationCode::OpenRead => {
-                let cursor_idx = read_u64(&mut context, buffer);
-                let file_paths_array_idx = read_u64(&mut context, buffer);
-                let start = read_u64(&mut context, buffer);
-                let end = read_u64(&mut context, buffer);
+                let cursor_idx = read_u64_pc(&mut context, buffer);
+                let file_paths_array_idx = read_u64_pc(&mut context, buffer);
+                let start = read_u64_pc(&mut context, buffer);
+                let end = read_u64_pc(&mut context, buffer);
 
                 context.open_read(cursor_idx, file_paths_array_idx, start, end);
             }
             OperationCode::CloseRead => {
-                let cursor_idx = read_u64(&mut context, buffer);
+                let cursor_idx = read_u64_pc(&mut context, buffer);
                 context.close_read(cursor_idx);
             }
 
             OperationCode::Next => {
-                let cursor_idx = read_u64(&mut context, buffer);
+                let cursor_idx = read_u64_pc(&mut context, buffer);
                 context.next(cursor_idx);
             }
             OperationCode::FetchVector => {
-                let cursor_idx = read_u64(&mut context, buffer);
-                let to_register_timestamp = read_u64(&mut context, buffer);
-                let to_register_value = read_u64(&mut context, buffer);
+                let cursor_idx = read_u64_pc(&mut context, buffer);
+                let to_register_timestamp = read_u64_pc(&mut context, buffer);
+                let to_register_value = read_u64_pc(&mut context, buffer);
 
                 let (timestamp, value) = context.fetch_vector(cursor_idx);
                 context.regs[to_register_timestamp as usize] = timestamp;
@@ -163,13 +163,13 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
             }
 
             OperationCode::Goto => {
-                let address = read_u64(&mut context, buffer);
+                let address = read_u64_pc(&mut context, buffer);
                 context.pc = address as usize;
             }
             OperationCode::GotoEq => {
-                let address = read_u64(&mut context, buffer);
-                let register1 = read_u64(&mut context, buffer);
-                let register2 = read_u64(&mut context, buffer);
+                let address = read_u64_pc(&mut context, buffer);
+                let register1 = read_u64_pc(&mut context, buffer);
+                let register2 = read_u64_pc(&mut context, buffer);
 
                 let value1 = context.regs[register1 as usize];
                 let value2 = context.regs[register2 as usize];
@@ -178,9 +178,9 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
                 }
             }
             OperationCode::GotoNeq => {
-                let address = read_u64(&mut context, buffer);
-                let register1 = read_u64(&mut context, buffer);
-                let register2 = read_u64(&mut context, buffer);
+                let address = read_u64_pc(&mut context, buffer);
+                let register1 = read_u64_pc(&mut context, buffer);
+                let register2 = read_u64_pc(&mut context, buffer);
 
                 let value1 = context.regs[register1 as usize];
                 let value2 = context.regs[register2 as usize];
@@ -190,14 +190,14 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
             }
 
             OperationCode::OutputScalar => {
-                let from_register = read_u64(&mut context, buffer);
+                let from_register = read_u64_pc(&mut context, buffer);
                 context
                     .outputs
                     .push_back(OutputValue::Scalar(context.regs[from_register as usize]));
             }
             OperationCode::OutputVector => {
-                let from_register_timestamp = read_u64(&mut context, buffer);
-                let from_register_value = read_u64(&mut context, buffer);
+                let from_register_timestamp = read_u64_pc(&mut context, buffer);
+                let from_register_value = read_u64_pc(&mut context, buffer);
 
                 context.outputs.push_back(OutputValue::Vector((
                     context.regs[from_register_timestamp as usize],
