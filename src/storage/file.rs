@@ -195,15 +195,24 @@ impl<'a> Cursor<'a> {
         if self.values_read % 2 == 1 {
             let mut l_buf = [0u8; 1];
             self.offset += self.seq_reader.read(&mut l_buf);
-            // self.file.read_exact(&mut l_buf);
             self.cur_length_byte = l_buf[0];
         }
 
-        let int_length = EXPONENTS
+        let ts_delta_int_length = EXPONENTS
             [((self.cur_length_byte >> (6 - 4 * (1 - (self.values_read % 2)))) & 0b11) as usize];
-        let mut ts_buf = [0x00; size_of::<u64>()];
-        self.offset += self.seq_reader.read(&mut ts_buf[0..int_length]);
+        let val_delta_int_length = EXPONENTS[((self.cur_length_byte
+            >> (6 - 4 * (1 - (self.values_read % 2)) - 2))
+            & 0b11) as usize];
 
+        // read deltas
+        let mut buffer = [0u8; size_of::<Timestamp>() + size_of::<Value>()];
+        self.offset += self
+            .seq_reader
+            .read(&mut buffer[0..(ts_delta_int_length + val_delta_int_length)]);
+
+        // compute timestamp
+        let mut ts_buf: [u8; 8] = [0x00; size_of::<Timestamp>()];
+        ts_buf[0..ts_delta_int_length].copy_from_slice(&buffer[0..ts_delta_int_length]);
         let time_delta =
             CompressionEngine::zig_zag_decode(u64::from_le_bytes(ts_buf)) + self.last_deltas.0;
         let new_timestamp = self.current_timestamp.wrapping_add_signed(time_delta);
@@ -211,11 +220,11 @@ impl<'a> Cursor<'a> {
             return None;
         }
 
-        let int_length = EXPONENTS[((self.cur_length_byte
-            >> (6 - 4 * (1 - (self.values_read % 2)) - 2))
-            & 0b11) as usize];
+        // compute value
         let mut v_buf = [0x00u8; size_of::<i64>()];
-        self.offset += self.seq_reader.read(&mut v_buf[0..int_length]);
+        v_buf[0..val_delta_int_length].copy_from_slice(
+            &buffer[ts_delta_int_length..ts_delta_int_length + val_delta_int_length],
+        );
         let value_delta =
             CompressionEngine::zig_zag_decode(u64::from_le_bytes(v_buf)) + self.last_deltas.1;
         let new_value = self.value.wrapping_add_signed(value_delta);
