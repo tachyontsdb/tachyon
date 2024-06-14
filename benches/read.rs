@@ -63,13 +63,13 @@ fn criterion_benchmark(c: &mut Criterion) {
     // setup SQLite benchmark
     let conn = Connection::open("./tmp/bench_sql.sqlite").unwrap();
 
-    if !Path::new("./tmp/bench_sql.exists").exists() {
+    if !Path::new("./tmp/bench_sql.sqlite").exists() {
         conn.execute(
             "
-            CREATE TABLE Item (
-                timestamp INTEGER,
-                value INTEGER
-            )
+                CREATE TABLE Item (
+                    timestamp INTEGER,
+                    value INTEGER
+                )
             ",
             (),
         )
@@ -81,8 +81,8 @@ fn criterion_benchmark(c: &mut Criterion) {
             };
             conn.execute(
                 "
-            INSERT INTO Item (timestamp, value) VALUES (?1, ?2);
-            ",
+                    INSERT INTO Item (timestamp, value) VALUES (?1, ?2);
+                ",
                 (&item.timestamp, &item.value),
             )
             .unwrap();
