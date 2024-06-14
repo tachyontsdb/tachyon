@@ -3,6 +3,7 @@ use crate::common::{Timestamp, Value};
 use crate::storage::compression::CompressionEngine;
 use crate::storage::page_cache::page_cache_sequential_read;
 use std::cell::RefCell;
+use std::mem;
 use std::{
     fs::File,
     io::{Error, Read, Seek, Write},
@@ -15,6 +16,8 @@ const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
 const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
+
+pub const MAX_FILE_SIZE: usize = 1024;
 
 struct FileReaderUtil;
 const VAR_U64_READERS: [fn(&[u8]) -> u64; 4] = [
@@ -378,6 +381,7 @@ impl TimeDataFile {
     }
 
     pub fn write(&self, path: PathBuf) -> usize {
+        let path = path.join( format!( "{}.ty", self.header.max_timestamp ) );
         let mut file = File::create(path).unwrap();
 
         let header_bytes = self.header.write(&mut file).unwrap();
@@ -430,6 +434,11 @@ impl TimeDataFile {
 
         self.timestamps.push(timestamp);
         self.values.push(value);
+    }
+
+    pub fn size_of_entries(&self) -> usize {
+        let size = size_of::<Timestamp>() * self.timestamps.len() + size_of::<Value>() * self.values.len();
+        size
     }
 }
 
