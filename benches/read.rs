@@ -55,9 +55,9 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     // setup SQLite benchmark
-    let conn = Connection::open("./tmp/bench_sql.sqlite").unwrap();
+    let conn = Connection::open(format!("./tmp/bench_sql_{}.sqlite", NUM_ITEMS)).unwrap();
 
-    if !Path::new("./tmp/bench_sql.exists").exists() {
+    if !Path::new(&format!("./tmp/bench_sql_{}.exists", NUM_ITEMS)).exists() {
         conn.execute(
             "
             CREATE TABLE Item (
@@ -81,7 +81,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             )
             .unwrap();
         }
-        File::create("./tmp/bench_sql.exists").unwrap();
+        File::create(format!("./tmp/bench_sql_{}.exists", NUM_ITEMS)).unwrap();
     }
 
     c.bench_function(&format!("SQLite: read sequential 0-{}", NUM_ITEMS), |b| {
@@ -98,42 +98,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     std::fs::remove_file("./tmp/bench_sequential_read.ty").unwrap();
 }
-
-// pub struct FlamegraphProfiler<'a> {
-//     frequency: c_int,
-//     active_profiler: Option<ProfilerGuard<'a>>,
-// }
-
-// impl<'a> FlamegraphProfiler<'a> {
-//     #[allow(dead_code)]
-//     pub fn new(frequency: c_int) -> Self {
-//         FlamegraphProfiler {
-//             frequency,
-//             active_profiler: None,
-//         }
-//     }
-// }
-
-// impl<'a> Profiler for FlamegraphProfiler<'a> {
-//     fn start_profiling(&mut self, _benchmark_id: &str, _benchmark_dir: &Path) {
-//         self.active_profiler = Some(ProfilerGuard::new(self.frequency).unwrap());
-//     }
-
-//     fn stop_profiling(&mut self, _benchmark_id: &str, benchmark_dir: &Path) {
-//         std::fs::create_dir_all(benchmark_dir).unwrap();
-//         // let flamegraph_path = benchmark_dir.join("flamegraph.svg");
-//         let flamegraph_file = File::create("flamegraph.svg")
-//             .expect("File system error while creating flamegraph.svg");
-//         if let Some(profiler) = self.active_profiler.take() {
-//             profiler
-//                 .report()
-//                 .build()
-//                 .unwrap()
-//                 .flamegraph(flamegraph_file)
-//                 .expect("Error writing flamegraph");
-//         }
-//     }
-// }
 
 fn get_config() -> Criterion {
     Criterion::default().with_profiler(PProfProfiler::new(50, Output::Flamegraph(None)))

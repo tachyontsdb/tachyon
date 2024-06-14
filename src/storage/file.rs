@@ -1,4 +1,4 @@
-use super::page_cache::{self, FileId, PageCache};
+use super::page_cache::{self, FileId, PageCache, SeqPageRead};
 use crate::common::{Timestamp, Value};
 use crate::storage::compression::CompressionEngine;
 use std::{
@@ -110,7 +110,7 @@ pub struct Cursor<'a> {
     cur_length_byte: u8,
     file_paths: Arc<[PathBuf]>,
 
-    page_cache: &'a mut PageCache,
+    seq_reader: SeqPageRead<'a>,
 }
 
 // TODO: Remove this
@@ -147,8 +147,8 @@ impl<'a> Cursor<'a> {
             offset: MAGIC_SIZE + HEADER_SIZE,
             cur_length_byte: 0,
             file_paths,
-            page_cache,
             last_deltas: (0, 0),
+            seq_reader: page_cache.sequential_read(file_id, MAGIC_SIZE + HEADER_SIZE),
         };
 
         while cursor.current_timestamp < start {
@@ -170,17 +170,19 @@ impl<'a> Cursor<'a> {
             if self.file_index == self.file_paths.len() {
                 return None;
             }
-
             self.file_id = self
+                .seq_reader
                 .page_cache
                 .register_or_get_file_id(&self.file_paths[self.file_index]);
-            self.header = Header::parse(self.file_id, self.page_cache);
+            self.header = Header::parse(self.file_id, &mut self.seq_reader.page_cache);
             self.offset = MAGIC_SIZE + HEADER_SIZE;
 
             self.current_timestamp = self.header.min_timestamp;
             self.value = self.header.first_value;
             self.values_read = 1;
             self.last_deltas = (0, 0);
+
+            self.seq_reader.reset(self.file_id, self.offset);
 
             // this should never be triggered
             if self.current_timestamp > self.end {
@@ -192,7 +194,7 @@ impl<'a> Cursor<'a> {
 
         if self.values_read % 2 == 1 {
             let mut l_buf = [0u8; 1];
-            self.offset += self.page_cache.read(self.file_id, self.offset, &mut l_buf);
+            self.offset += self.seq_reader.read(&mut l_buf);
             // self.file.read_exact(&mut l_buf);
             self.cur_length_byte = l_buf[0];
         }
@@ -200,9 +202,7 @@ impl<'a> Cursor<'a> {
         let int_length = EXPONENTS
             [((self.cur_length_byte >> (6 - 4 * (1 - (self.values_read % 2)))) & 0b11) as usize];
         let mut ts_buf = [0x00; size_of::<u64>()];
-        self.offset += self
-            .page_cache
-            .read(self.file_id, self.offset, &mut ts_buf[0..int_length]);
+        self.offset += self.seq_reader.read(&mut ts_buf[0..int_length]);
 
         let time_delta =
             CompressionEngine::zig_zag_decode(u64::from_le_bytes(ts_buf)) + self.last_deltas.0;
@@ -215,9 +215,7 @@ impl<'a> Cursor<'a> {
             >> (6 - 4 * (1 - (self.values_read % 2)) - 2))
             & 0b11) as usize];
         let mut v_buf = [0x00u8; size_of::<i64>()];
-        self.offset += self
-            .page_cache
-            .read(self.file_id, self.offset, &mut v_buf[0..int_length]);
+        self.offset += self.seq_reader.read(&mut v_buf[0..int_length]);
         let value_delta =
             CompressionEngine::zig_zag_decode(u64::from_le_bytes(v_buf)) + self.last_deltas.1;
         let new_value = self.value.wrapping_add_signed(value_delta);

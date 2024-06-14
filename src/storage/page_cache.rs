@@ -12,6 +12,8 @@ use std::{
 
 use rustc_hash::FxHashMap;
 
+use super::hash_map::IDLookup;
+
 pub type FileId = u32;
 type PageId = u32;
 type FrameId = usize;
@@ -53,7 +55,7 @@ impl Hasher for FastNoHash {
 pub struct PageCache {
     frames: Vec<Frame>,
 
-    mapping: HashMap<u64, FrameId, BuildHasherDefault<FastNoHash>>,
+    mapping: IDLookup<FrameId>,
     open_files: HashMap<FileId, File, BuildHasherDefault<FastNoHash>>,
 
     file_path_to_id: FxHashMap<PathBuf, FileId>,
@@ -61,6 +63,64 @@ pub struct PageCache {
     cur_file_id: FileId,
 
     root_free: usize,
+}
+
+pub struct SeqPageRead<'a> {
+    file_id: FileId,
+    cur_page_id: PageId,
+    frame_id: FrameId,
+    pub page_cache: &'a mut PageCache,
+    offset: usize,
+}
+
+impl<'a> SeqPageRead<'a> {
+    pub fn reset(&mut self, file_id: FileId, offset: usize) {
+        self.file_id = file_id;
+        self.offset = offset;
+        self.cur_page_id = (offset / PAGE_SIZE) as PageId;
+        self.frame_id = self.page_cache.load_page(file_id, self.cur_page_id);
+    }
+
+    pub fn read(&mut self, buffer: &mut [u8]) -> usize {
+        let mut bytes_copied = 0;
+
+        while (bytes_copied < buffer.len()) {
+            // make sure correct page is in the frame (not evicted)
+            if let Frame::Page(PageInfo {
+                file_id,
+                page_id,
+                data,
+            }) = self.page_cache.frames[self.frame_id]
+            {
+                if self.file_id != file_id || self.cur_page_id != page_id {
+                    self.frame_id = self.page_cache.load_page(self.file_id, self.cur_page_id);
+                }
+            } else {
+                self.frame_id = self.page_cache.load_page(self.file_id, self.cur_page_id);
+            }
+
+            if let Frame::Page(PageInfo {
+                file_id,
+                page_id,
+                data,
+            }) = &mut self.page_cache.frames[self.frame_id]
+            {
+                let num_bytes =
+                    (PAGE_SIZE - (self.offset % PAGE_SIZE)).min(buffer.len() - bytes_copied);
+                let data_to_copy =
+                    &data[(self.offset % PAGE_SIZE)..(self.offset % PAGE_SIZE) + num_bytes];
+                self.offset += num_bytes;
+                buffer[bytes_copied..bytes_copied + num_bytes].copy_from_slice(data_to_copy);
+                bytes_copied += num_bytes;
+
+                if self.offset % PAGE_SIZE == 0 {
+                    self.cur_page_id += 1;
+                }
+            }
+        }
+
+        bytes_copied
+    }
 }
 
 impl PageCache {
@@ -72,10 +132,7 @@ impl PageCache {
 
         PageCache {
             frames,
-            mapping: HashMap::with_capacity_and_hasher(
-                num_frames,
-                BuildHasherDefault::<FastNoHash>::default(),
-            ),
+            mapping: IDLookup::new_with_size(2 * num_frames),
             open_files: HashMap::with_capacity_and_hasher(
                 2,
                 BuildHasherDefault::<FastNoHash>::default(),
@@ -102,6 +159,63 @@ impl PageCache {
         self.cur_file_id.wrapping_sub(1)
     }
 
+    pub fn sequential_read(&mut self, file_id: FileId, mut start_offset: usize) -> SeqPageRead {
+        let page_id = (start_offset / PAGE_SIZE) as PageId;
+        SeqPageRead {
+            file_id,
+            cur_page_id: page_id,
+            frame_id: self.load_page(file_id, page_id),
+            page_cache: self,
+            offset: start_offset,
+        }
+    }
+
+    fn load_page(&mut self, file_id: FileId, page_id: PageId) -> FrameId {
+        let frame_id;
+        // 1st - check that page_id is loaded in memory
+        if let Some(frame) = self
+            .mapping
+            .get(((file_id as u64) << 32) | (page_id as u64))
+        {
+            frame_id = frame;
+        } else {
+            // check that file is open
+            if let std::collections::hash_map::Entry::Vacant(e) = self.open_files.entry(file_id) {
+                let path = self.file_id_to_path.get(&file_id).unwrap();
+                e.insert(File::open(path).unwrap());
+            }
+
+            // find next available frame
+            // TODO: Change eviction scheme
+            frame_id = self.root_free;
+            self.root_free = (self.root_free + 1) % self.frames.len();
+
+            // if there was a page there, remove it from mapping
+            if let Frame::Page(info) = &mut self.frames[frame_id] {
+                // evict
+                self.mapping
+                    .remove(((info.file_id as u64) << 32) | (info.page_id as u64));
+            }
+
+            let mut new_page_info = PageInfo {
+                file_id,
+                page_id,
+                data: [0; PAGE_SIZE],
+            };
+
+            let bytes_read = self.open_files.get_mut(&file_id).unwrap().read_at(
+                &mut new_page_info.data,
+                ((PAGE_SIZE as PageId) * page_id) as u64,
+            );
+
+            self.mapping
+                .insert(((file_id as u64) << 32) | (page_id as u64), frame_id);
+            self.frames[frame_id] = Frame::Page(new_page_info);
+        }
+
+        frame_id
+    }
+
     pub fn read(&mut self, file_id: FileId, mut offset: usize, buffer: &mut [u8]) -> usize {
         let last_offset = offset + buffer.len();
         let first_page_id = (offset / PAGE_SIZE) as PageId;
@@ -109,48 +223,7 @@ impl PageCache {
         let mut bytes_copied = 0;
 
         for page_id in first_page_id..=last_page_id {
-            let frame_id;
-            // 1st - check that page_id is loaded in memory
-            if let Some(frame) = self
-                .mapping
-                .get(&(((file_id as u64) << 32) | (page_id as u64)))
-            {
-                frame_id = *frame;
-            } else {
-                // check that file is open
-                if let std::collections::hash_map::Entry::Vacant(e) = self.open_files.entry(file_id)
-                {
-                    let path = self.file_id_to_path.get(&file_id).unwrap();
-                    e.insert(File::open(path).unwrap());
-                }
-
-                // find next available frame
-                // TODO: Change eviction scheme
-                frame_id = self.root_free;
-                self.root_free = (self.root_free + 1) % self.frames.len();
-
-                // if there was a page there, remove it from mapping
-                if let Frame::Page(info) = &mut self.frames[frame_id] {
-                    // evict
-                    self.mapping
-                        .remove(&(((info.file_id as u64) << 32) | (info.page_id as u64)));
-                }
-
-                let mut new_page_info = PageInfo {
-                    file_id,
-                    page_id,
-                    data: [0; PAGE_SIZE],
-                };
-
-                let bytes_read = self.open_files.get_mut(&file_id).unwrap().read_at(
-                    &mut new_page_info.data,
-                    ((PAGE_SIZE as PageId) * page_id) as u64,
-                );
-
-                self.mapping
-                    .insert(((file_id as u64) << 32) | (page_id as u64), frame_id);
-                self.frames[frame_id] = Frame::Page(new_page_info);
-            }
+            let frame_id = self.load_page(file_id, page_id);
 
             // page is now guaranteed to be loaded
             if let Frame::Page(PageInfo {
@@ -175,7 +248,7 @@ impl PageCache {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::File, io::Write, path::PathBuf, str::FromStr};
+    use std::{cmp::min, fs::File, io::Write, path::PathBuf, str::FromStr};
 
     use crate::{
         common::{Timestamp, Value},
@@ -211,5 +284,41 @@ mod tests {
         }
         std::fs::remove_file("./tmp/page_cache_read.ty");
         std::fs::remove_file("./tmp/page_cache_test.ty");
+    }
+
+    #[test]
+    fn test_read_sequential_whole_file() {
+        let mut page_cache = PageCache::new(10);
+        let mut model = TimeDataFile::new();
+        for i in 0..100000u64 {
+            model.write_data_to_file_in_mem(i, i + 10);
+        }
+        let file_size = model.write("./tmp/page_cache_seq_read.ty".into());
+        // start the test
+        let file_id = page_cache.register_or_get_file_id(&"./tmp/page_cache_seq_read.ty".into());
+        assert_eq!(file_id, 0);
+
+        let mut seq_read = page_cache.sequential_read(file_id, 0);
+
+        let mut buffer = vec![0; file_size];
+        let mut bytes_read = 0;
+
+        while bytes_read < file_size {
+            // read 8 bytes at a time
+            bytes_read += seq_read.read(&mut buffer[bytes_read..min(bytes_read + 8, file_size)]);
+        }
+
+        let mut new_file = File::create("./tmp/page_cache_seq_read_test.ty").unwrap();
+        new_file.write_all(&buffer);
+
+        let data_file = TimeDataFile::read_data_file("./tmp/page_cache_seq_read_test.ty".into());
+
+        assert_eq!(data_file.timestamps.len(), 100000);
+        for i in 0..data_file.timestamps.len() {
+            assert_eq!(data_file.timestamps[i], i as Timestamp);
+            assert_eq!(data_file.values[i], (i + 10) as Value);
+        }
+        std::fs::remove_file("./tmp/page_cache_seq_read.ty");
+        std::fs::remove_file("./tmp/page_cache_seq_read_test.ty");
     }
 }
