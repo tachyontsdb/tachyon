@@ -45,6 +45,11 @@ impl RNode {
         panic!("Equal keys compared")
     }
 
+    fn insert_node(&mut self, label: u64, node: *mut RNode) {
+        // let new_shift = self.first_differing(a, b);
+        todo!()
+    }
+
     fn insert(&mut self, key: u64, value: u64) {
         let idx = ((key >> self.shift) & MASK) as usize;
         let child: *mut RNode = self.children[idx];
@@ -101,6 +106,7 @@ impl RNode {
             value_bitmap: 0,
         };
         new_node.insert(key, value);
+        new_node.insert_node(self.labels[idx], self.children[idx]);
         self.labels[idx] = key & !((1 << (new_shift + 8)) - 1);
         self.children[idx] = Box::into_raw(Box::new(new_node));
     }

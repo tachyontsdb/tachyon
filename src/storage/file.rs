@@ -52,7 +52,7 @@ const HEADER_SIZE: usize = 62;
 
 impl Header {
     fn parse(file_id: FileId, page_cache: &mut PageCache) -> Self {
-        let mut magic = [0x00u8; 4];
+        let mut magic = [0u8; 4];
         page_cache.read(file_id, 0, &mut magic);
 
         if magic != MAGIC {
@@ -211,7 +211,7 @@ impl<'a> Cursor<'a> {
             .read(&mut buffer[0..(ts_delta_int_length + val_delta_int_length)]);
 
         // compute timestamp
-        let mut ts_buf: [u8; 8] = [0x00; size_of::<Timestamp>()];
+        let mut ts_buf: [u8; 8] = [0u8; size_of::<Timestamp>()];
         ts_buf[0..ts_delta_int_length].copy_from_slice(&buffer[0..ts_delta_int_length]);
         let time_delta =
             CompressionEngine::zig_zag_decode(u64::from_le_bytes(ts_buf)) + self.last_deltas.0;
@@ -221,7 +221,7 @@ impl<'a> Cursor<'a> {
         }
 
         // compute value
-        let mut v_buf = [0x00u8; size_of::<i64>()];
+        let mut v_buf = [0u8; size_of::<i64>()];
         v_buf[0..val_delta_int_length].copy_from_slice(
             &buffer[ts_delta_int_length..ts_delta_int_length + val_delta_int_length],
         );
@@ -351,6 +351,7 @@ mod tests {
             model.write_data_to_file_in_mem(i, i + 10);
         }
         model.write("./tmp/cool.ty".into());
+        std::fs::remove_file("./tmp/cool.ty");
     }
 
     #[test]

@@ -1,10 +1,10 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion, SamplingMode};
 use pprof::criterion::{Output, PProfProfiler};
 use rusqlite::{Connection, Statement};
 use std::sync::Arc;
 use tachyon::storage::{file::*, page_cache::PageCache};
 
-const NUM_ITEMS: u64 = 1000000;
+const NUM_ITEMS: u64 = 100_000_000;
 
 #[derive(Debug)]
 struct Item {
@@ -42,6 +42,9 @@ fn bench_read_sequential_timestamps(start: u64, end: u64, page_cache: &mut PageC
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("long-read");
+    group.sampling_mode(SamplingMode::Flat).sample_size(10);
+
     // setup tachyon benchmark
     let mut model = TimeDataFile::new();
     for i in 0..NUM_ITEMS {
@@ -49,7 +52,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     }
     model.write("./tmp/bench_sequential_read.ty".into());
     let mut page_cache = PageCache::new(1000);
-    c.bench_function(&format!("tachyon: read sequential 0-{}", NUM_ITEMS), |b| {
+    group.bench_function(&format!("tachyon: read sequential 0-{}", NUM_ITEMS), |b| {
         b.iter(|| bench_read_sequential_timestamps(0, NUM_ITEMS, &mut page_cache))
     });
 
@@ -84,12 +87,14 @@ fn criterion_benchmark(c: &mut Criterion) {
     transaction.commit().unwrap();
 
     let mut stmt = conn.prepare("SELECT * FROM Item").unwrap();
-    c.bench_function(&format!("SQLite: read sequential 0-{}", NUM_ITEMS), |b| {
+    group.bench_function(&format!("SQLite: read sequential 0-{}", NUM_ITEMS), |b| {
         b.iter(|| bench_read_sqlite(&mut stmt))
     });
 
     std::fs::remove_file("./tmp/bench_sequential_read.ty").unwrap();
     std::fs::remove_file(format!("./tmp/bench_sql_{}.sqlite", NUM_ITEMS)).unwrap();
+
+    group.finish()
 }
 
 fn get_config() -> Criterion {
@@ -99,6 +104,6 @@ fn get_config() -> Criterion {
 criterion_group!(
     name = benches;
     config = get_config();
-    targets = criterion_benchmark
+    targets = criterion_benchmark,
 );
 criterion_main!(benches);
