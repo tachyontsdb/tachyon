@@ -15,6 +15,12 @@ const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
 
 struct FileReaderUtil;
+const VAR_U64_READERS: [fn(&[u8]) -> u64; 4] = [
+    FileReaderUtil::read_u64_1,
+    FileReaderUtil::read_u64_2,
+    FileReaderUtil::read_u64_4,
+    FileReaderUtil::read_u64_8,
+];
 
 // TODO: Check this, changed
 impl FileReaderUtil {
@@ -28,6 +34,30 @@ impl FileReaderUtil {
 
     fn read_u64(buffer: [u8; size_of::<u64>()]) -> u64 {
         u64::from_le_bytes(buffer)
+    }
+
+    // Varint decoding
+    #[inline]
+    fn read_u64_1(buf: &[u8]) -> u64 {
+        buf[0] as u64
+    }
+
+    #[inline]
+    fn read_u64_2(buf: &[u8]) -> u64 {
+        ((buf[1] as u64) << 8) | (buf[0] as u64)
+    }
+    #[inline]
+    fn read_u64_4(buf: &[u8]) -> u64 {
+        ((buf[3] as u64) << 24) | ((buf[2] as u64) << 16) | ((buf[1] as u64) << 8) | (buf[0] as u64)
+    }
+
+    #[inline]
+    fn read_u64_8(buf: &[u8]) -> u64 {
+        let mut res = 0u64;
+        for i in 0..8 {
+            res |= (buf[i] as u64) << (i * 8);
+        }
+        res
     }
 }
 
@@ -173,15 +203,6 @@ impl<'a> Cursor<'a> {
         Ok(cursor)
     }
 
-    #[inline]
-    fn read_u64(buf: &[u8], length: usize) -> u64 {
-        let mut res = 0u64;
-        for i in 0..length {
-            res |= (buf[i] as u64) << (i * 8);
-        }
-        res
-    }
-
     pub fn next(&mut self) -> Option<(Timestamp, Value)> {
         if self.current_timestamp > self.end {
             return None;
@@ -231,26 +252,33 @@ impl<'a> Cursor<'a> {
         }
 
         // compute integer lengths
-        let lengths: [usize; 4] = [
-            EXPONENTS[((self.cur_length_byte >> 6) & 0b11) as usize],
-            EXPONENTS[((self.cur_length_byte >> 4) & 0b11) as usize],
-            EXPONENTS[((self.cur_length_byte >> 2) & 0b11) as usize],
-            EXPONENTS[((self.cur_length_byte) & 0b11) as usize],
+        let indexes: [usize; 4] = [
+            ((self.cur_length_byte >> 6) & 0b11) as usize,
+            ((self.cur_length_byte >> 4) & 0b11) as usize,
+            ((self.cur_length_byte >> 2) & 0b11) as usize,
+            ((self.cur_length_byte) & 0b11) as usize,
         ];
+
+        let total_varint_lengths = EXPONENTS[indexes[0]]
+            + EXPONENTS[indexes[1]]
+            + EXPONENTS[indexes[2]]
+            + EXPONENTS[indexes[3]];
 
         // read deltas + next length byte
         let mut buffer = [0u8; 2 * (size_of::<Timestamp>() + size_of::<Value>()) + 1];
         self.offset += self
             .seq_reader
-            .read(&mut buffer[0..lengths.iter().sum::<usize>() + 1]);
+            .read(&mut buffer[0..total_varint_lengths + 1]);
 
         let mut decoded_deltas = [0i64; 4];
         let mut buf_offset = 0;
+
         for i in 0..4 {
-            let encoded_delta =
-                Cursor::read_u64(&buffer[buf_offset..buf_offset + lengths[i]], lengths[i]);
+            let encoded_delta = VAR_U64_READERS[indexes[i]](
+                &buffer[buf_offset..buf_offset + EXPONENTS[indexes[i]]],
+            );
             decoded_deltas[i] = CompressionEngine::zig_zag_decode(encoded_delta);
-            buf_offset += lengths[i];
+            buf_offset += EXPONENTS[indexes[i]];
         }
 
         // compute timestamp / value
@@ -277,7 +305,7 @@ impl<'a> Cursor<'a> {
 
         // update state
         self.values_read += 1;
-        self.cur_length_byte = buffer[lengths.iter().sum::<usize>()];
+        self.cur_length_byte = buffer[total_varint_lengths];
 
         Some((self.current_timestamp, self.value))
     }
