@@ -175,9 +175,11 @@ impl<'a> Cursor<'a> {
 
     #[inline]
     fn read_u64(buf: &[u8], length: usize) -> u64 {
-        let mut dst = [0u8; size_of::<u64>()];
-        dst[0..length].copy_from_slice(&buf[0..length]);
-        u64::from_le_bytes(dst)
+        let mut res = 0u64;
+        for i in 0..length {
+            res |= (buf[i] as u64) << (i * 8);
+        }
+        res
     }
 
     pub fn next(&mut self) -> Option<(Timestamp, Value)> {
