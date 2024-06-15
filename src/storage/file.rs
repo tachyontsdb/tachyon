@@ -111,6 +111,9 @@ pub struct Cursor<'a> {
     file_paths: Arc<[PathBuf]>,
 
     seq_reader: SeqPageRead<'a>,
+
+    next_timestamp: Timestamp,
+    next_value: Value,
 }
 
 // TODO: Remove this
@@ -149,7 +152,14 @@ impl<'a> Cursor<'a> {
             file_paths,
             last_deltas: (0, 0),
             seq_reader: page_cache.sequential_read(file_id, MAGIC_SIZE + HEADER_SIZE),
+
+            next_timestamp: 0,
+            next_value: 0,
         };
+
+        let mut l_buf = [0u8; 1];
+        cursor.offset += cursor.seq_reader.read(&mut l_buf);
+        cursor.cur_length_byte = l_buf[0];
 
         while cursor.current_timestamp < start {
             if let Some((timestamp, value)) = cursor.next() {
@@ -163,7 +173,18 @@ impl<'a> Cursor<'a> {
         Ok(cursor)
     }
 
+    #[inline]
+    fn read_u64(buf: &[u8], length: usize) -> u64 {
+        let mut dst = [0u8; size_of::<u64>()];
+        dst[0..length].copy_from_slice(&buf[0..length]);
+        u64::from_le_bytes(dst)
+    }
+
     pub fn next(&mut self) -> Option<(Timestamp, Value)> {
+        if self.current_timestamp > self.end {
+            return None;
+        }
+
         if self.values_read == self.header.count as u64 {
             self.file_index += 1;
 
@@ -184,6 +205,10 @@ impl<'a> Cursor<'a> {
 
             self.seq_reader.reset(self.file_id, self.offset);
 
+            let mut l_buf = [0u8; 1];
+            self.offset += self.seq_reader.read(&mut l_buf);
+            self.cur_length_byte = l_buf[0];
+
             // this should never be triggered
             if self.current_timestamp > self.end {
                 panic!("Unexpected file change! Cursor timestamp is greater then end timestamp.");
@@ -191,52 +216,70 @@ impl<'a> Cursor<'a> {
 
             return Some((self.current_timestamp, self.value));
         }
+        if self.values_read % 2 == 0 {
+            self.current_timestamp = self.next_timestamp;
+            self.value = self.next_value;
+            if self.current_timestamp > self.end {
+                return None;
+            }
 
-        if self.values_read % 2 == 1 {
-            let mut l_buf = [0u8; 1];
-            self.offset += self.seq_reader.read(&mut l_buf);
-            self.cur_length_byte = l_buf[0];
+            self.values_read += 1;
+            return Some((self.current_timestamp, self.value));
         }
 
-        let ts_delta_int_length = EXPONENTS
-            [((self.cur_length_byte >> (6 - 4 * (1 - (self.values_read % 2)))) & 0b11) as usize];
-        let val_delta_int_length = EXPONENTS[((self.cur_length_byte
-            >> (6 - 4 * (1 - (self.values_read % 2)) - 2))
-            & 0b11) as usize];
+        // compute integer lengths
+        let lengths: [usize; 4] = [
+            EXPONENTS[((self.cur_length_byte >> 6) & 0b11) as usize],
+            EXPONENTS[((self.cur_length_byte >> 4) & 0b11) as usize],
+            EXPONENTS[((self.cur_length_byte >> 2) & 0b11) as usize],
+            EXPONENTS[((self.cur_length_byte) & 0b11) as usize],
+        ];
 
-        // read deltas
-        let mut buffer = [0u8; size_of::<Timestamp>() + size_of::<Value>()];
+        // read deltas + next length byte
+        let mut buffer = [0u8; 2 * (size_of::<Timestamp>() + size_of::<Value>()) + 1];
         self.offset += self
             .seq_reader
-            .read(&mut buffer[0..(ts_delta_int_length + val_delta_int_length)]);
+            .read(&mut buffer[0..lengths.iter().sum::<usize>() + 1]);
 
-        // compute timestamp
-        let mut ts_buf: [u8; 8] = [0u8; size_of::<Timestamp>()];
-        ts_buf[0..ts_delta_int_length].copy_from_slice(&buffer[0..ts_delta_int_length]);
-        let time_delta =
-            CompressionEngine::zig_zag_decode(u64::from_le_bytes(ts_buf)) + self.last_deltas.0;
-        let new_timestamp = self.current_timestamp.wrapping_add_signed(time_delta);
-        if new_timestamp > self.end {
+        let mut decoded_deltas = [0i64; 4];
+        let mut buf_offset = 0;
+        for i in 0..4 {
+            let encoded_delta =
+                Cursor::read_u64(&buffer[buf_offset..buf_offset + lengths[i]], lengths[i]);
+            decoded_deltas[i] = CompressionEngine::zig_zag_decode(encoded_delta);
+            buf_offset += lengths[i];
+        }
+
+        // compute timestamp / value
+        self.last_deltas.0 = decoded_deltas[0] + self.last_deltas.0;
+        self.current_timestamp = self
+            .current_timestamp
+            .wrapping_add_signed(self.last_deltas.0);
+
+        self.last_deltas.1 = decoded_deltas[1] + self.last_deltas.1;
+        self.value = self.value.wrapping_add_signed(self.last_deltas.1);
+
+        if self.current_timestamp > self.end {
             return None;
         }
 
-        // compute value
-        let mut v_buf = [0u8; size_of::<i64>()];
-        v_buf[0..val_delta_int_length].copy_from_slice(
-            &buffer[ts_delta_int_length..ts_delta_int_length + val_delta_int_length],
-        );
-        let value_delta =
-            CompressionEngine::zig_zag_decode(u64::from_le_bytes(v_buf)) + self.last_deltas.1;
-        let new_value = self.value.wrapping_add_signed(value_delta);
+        // compute next timestamp / value
+        self.last_deltas.0 = decoded_deltas[2] + self.last_deltas.0;
+        self.next_timestamp = self
+            .current_timestamp
+            .wrapping_add_signed(self.last_deltas.0);
 
-        self.last_deltas = (time_delta, value_delta);
-        self.current_timestamp = new_timestamp;
-        self.value = new_value;
+        self.last_deltas.1 = decoded_deltas[3] + self.last_deltas.1;
+        self.next_value = self.value.wrapping_add_signed(self.last_deltas.1);
+
+        // update state
         self.values_read += 1;
+        self.cur_length_byte = buffer[lengths.iter().sum::<usize>()];
 
-        Some((new_timestamp, new_value))
+        Some((self.current_timestamp, self.value))
     }
 
+    // not valid after next returns none
     pub fn fetch(&self) -> (Timestamp, Value) {
         (self.current_timestamp, self.value)
     }

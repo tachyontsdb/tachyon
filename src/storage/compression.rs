@@ -100,9 +100,12 @@ impl CompressionEngine {
         bytes
     }
 
+    #[inline]
     pub fn zig_zag_decode(n: u64) -> i64 {
         (((n >> 1) as i64) ^ -((n & 1) as i64)) as i64
     }
+
+    #[inline]
     pub fn zig_zag_encode(n: i64) -> u64 {
         ((n >> (size_of::<i64>() * 8 - 1)) ^ (n << 1)) as u64
     }
