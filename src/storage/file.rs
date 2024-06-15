@@ -218,6 +218,7 @@ impl<'a> Cursor<'a> {
 
             return Some((self.current_timestamp, self.value));
         }
+
         if self.values_read % 2 == 0 {
             self.current_timestamp = self.next_timestamp;
             self.value = self.next_value;
