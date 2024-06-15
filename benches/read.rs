@@ -63,7 +63,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     // setup SQLite benchmark
     let conn = Connection::open("./tmp/bench_sql.sqlite").unwrap();
 
-    if !Path::new("./tmp/bench_sql.sqlite").exists() {
+    if !Path::new("./tmp/bench_sql.exists").exists() {
         conn.execute(
             "
                 CREATE TABLE Item (
