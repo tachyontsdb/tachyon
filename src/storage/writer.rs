@@ -1,22 +1,19 @@
-use std::{collections::HashMap, path::PathBuf, mem::size_of};
+use std::{collections::HashMap, mem::size_of, path::PathBuf};
 
 use crate::common::{Timestamp, Value};
 
 use super::file::{TimeDataFile, MAX_FILE_SIZE};
 
-
-
-
 struct Writer {
     open_data_files: HashMap<u64, TimeDataFile>, // stream id to in-mem file
-    root: PathBuf
+    root: PathBuf,
 }
 
 impl Writer {
     pub fn new(root: PathBuf) -> Self {
-        Writer{
+        Writer {
             open_data_files: HashMap::new(),
-            root: root
+            root: root,
         }
     }
 
@@ -28,34 +25,32 @@ impl Writer {
         if let Some(file) = self.open_data_files.get_mut(&stream_id) {
             file.write_data_to_file_in_mem(ts, v);
             if file.size_of_entries() >= MAX_FILE_SIZE {
-                file.write( self.root.join(format!("{}", stream_id)) );
+                file.write(self.root.join(format!("{}", stream_id)));
                 self.open_data_files.remove_entry(&stream_id);
             }
         } else {
             panic!("No file open in memory associated with {stream_id}")
         }
-        
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use super::*;
-
+    use std::fs;
 
     const MAX_ENTRIES: usize = MAX_FILE_SIZE / (2 * size_of::<u64>());
 
     fn init(stream_ids: &[u32]) {
         fs::create_dir("./tmp/db");
         for stream_id in stream_ids {
-            fs::create_dir( format!("./tmp/db/{}", stream_id));
+            fs::create_dir(format!("./tmp/db/{}", stream_id));
         }
     }
 
     fn clean(stream_ids: &[u32]) {
         for stream_id in stream_ids {
-            fs::remove_dir_all( format!("./tmp/db/{}", stream_id));
+            fs::remove_dir_all(format!("./tmp/db/{}", stream_id));
         }
         fs::remove_dir("./tmp/db");
     }
@@ -73,7 +68,6 @@ mod tests {
             writer.write(0, i as Timestamp, (i * 1000) as Value);
         }
 
-
         clean(&stream_ids)
     }
 
@@ -87,7 +81,7 @@ mod tests {
         let mut values = Vec::<Value>::new();
 
         for i in 0..MAX_ENTRIES {
-            for stream_id in stream_ids{
+            for stream_id in stream_ids {
                 writer.write(stream_id.into(), i as Timestamp, (i * 1000) as Value);
             }
         }

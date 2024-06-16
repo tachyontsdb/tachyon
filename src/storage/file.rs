@@ -381,7 +381,7 @@ impl TimeDataFile {
     }
 
     pub fn write(&self, path: PathBuf) -> usize {
-        let path = path.join( format!( "{}.ty", self.header.max_timestamp ) );
+        let path = path.join(format!("{}.ty", self.header.max_timestamp));
         let mut file = File::create(path).unwrap();
 
         let header_bytes = self.header.write(&mut file).unwrap();
@@ -437,7 +437,8 @@ impl TimeDataFile {
     }
 
     pub fn size_of_entries(&self) -> usize {
-        let size = size_of::<Timestamp>() * self.timestamps.len() + size_of::<Value>() * self.values.len();
+        let size =
+            size_of::<Timestamp>() * self.timestamps.len() + size_of::<Value>() * self.values.len();
         size
     }
 }
