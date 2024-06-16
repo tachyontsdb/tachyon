@@ -3,3 +3,6 @@
 .DS_STORE
 *.o
 *.out
+*.svg
+**profile.json
+.vscode

@@ -1,4 +1,4 @@
-use super::page_cache::{self, FileId, PageCache};
+use super::page_cache::{self, FileId, PageCache, SeqPageRead};
 use crate::common::{Timestamp, Value};
 use crate::storage::compression::CompressionEngine;
 use std::{
@@ -15,6 +15,12 @@ const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
 
 struct FileReaderUtil;
+const VAR_U64_READERS: [fn(&[u8]) -> u64; 4] = [
+    FileReaderUtil::read_u64_1,
+    FileReaderUtil::read_u64_2,
+    FileReaderUtil::read_u64_4,
+    FileReaderUtil::read_u64_8,
+];
 
 // TODO: Check this, changed
 impl FileReaderUtil {
@@ -28,6 +34,30 @@ impl FileReaderUtil {
 
     fn read_u64(buffer: [u8; size_of::<u64>()]) -> u64 {
         u64::from_le_bytes(buffer)
+    }
+
+    // Varint decoding
+    #[inline]
+    fn read_u64_1(buf: &[u8]) -> u64 {
+        buf[0] as u64
+    }
+
+    #[inline]
+    fn read_u64_2(buf: &[u8]) -> u64 {
+        ((buf[1] as u64) << 8) | (buf[0] as u64)
+    }
+    #[inline]
+    fn read_u64_4(buf: &[u8]) -> u64 {
+        ((buf[3] as u64) << 24) | ((buf[2] as u64) << 16) | ((buf[1] as u64) << 8) | (buf[0] as u64)
+    }
+
+    #[inline]
+    fn read_u64_8(buf: &[u8]) -> u64 {
+        let mut res = 0u64;
+        for (i, byte) in buf.iter().enumerate().take(8) {
+            res |= (*byte as u64) << (i * 8);
+        }
+        res
     }
 }
 
@@ -52,15 +82,12 @@ const HEADER_SIZE: usize = 62;
 
 impl Header {
     fn parse(file_id: FileId, page_cache: &mut PageCache) -> Self {
-        let mut magic = [0x00u8; 4];
-        page_cache.read(file_id, 0, &mut magic);
-
-        if magic != MAGIC {
+        let mut buffer = [0x00u8; MAGIC_SIZE + HEADER_SIZE];
+        page_cache.read(file_id, 0, &mut buffer);
+        if buffer[0..MAGIC_SIZE] != MAGIC {
             panic!("Corrupted file - invalid magic for .ty file");
         }
-
-        let mut buffer = [0x00u8; HEADER_SIZE];
-        page_cache.read(file_id, 4, &mut buffer);
+        let buffer = &mut buffer[MAGIC_SIZE..];
 
         Self {
             version: FileReaderUtil::read_u16(buffer[0..2].try_into().unwrap()),
@@ -110,7 +137,10 @@ pub struct Cursor<'a> {
     cur_length_byte: u8,
     file_paths: Arc<[PathBuf]>,
 
-    page_cache: &'a mut PageCache,
+    seq_reader: SeqPageRead<'a>,
+
+    next_timestamp: Timestamp,
+    next_value: Value,
 }
 
 // TODO: Remove this
@@ -147,9 +177,18 @@ impl<'a> Cursor<'a> {
             offset: MAGIC_SIZE + HEADER_SIZE,
             cur_length_byte: 0,
             file_paths,
-            page_cache,
             last_deltas: (0, 0),
+            seq_reader: page_cache.sequential_read(file_id, MAGIC_SIZE + HEADER_SIZE),
+
+            next_timestamp: 0,
+            next_value: 0,
         };
+
+        if cursor.header.count > 1 {
+            let mut l_buf = [0u8; 1];
+            cursor.offset += cursor.seq_reader.read(&mut l_buf);
+            cursor.cur_length_byte = l_buf[0];
+        }
 
         while cursor.current_timestamp < start {
             if let Some((timestamp, value)) = cursor.next() {
@@ -163,24 +202,41 @@ impl<'a> Cursor<'a> {
         Ok(cursor)
     }
 
+    fn load_next_file(&mut self) -> Option<()> {
+        self.file_index += 1;
+
+        if self.file_index == self.file_paths.len() {
+            return None;
+        }
+        self.file_id = self
+            .seq_reader
+            .page_cache
+            .register_or_get_file_id(&self.file_paths[self.file_index]);
+        self.header = Header::parse(self.file_id, self.seq_reader.page_cache);
+        self.offset = MAGIC_SIZE + HEADER_SIZE;
+
+        self.current_timestamp = self.header.min_timestamp;
+        self.value = self.header.first_value;
+        self.values_read = 1;
+        self.last_deltas = (0, 0);
+
+        self.seq_reader.reset(self.file_id, self.offset);
+
+        if self.header.count > 1 {
+            let mut l_buf = [0u8; 1];
+            self.offset += self.seq_reader.read(&mut l_buf);
+            self.cur_length_byte = l_buf[0];
+        }
+        Some(())
+    }
+
     pub fn next(&mut self) -> Option<(Timestamp, Value)> {
+        if self.current_timestamp > self.end {
+            return None;
+        }
+
         if self.values_read == self.header.count as u64 {
-            self.file_index += 1;
-
-            if self.file_index == self.file_paths.len() {
-                return None;
-            }
-
-            self.file_id = self
-                .page_cache
-                .register_or_get_file_id(&self.file_paths[self.file_index]);
-            self.header = Header::parse(self.file_id, self.page_cache);
-            self.offset = MAGIC_SIZE + HEADER_SIZE;
-
-            self.current_timestamp = self.header.min_timestamp;
-            self.value = self.header.first_value;
-            self.values_read = 1;
-            self.last_deltas = (0, 0);
+            self.load_next_file()?;
 
             // this should never be triggered
             if self.current_timestamp > self.end {
@@ -190,46 +246,77 @@ impl<'a> Cursor<'a> {
             return Some((self.current_timestamp, self.value));
         }
 
-        if self.values_read % 2 == 1 {
-            let mut l_buf = [0u8; 1];
-            self.offset += self.page_cache.read(self.file_id, self.offset, &mut l_buf);
-            // self.file.read_exact(&mut l_buf);
-            self.cur_length_byte = l_buf[0];
+        if self.values_read % 2 == 0 {
+            self.current_timestamp = self.next_timestamp;
+            self.value = self.next_value;
+            if self.current_timestamp > self.end {
+                return None;
+            }
+
+            self.values_read += 1;
+            return Some((self.current_timestamp, self.value));
         }
 
-        let int_length = EXPONENTS
-            [((self.cur_length_byte >> (6 - 4 * (1 - (self.values_read % 2)))) & 0b11) as usize];
-        let mut ts_buf = [0x00; size_of::<u64>()];
-        self.offset += self
-            .page_cache
-            .read(self.file_id, self.offset, &mut ts_buf[0..int_length]);
+        // compute integer lengths
+        let indexes: [usize; 4] = [
+            ((self.cur_length_byte >> 6) & 0b11) as usize,
+            ((self.cur_length_byte >> 4) & 0b11) as usize,
+            ((self.cur_length_byte >> 2) & 0b11) as usize,
+            ((self.cur_length_byte) & 0b11) as usize,
+        ];
 
-        let time_delta =
-            CompressionEngine::zig_zag_decode(u64::from_le_bytes(ts_buf)) + self.last_deltas.0;
-        let new_timestamp = self.current_timestamp.wrapping_add_signed(time_delta);
-        if new_timestamp > self.end {
+        let total_varint_lengths = EXPONENTS[indexes[0]]
+            + EXPONENTS[indexes[1]]
+            + EXPONENTS[indexes[2]]
+            + EXPONENTS[indexes[3]];
+
+        // read deltas + next length byte
+        let mut buffer = [0u8; 2 * (size_of::<Timestamp>() + size_of::<Value>()) + 1];
+        self.offset += self
+            .seq_reader
+            .read(&mut buffer[0..total_varint_lengths + 1]);
+
+        let mut decoded_deltas = [0i64; 4];
+        let mut buf_offset = 0;
+
+        for i in 0..4 {
+            let encoded = VAR_U64_READERS[indexes[i]](
+                &buffer[buf_offset..buf_offset + EXPONENTS[indexes[i]]],
+            );
+            buf_offset += EXPONENTS[indexes[i]];
+            decoded_deltas[i] = CompressionEngine::zig_zag_decode(encoded);
+        }
+
+        // compute timestamp / value
+        self.last_deltas.0 += decoded_deltas[0];
+        self.current_timestamp = self
+            .current_timestamp
+            .wrapping_add_signed(self.last_deltas.0);
+
+        self.last_deltas.1 += decoded_deltas[1];
+        self.value = self.value.wrapping_add_signed(self.last_deltas.1);
+
+        if self.current_timestamp > self.end {
             return None;
         }
 
-        let int_length = EXPONENTS[((self.cur_length_byte
-            >> (6 - 4 * (1 - (self.values_read % 2)) - 2))
-            & 0b11) as usize];
-        let mut v_buf = [0x00u8; size_of::<i64>()];
-        self.offset += self
-            .page_cache
-            .read(self.file_id, self.offset, &mut v_buf[0..int_length]);
-        let value_delta =
-            CompressionEngine::zig_zag_decode(u64::from_le_bytes(v_buf)) + self.last_deltas.1;
-        let new_value = self.value.wrapping_add_signed(value_delta);
+        // compute next timestamp / value
+        self.last_deltas.0 += decoded_deltas[2];
+        self.next_timestamp = self
+            .current_timestamp
+            .wrapping_add_signed(self.last_deltas.0);
 
-        self.last_deltas = (time_delta, value_delta);
-        self.current_timestamp = new_timestamp;
-        self.value = new_value;
+        self.last_deltas.1 += decoded_deltas[3];
+        self.next_value = self.value.wrapping_add_signed(self.last_deltas.1);
+
+        // update state
         self.values_read += 1;
+        self.cur_length_byte = buffer[total_varint_lengths];
 
-        Some((new_timestamp, new_value))
+        Some((self.current_timestamp, self.value))
     }
 
+    // not valid after next returns none
     pub fn fetch(&self) -> (Timestamp, Value) {
         (self.current_timestamp, self.value)
     }
@@ -297,7 +384,7 @@ impl TimeDataFile {
             body.push(CompressionEngine::zig_zag_encode(
                 curr_deltas.1 - last_deltas.1,
             ));
-            last_deltas = curr_deltas.clone()
+            last_deltas = curr_deltas
         }
         let body_compressed = CompressionEngine::compress(&body);
         println!(
@@ -344,6 +431,7 @@ mod tests {
             model.write_data_to_file_in_mem(i, i + 10);
         }
         model.write("./tmp/cool.ty".into());
+        std::fs::remove_file("./tmp/cool.ty");
     }
 
     #[test]
@@ -396,7 +484,7 @@ mod tests {
         std::fs::remove_file("./tmp/test_cursor.ty");
     }
 
-    fn generate_ty_file(path: PathBuf, timestamps: &Vec<Timestamp>, values: &Vec<Value>) {
+    fn generate_ty_file(path: PathBuf, timestamps: &[Timestamp], values: &[Value]) {
         assert!(timestamps.len() == values.len());
         let mut model = TimeDataFile::new();
 
@@ -404,6 +492,31 @@ mod tests {
             model.write_data_to_file_in_mem(timestamps[i], values[i])
         }
         model.write(path);
+    }
+
+    #[test]
+    fn test_single_valued_file() {
+        let file_paths = [PathBuf::from_str("./tmp/test_single_valued_file.ty").unwrap()];
+
+        generate_ty_file(file_paths[0].clone(), &[1], &[2]);
+
+        let mut page_cache = PageCache::new(10);
+        page_cache.register_or_get_file_id(&file_paths[0]);
+        let mut cursor = Cursor::new(Arc::new(file_paths), 0, 100, &mut page_cache).unwrap();
+
+        let mut i = 0;
+        loop {
+            let (timestamp, value) = cursor.fetch();
+            println!("{} {}", timestamp, value);
+            assert_eq!(timestamp, 1);
+            assert_eq!(value, 2);
+            i += 1;
+            if cursor.next().is_none() {
+                break;
+            }
+        }
+
+        std::fs::remove_file("./tmp/test_single_valued_file.ty");
     }
 
     #[test]
@@ -515,8 +628,8 @@ mod tests {
         let mut values = Vec::<u64>::new();
 
         for i in 1..100000u64 {
-            timestamps.push(i.into());
-            values.push((i * 200000).into());
+            timestamps.push(i);
+            values.push(i * 200000);
         }
 
         generate_ty_file("./tmp/compressed_file.ty".into(), &timestamps, &values);

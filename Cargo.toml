@@ -13,6 +13,7 @@ rustc-hash = "1.1.0"
 [dev-dependencies]
 pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
 criterion = { version = "0.5.1", features = ["html_reports"] }
+postgres = "0.19.7"
 
 [[bench]]
 name = "read"
@@ -26,6 +27,18 @@ harness = false
 name = "micro"
 harness = false
 
+[[bench]]
+name = "long"
+harness = false
+
+[[bench]]
+name = "sqlite"
+harness = false
+
+[[bench]]
+name = "timescaledb"
+harness = false
+
 [profile.release]
 codegen-units = 1
 opt-level = 3
@@ -35,3 +48,4 @@ lto = "fat"
 codegen-units = 1
 opt-level = 3
 lto = "fat"
+debug = 1
