@@ -59,8 +59,8 @@ impl CompressionEngine {
             result.push(length);
         }
 
-        for i in (values.len() - (values.len() % 4))..values.len() {
-            CompressionEngine::encode_value(values[i], &mut result);
+        for val in values[(values.len() - (values.len() % 4))..].iter() {
+            CompressionEngine::encode_value(*val, &mut result);
         }
 
         result
@@ -102,12 +102,12 @@ impl CompressionEngine {
 
     #[inline]
     pub fn zig_zag_decode(n: u64) -> i64 {
-        (((n >> 1) as i64) ^ -((n & 1) as i64)) as i64
+        (((n >> 1) as i64) ^ -((n & 1) as i64))
     }
 
     #[inline]
     pub fn zig_zag_encode(n: i64) -> u64 {
-        ((n >> (size_of::<i64>() * 8 - 1)) ^ (n << 1)) as u64
+        ((n >> (i64::BITS as usize - 1)) ^ (n << 1)) as u64
     }
 }
 

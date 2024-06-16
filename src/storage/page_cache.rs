@@ -19,7 +19,7 @@ type PageId = u32;
 type FrameId = usize;
 
 const FILE_SIZE: usize = 1_000_000;
-const PAGE_SIZE: usize = 4_000;
+const PAGE_SIZE: usize = 4_096;
 
 struct PageInfo {
     file_id: FileId,
@@ -175,7 +175,7 @@ impl PageCache {
         // 1st - check that page_id is loaded in memory
         if let Some(frame) = self
             .mapping
-            .get(((file_id as u64) << 32) | (page_id as u64))
+            .get(&(((file_id as u64) << 32) | (page_id as u64)))
         {
             frame_id = frame;
         } else {
@@ -194,7 +194,7 @@ impl PageCache {
             if let Frame::Page(info) = &mut self.frames[frame_id] {
                 // evict
                 self.mapping
-                    .remove(((info.file_id as u64) << 32) | (info.page_id as u64));
+                    .remove(&(((info.file_id as u64) << 32) | (info.page_id as u64)));
             }
 
             let mut new_page_info = PageInfo {
@@ -238,7 +238,7 @@ impl PageCache {
                 buffer[bytes_copied..bytes_copied + num_bytes].copy_from_slice(data_to_copy);
                 bytes_copied += num_bytes;
             } else {
-                assert!(false);
+                panic!("Expected page to be loaded");
             }
         }
 

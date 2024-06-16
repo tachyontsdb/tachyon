@@ -1,34 +1,12 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use pprof::criterion::{Output, PProfProfiler};
-use rusqlite::{Connection, Statement};
+use pprof::{
+    criterion::{Output, PProfProfiler},
+    flamegraph::Options,
+};
 use std::sync::Arc;
 use tachyon::storage::{file::*, page_cache::PageCache};
 
-const NUM_ITEMS: u64 = 1000000;
-
-#[derive(Debug)]
-struct Item {
-    timestamp: u64,
-    value: u64,
-}
-
-fn bench_read_sqlite(stmt: &mut Statement) -> u64 {
-    let item_iter = stmt
-        .query_map([], |row| {
-            Ok(Item {
-                timestamp: row.get(0).unwrap(),
-                value: row.get(1).unwrap(),
-            })
-        })
-        .unwrap();
-
-    let mut res = 0;
-    for item in item_iter {
-        let item = item.unwrap();
-        res += item.timestamp + item.value;
-    }
-    res
-}
+const NUM_ITEMS: u64 = 10000000;
 
 fn bench_read_sequential_timestamps(start: u64, end: u64, page_cache: &mut PageCache) -> u64 {
     let file_paths = Arc::new(["./tmp/bench_sequential_read.ty".into()]);
@@ -52,48 +30,13 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function(&format!("tachyon: read sequential 0-{}", NUM_ITEMS), |b| {
         b.iter(|| bench_read_sequential_timestamps(0, NUM_ITEMS, &mut page_cache))
     });
-
-    // setup SQLite benchmark
-    let mut conn = Connection::open(format!("./tmp/bench_sql_{}.sqlite", NUM_ITEMS)).unwrap();
-    conn.execute(
-        "
-        CREATE TABLE if not exists Item (
-            timestamp INTEGER,
-            value INTEGER
-        )
-        ",
-        (),
-    )
-    .unwrap();
-
-    let transaction = conn.transaction().unwrap();
-    let mut insert_stmt = transaction
-        .prepare("INSERT INTO Item (timestamp, value) VALUES (?, ?)")
-        .unwrap();
-
-    for i in 0..NUM_ITEMS {
-        let item = Item {
-            timestamp: i,
-            value: i + (i % 100),
-        };
-        insert_stmt
-            .execute(&[&item.timestamp, &item.value])
-            .unwrap();
-    }
-    drop(insert_stmt);
-    transaction.commit().unwrap();
-
-    let mut stmt = conn.prepare("SELECT * FROM Item").unwrap();
-    c.bench_function(&format!("SQLite: read sequential 0-{}", NUM_ITEMS), |b| {
-        b.iter(|| bench_read_sqlite(&mut stmt))
-    });
-
     std::fs::remove_file("./tmp/bench_sequential_read.ty").unwrap();
-    std::fs::remove_file(format!("./tmp/bench_sql_{}.sqlite", NUM_ITEMS)).unwrap();
 }
 
 fn get_config() -> Criterion {
-    Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)))
+    let mut options = Options::default();
+    options.flame_chart = true;
+    Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(Some(options))))
 }
 
 criterion_group!(
