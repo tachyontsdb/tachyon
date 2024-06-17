@@ -230,6 +230,7 @@ impl<'a> Cursor<'a> {
         Some(())
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<(Timestamp, Value)> {
         if self.current_timestamp > self.end {
             return None;
