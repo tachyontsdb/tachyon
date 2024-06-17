@@ -27,6 +27,7 @@ struct PageInfo {
     data: [u8; PAGE_SIZE],
 }
 
+#[allow(clippy::large_enum_variant)]
 enum Frame {
     Empty,
     Page(PageInfo),
@@ -257,45 +258,49 @@ mod tests {
 
     use super::PageCache;
 
+    use crate::utils::test_utils::*;
+
     #[test]
     fn test_read_whole_file() {
+        set_up_files!(file_paths, "test.ty", "expected.ty");
+
         let mut page_cache = PageCache::new(10);
         let mut model = TimeDataFile::new();
         for i in 0..100000u64 {
             model.write_data_to_file_in_mem(i, i + 10);
         }
-        let file_size = model.write("./tmp/page_cache_read.ty".into());
+        let file_size = model.write(file_paths[0].clone());
         // start the test
-        let file_id = page_cache.register_or_get_file_id(&"./tmp/page_cache_read.ty".into());
+        let file_id = page_cache.register_or_get_file_id(&file_paths[0]);
         assert_eq!(file_id, 0);
 
         let mut buffer = vec![0; file_size];
         page_cache.read(file_id, 0, &mut buffer);
 
-        let mut new_file = File::create("./tmp/page_cache_test.ty").unwrap();
+        let mut new_file = File::create(&file_paths[1]).unwrap();
         new_file.write_all(&buffer);
 
-        let data_file = TimeDataFile::read_data_file("./tmp/page_cache_test.ty".into());
+        let data_file = TimeDataFile::read_data_file(file_paths[1].clone());
 
         assert_eq!(data_file.timestamps.len(), 100000);
         for i in 0..data_file.timestamps.len() {
             assert_eq!(data_file.timestamps[i], i as Timestamp);
             assert_eq!(data_file.values[i], (i + 10) as Value);
         }
-        std::fs::remove_file("./tmp/page_cache_read.ty");
-        std::fs::remove_file("./tmp/page_cache_test.ty");
     }
 
     #[test]
     fn test_read_sequential_whole_file() {
+        set_up_files!(file_paths, "test.ty", "expected.ty");
+
         let mut page_cache = PageCache::new(10);
         let mut model = TimeDataFile::new();
         for i in 0..100000u64 {
             model.write_data_to_file_in_mem(i, i + 10);
         }
-        let file_size = model.write("./tmp/page_cache_seq_read.ty".into());
+        let file_size = model.write(file_paths[0].clone());
         // start the test
-        let file_id = page_cache.register_or_get_file_id(&"./tmp/page_cache_seq_read.ty".into());
+        let file_id = page_cache.register_or_get_file_id(&file_paths[0]);
         assert_eq!(file_id, 0);
 
         let mut seq_read = page_cache.sequential_read(file_id, 0);
@@ -308,17 +313,15 @@ mod tests {
             bytes_read += seq_read.read(&mut buffer[bytes_read..min(bytes_read + 8, file_size)]);
         }
 
-        let mut new_file = File::create("./tmp/page_cache_seq_read_test.ty").unwrap();
+        let mut new_file = File::create(&file_paths[1]).unwrap();
         new_file.write_all(&buffer);
 
-        let data_file = TimeDataFile::read_data_file("./tmp/page_cache_seq_read_test.ty".into());
+        let data_file = TimeDataFile::read_data_file(file_paths[1].clone());
 
         assert_eq!(data_file.timestamps.len(), 100000);
         for i in 0..data_file.timestamps.len() {
             assert_eq!(data_file.timestamps[i], i as Timestamp);
             assert_eq!(data_file.values[i], (i + 10) as Value);
         }
-        std::fs::remove_file("./tmp/page_cache_seq_read.ty");
-        std::fs::remove_file("./tmp/page_cache_seq_read_test.ty");
     }
 }
