@@ -25,7 +25,7 @@ macro_rules! set_up_files {
                 _new_paths[i] = _new_paths[i].clone() + &path;
             }
 
-            let _tmp = TestFile::new(&_new_paths);
+            let _tmp = crate::utils::test_utils::TestFile::new(&_new_paths);
             let $path_var = _tmp.paths.clone();
         };
     }
