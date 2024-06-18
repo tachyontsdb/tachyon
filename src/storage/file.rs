@@ -415,8 +415,6 @@ impl TimeDataFile {
     }
 
     pub fn write_data_to_file_in_mem(&mut self, timestamp: Timestamp, value: Value) {
-        assert!(self.size_of_entries() + size_of::<(Timestamp, Value)>() <= MAX_FILE_SIZE); // TODO: find new metric for max file size
-
         if self.header.count == 0 {
             self.header.first_value = value;
             self.header.min_timestamp = timestamp;
