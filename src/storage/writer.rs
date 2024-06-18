@@ -118,7 +118,7 @@ mod tests {
         let n = (1.5 * MAX_ENTRIES as f32).round() as usize;
         let mut writer = Writer::new("./tmp/db".into());
         let mut entries: Vec<(u64, u64)> = Vec::<(Timestamp, Value)>::with_capacity(n);
-  
+
         for i in 0..n {
             entries.push((i as Timestamp, (i * 1000) as Value));
         }
