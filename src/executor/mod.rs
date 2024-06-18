@@ -3,9 +3,10 @@ use crate::{
     storage::{file::Cursor, page_cache::PageCache},
 };
 use std::{
+    cell::RefCell,
     collections::{HashMap, VecDeque},
     path::PathBuf,
-    sync::Arc,
+    rc::Rc,
 };
 
 #[non_exhaustive]
@@ -16,42 +17,39 @@ pub enum OperationCode {
     Init,
     Halt,
 
-    OpenRead, // { cursor: u64, file_paths_array_idx: u64, start: u64, end: u64 } (returns cursor),
-    CloseRead, // { cursor: u64 },
+    OpenRead,
+    CloseRead,
 
-    Next, // { cursor: u64 },
+    Next,
+    FetchVector,
 
-    // GoPrevEntry, // { cursor: u64 },
-    // GoGreaterTimestampEntry, // Seek { cursor: u64, timestamp: u64 }, (might not need)
-    // FetchScalar, // { cursor: u64, to_register: u64 }
-    FetchVector, // { cursor: u64, to_register_timestamp: u64, to_register_value: u64 },
+    Goto,
+    GotoEq,
+    GotoNeq,
 
-    Goto,    // { address: u64 }
-    GotoEq,  // { address: u64, register_1: u64, register_2: u64 }
-    GotoNeq, // { address: u64, register_1: u64, register_2: u64 }
+    OutputScalar,
+    OutputVector,
 
-    OutputScalar, // { from_register: u64 }
-    OutputVector, // { from_register_timestamp: u64, from_register_value: u64 }
+    LogicalNot,
+    LogicalAnd,
+    LogicalOr,
+    LogicalXor,
+    LogicalShiftLeft,
+    LogicalShiftRight,
 
-    LogicalNot,        // { to_register: u64, from_register: u64 }
-    LogicalAnd,        // { to_register: u64, from_register_1: u64, from_register_2: u64 }
-    LogicalOr,         // { to_register: u64, from_register_1: u64, from_register_2: u64 }
-    LogicalXor,        // { to_register: u64, from_register_1: u64, from_register_2: u64 }
-    LogicalShiftLeft,  // { to_register: u64, from_register_1: u64, from_register_2: u64 }
-    LogicalShiftRight, // { to_register: u64, from_register_1: u64, from_register_2: u64 }
-
-    ArithmeticAdd, // { to_register: u64, from_register_1: u64, from_register_2: u64 }
-    ArithmeticAddImmediate, // { to_register: u64, from_register: u64, immediate_value: u64 }
-    ArithmeticSubtract, // { to_register: u64, from_register_1: u64, from_register_2: u64 }
-    ArithmeticSubtractImmediate, // { to_register: u64, from_register: u64, immediate_value: u64 }
-    ArithmeticMultiply, // { to_register: u64, from_register_1: u64, from_register_2: u64 }
-    ArithmeticMultiplyImmediate, // { to_register: u64, from_register: u64, immediate_value: u64 }
-    ArithmeticDivide, // { to_register: u64, from_register_1: u64, from_register_2: u64 }
-    ArithmeticDivideImmediate, // { to_register: u64, from_register: u64, immediate_value: u64 }
-    ArithmeticRemainder, // { to_register: u64, from_register_1: u64, from_register_2: u64 }
-    ArithmeticRemainderImmediate, // { to_register: u64, from_register: u64, immediate_value: u64 }
+    ArithmeticAdd,
+    ArithmeticAddImmediate,
+    ArithmeticSubtract,
+    ArithmeticSubtractImmediate,
+    ArithmeticMultiply,
+    ArithmeticMultiplyImmediate,
+    ArithmeticDivide,
+    ArithmeticDivideImmediate,
+    ArithmeticRemainder,
+    ArithmeticRemainderImmediate,
 }
 
+const NUM_EXPECTED_INITIAL_CURSORS: usize = 10;
 const NUM_REGS: usize = 10;
 
 pub enum OutputValue {
@@ -59,54 +57,84 @@ pub enum OutputValue {
     Vector((Timestamp, Value)),
 }
 
-pub struct Context<'a> {
+pub struct Context {
     pc: usize,
     regs: [u64; NUM_REGS],
-    file_paths_array: Arc<[Arc<[PathBuf]>]>,
-    cursors: HashMap<usize, Cursor<'a>>,
+
+    file_paths_array: Rc<[Rc<[PathBuf]>]>,
+    cursors: Vec<Option<Cursor>>,
+    page_cache: Rc<RefCell<PageCache>>,
+
     outputs: VecDeque<OutputValue>,
-    page_cache: Arc<PageCache>,
 }
 
-impl<'a> Context<'a> {
-    pub fn new(file_paths_array: Arc<[Arc<[PathBuf]>]>, page_cache: Arc<PageCache>) -> Self {
+impl Context {
+    pub fn new(file_paths_array: Rc<[Rc<[PathBuf]>]>, page_cache: Rc<RefCell<PageCache>>) -> Self {
         Self {
             pc: 0,
             regs: [0x00u64; NUM_REGS],
             file_paths_array,
-            cursors: HashMap::new(),
+            cursors: Vec::with_capacity(NUM_EXPECTED_INITIAL_CURSORS),
             outputs: VecDeque::new(),
             page_cache,
         }
     }
 
-    fn open_read(&mut self, cursor_idx: u64, file_paths_array_idx: u64, start: u64, end: u64) {
-        if self.cursors.contains_key(&(cursor_idx as usize)) {
+    fn open_read(
+        &mut self,
+        cursor_idx: u64,
+        file_paths_array_idx: u64,
+        start: Timestamp,
+        end: Timestamp,
+    ) {
+        if cursor_idx as usize > self.cursors.len() {
+            self.cursors
+                .reserve(cursor_idx as usize - self.cursors.len());
+            for i in self.cursors.len()..cursor_idx as usize {
+                self.cursors.push(None);
+            }
+        }
+
+        if self.cursors[cursor_idx as usize].is_some() {
             panic!("Cursor key already used!");
         }
 
-        // let cursor = Cursor::<'a>::new(
-        //     self.file_paths_array[file_paths_array_idx as usize].clone(),
-        //     start,
-        //     end,
-        //     self.page_cache,
-        // )
-        // .unwrap();
-        // self.cursors.insert(cursor_idx as usize, cursor);
-        todo!()
+        self.cursors.push(Some(
+            Cursor::new(
+                self.file_paths_array[file_paths_array_idx as usize].clone(),
+                start,
+                end,
+                self.page_cache.clone(),
+            )
+            .unwrap(),
+        ));
     }
 
     fn close_read(&mut self, cursor_idx: u64) {
-        self.cursors.remove(&(cursor_idx as usize));
+        self.cursors[cursor_idx as usize] = None;
     }
 
-    fn next(&mut self, cursor_idx: u64) {
-        self.cursors.get_mut(&(cursor_idx as usize)).unwrap().next();
+    fn next(&mut self, cursor_idx: u64) -> bool {
+        self.cursors[cursor_idx as usize]
+            .as_mut()
+            .unwrap()
+            .next()
+            .is_some()
     }
 
     fn fetch_vector(&mut self, cursor_idx: u64) -> (Timestamp, Value) {
-        self.cursors[&(cursor_idx as usize)].fetch()
+        self.cursors[cursor_idx as usize].as_ref().unwrap().fetch()
     }
+
+    pub fn get_output(&mut self) -> Option<OutputValue> {
+        self.outputs.pop_front()
+    }
+}
+
+fn read_u64_pc(context: &mut Context, buffer: &[u8]) -> u64 {
+    let ret = u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
+    context.pc += 8;
+    ret
 }
 
 pub fn execute(mut context: Context, buffer: &[u8]) {
@@ -123,49 +151,30 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
             }
 
             OperationCode::OpenRead => {
-                let cursor_idx =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-                let file_paths_array_idx =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-                let start = Timestamp::from_le_bytes(
-                    buffer[context.pc..(context.pc + 8)].try_into().unwrap(),
-                );
-                context.pc += 8;
-                let end = Timestamp::from_le_bytes(
-                    buffer[context.pc..(context.pc + 8)].try_into().unwrap(),
-                );
-                context.pc += 8;
+                let cursor_idx = read_u64_pc(&mut context, buffer);
+                let file_paths_array_idx = read_u64_pc(&mut context, buffer);
+                let start = read_u64_pc(&mut context, buffer);
+                let end = read_u64_pc(&mut context, buffer);
 
                 context.open_read(cursor_idx, file_paths_array_idx, start, end);
             }
             OperationCode::CloseRead => {
-                let cursor_idx =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-
+                let cursor_idx = read_u64_pc(&mut context, buffer);
                 context.close_read(cursor_idx);
             }
 
             OperationCode::Next => {
-                let cursor_idx =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
+                let cursor_idx = read_u64_pc(&mut context, buffer);
+                let goto_success = read_u64_pc(&mut context, buffer);
 
-                context.next(cursor_idx);
+                if context.next(cursor_idx) {
+                    context.pc = goto_success as usize;
+                }
             }
             OperationCode::FetchVector => {
-                let cursor_idx =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-                let to_register_timestamp =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-                let to_register_value = Timestamp::from_le_bytes(
-                    buffer[context.pc..(context.pc + 8)].try_into().unwrap(),
-                );
-                context.pc += 8;
+                let cursor_idx = read_u64_pc(&mut context, buffer);
+                let to_register_timestamp = read_u64_pc(&mut context, buffer);
+                let to_register_value = read_u64_pc(&mut context, buffer);
 
                 let (timestamp, value) = context.fetch_vector(cursor_idx);
                 context.regs[to_register_timestamp as usize] = timestamp;
@@ -173,22 +182,13 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
             }
 
             OperationCode::Goto => {
-                let address =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-
+                let address = read_u64_pc(&mut context, buffer);
                 context.pc = address as usize;
             }
             OperationCode::GotoEq => {
-                let address =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-                let register1 =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-                let register2 =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
+                let address = read_u64_pc(&mut context, buffer);
+                let register1 = read_u64_pc(&mut context, buffer);
+                let register2 = read_u64_pc(&mut context, buffer);
 
                 let value1 = context.regs[register1 as usize];
                 let value2 = context.regs[register2 as usize];
@@ -197,15 +197,9 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
                 }
             }
             OperationCode::GotoNeq => {
-                let address =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-                let register1 =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-                let register2 =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
+                let address = read_u64_pc(&mut context, buffer);
+                let register1 = read_u64_pc(&mut context, buffer);
+                let register2 = read_u64_pc(&mut context, buffer);
 
                 let value1 = context.regs[register1 as usize];
                 let value2 = context.regs[register2 as usize];
@@ -215,21 +209,14 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
             }
 
             OperationCode::OutputScalar => {
-                let from_register =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-
+                let from_register = read_u64_pc(&mut context, buffer);
                 context
                     .outputs
                     .push_back(OutputValue::Scalar(context.regs[from_register as usize]));
             }
             OperationCode::OutputVector => {
-                let from_register_timestamp =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
-                let from_register_value =
-                    u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-                context.pc += 8;
+                let from_register_timestamp = read_u64_pc(&mut context, buffer);
+                let from_register_value = read_u64_pc(&mut context, buffer);
 
                 context.outputs.push_back(OutputValue::Vector((
                     context.regs[from_register_timestamp as usize],
@@ -258,4 +245,7 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    #[test]
+    fn read() {}
+}

@@ -1,5 +1,8 @@
+use super::hash_map::IDLookup;
 use core::num;
+use rustc_hash::FxHashMap;
 use std::{
+    cell::RefCell,
     collections::HashMap,
     fs::File,
     hash::{BuildHasherDefault, Hash, Hasher},
@@ -8,11 +11,8 @@ use std::{
     mem::MaybeUninit,
     os::unix::fs::FileExt,
     path::PathBuf,
+    rc::Rc,
 };
-
-use rustc_hash::FxHashMap;
-
-use super::hash_map::IDLookup;
 
 pub type FileId = u32;
 type PageId = u32;
@@ -66,23 +66,27 @@ pub struct PageCache {
     root_free: usize,
 }
 
-pub struct SeqPageRead<'a> {
+pub struct SeqPageRead {
     file_id: FileId,
     cur_page_id: PageId,
     frame_id: FrameId,
-    pub page_cache: &'a mut PageCache,
+    pub page_cache: Rc<RefCell<PageCache>>,
     offset: usize,
 }
 
-impl<'a> SeqPageRead<'a> {
+impl SeqPageRead {
     pub fn reset(&mut self, file_id: FileId, offset: usize) {
         self.file_id = file_id;
         self.offset = offset;
         self.cur_page_id = (offset / PAGE_SIZE) as PageId;
-        self.frame_id = self.page_cache.load_page(file_id, self.cur_page_id);
+        self.frame_id = self
+            .page_cache
+            .borrow_mut()
+            .load_page(file_id, self.cur_page_id);
     }
 
     pub fn read(&mut self, buffer: &mut [u8]) -> usize {
+        let mut page_cache = self.page_cache.borrow_mut();
         let mut bytes_copied = 0;
 
         while (bytes_copied < buffer.len()) {
@@ -91,20 +95,20 @@ impl<'a> SeqPageRead<'a> {
                 file_id,
                 page_id,
                 data,
-            }) = self.page_cache.frames[self.frame_id]
+            }) = page_cache.frames[self.frame_id]
             {
                 if self.file_id != file_id || self.cur_page_id != page_id {
-                    self.frame_id = self.page_cache.load_page(self.file_id, self.cur_page_id);
+                    self.frame_id = page_cache.load_page(self.file_id, self.cur_page_id);
                 }
             } else {
-                self.frame_id = self.page_cache.load_page(self.file_id, self.cur_page_id);
+                self.frame_id = page_cache.load_page(self.file_id, self.cur_page_id);
             }
 
             if let Frame::Page(PageInfo {
                 file_id,
                 page_id,
                 data,
-            }) = &mut self.page_cache.frames[self.frame_id]
+            }) = &mut page_cache.frames[self.frame_id]
             {
                 let num_bytes =
                     (PAGE_SIZE - (self.offset % PAGE_SIZE)).min(buffer.len() - bytes_copied);
@@ -158,17 +162,6 @@ impl PageCache {
         self.cur_file_id = self.cur_file_id.wrapping_add(1);
 
         self.cur_file_id.wrapping_sub(1)
-    }
-
-    pub fn sequential_read(&mut self, file_id: FileId, mut start_offset: usize) -> SeqPageRead {
-        let page_id = (start_offset / PAGE_SIZE) as PageId;
-        SeqPageRead {
-            file_id,
-            cur_page_id: page_id,
-            frame_id: self.load_page(file_id, page_id),
-            page_cache: self,
-            offset: start_offset,
-        }
     }
 
     fn load_page(&mut self, file_id: FileId, page_id: PageId) -> FrameId {
@@ -247,18 +240,32 @@ impl PageCache {
     }
 }
 
+pub fn page_cache_sequential_read(
+    page_cache: Rc<RefCell<PageCache>>,
+    file_id: FileId,
+    mut start_offset: usize,
+) -> SeqPageRead {
+    let page_id = (start_offset / PAGE_SIZE) as PageId;
+    let frame_id = page_cache.borrow_mut().load_page(file_id, page_id);
+
+    SeqPageRead {
+        file_id,
+        cur_page_id: page_id,
+        frame_id,
+        page_cache,
+        offset: start_offset,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{cmp::min, fs::File, io::Write, path::PathBuf, str::FromStr};
-
+    use super::PageCache;
+    use crate::utils::test_utils::*;
     use crate::{
         common::{Timestamp, Value},
-        storage::file::TimeDataFile,
+        storage::{file::TimeDataFile, page_cache::page_cache_sequential_read},
     };
-
-    use super::PageCache;
-
-    use crate::utils::test_utils::*;
+    use std::{cell::RefCell, cmp::min, fs::File, io::Write, path::PathBuf, rc::Rc, str::FromStr};
 
     #[test]
     fn test_read_whole_file() {
@@ -303,7 +310,8 @@ mod tests {
         let file_id = page_cache.register_or_get_file_id(&file_paths[0]);
         assert_eq!(file_id, 0);
 
-        let mut seq_read = page_cache.sequential_read(file_id, 0);
+        let mut seq_read =
+            page_cache_sequential_read(Rc::new(RefCell::new(page_cache)), file_id, 0);
 
         let mut buffer = vec![0; file_size];
         let mut bytes_read = 0;
