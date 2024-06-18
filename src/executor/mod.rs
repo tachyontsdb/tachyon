@@ -95,7 +95,7 @@ impl Context {
             }
         }
 
-        if self.cursors[cursor_idx as usize].is_some() {
+        if self.cursors.len() > cursor_idx as usize && self.cursors[cursor_idx as usize].is_some() {
             panic!("Cursor key already used!");
         }
 
@@ -137,7 +137,7 @@ fn read_u64_pc(context: &mut Context, buffer: &[u8]) -> u64 {
     ret
 }
 
-pub fn execute(mut context: Context, buffer: &[u8]) {
+pub fn execute(context: &mut Context, buffer: &[u8]) {
     while context.pc < buffer.len() {
         let opcode: OperationCode = unsafe { std::mem::transmute(buffer[context.pc]) };
         context.pc += 1;
@@ -147,34 +147,34 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
 
             OperationCode::Init => {}
             OperationCode::Halt => {
-                return;
+                break;
             }
 
             OperationCode::OpenRead => {
-                let cursor_idx = read_u64_pc(&mut context, buffer);
-                let file_paths_array_idx = read_u64_pc(&mut context, buffer);
-                let start = read_u64_pc(&mut context, buffer);
-                let end = read_u64_pc(&mut context, buffer);
+                let cursor_idx = read_u64_pc(context, buffer);
+                let file_paths_array_idx = read_u64_pc(context, buffer);
+                let start = read_u64_pc(context, buffer);
+                let end = read_u64_pc(context, buffer);
 
                 context.open_read(cursor_idx, file_paths_array_idx, start, end);
             }
             OperationCode::CloseRead => {
-                let cursor_idx = read_u64_pc(&mut context, buffer);
+                let cursor_idx = read_u64_pc(context, buffer);
                 context.close_read(cursor_idx);
             }
 
             OperationCode::Next => {
-                let cursor_idx = read_u64_pc(&mut context, buffer);
-                let goto_success = read_u64_pc(&mut context, buffer);
+                let cursor_idx = read_u64_pc(context, buffer);
+                let goto_success = read_u64_pc(context, buffer);
 
                 if context.next(cursor_idx) {
                     context.pc = goto_success as usize;
                 }
             }
             OperationCode::FetchVector => {
-                let cursor_idx = read_u64_pc(&mut context, buffer);
-                let to_register_timestamp = read_u64_pc(&mut context, buffer);
-                let to_register_value = read_u64_pc(&mut context, buffer);
+                let cursor_idx = read_u64_pc(context, buffer);
+                let to_register_timestamp = read_u64_pc(context, buffer);
+                let to_register_value = read_u64_pc(context, buffer);
 
                 let (timestamp, value) = context.fetch_vector(cursor_idx);
                 context.regs[to_register_timestamp as usize] = timestamp;
@@ -182,13 +182,13 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
             }
 
             OperationCode::Goto => {
-                let address = read_u64_pc(&mut context, buffer);
+                let address = read_u64_pc(context, buffer);
                 context.pc = address as usize;
             }
             OperationCode::GotoEq => {
-                let address = read_u64_pc(&mut context, buffer);
-                let register1 = read_u64_pc(&mut context, buffer);
-                let register2 = read_u64_pc(&mut context, buffer);
+                let address = read_u64_pc(context, buffer);
+                let register1 = read_u64_pc(context, buffer);
+                let register2 = read_u64_pc(context, buffer);
 
                 let value1 = context.regs[register1 as usize];
                 let value2 = context.regs[register2 as usize];
@@ -197,9 +197,9 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
                 }
             }
             OperationCode::GotoNeq => {
-                let address = read_u64_pc(&mut context, buffer);
-                let register1 = read_u64_pc(&mut context, buffer);
-                let register2 = read_u64_pc(&mut context, buffer);
+                let address = read_u64_pc(context, buffer);
+                let register1 = read_u64_pc(context, buffer);
+                let register2 = read_u64_pc(context, buffer);
 
                 let value1 = context.regs[register1 as usize];
                 let value2 = context.regs[register2 as usize];
@@ -209,14 +209,14 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
             }
 
             OperationCode::OutputScalar => {
-                let from_register = read_u64_pc(&mut context, buffer);
+                let from_register = read_u64_pc(context, buffer);
                 context
                     .outputs
                     .push_back(OutputValue::Scalar(context.regs[from_register as usize]));
             }
             OperationCode::OutputVector => {
-                let from_register_timestamp = read_u64_pc(&mut context, buffer);
-                let from_register_value = read_u64_pc(&mut context, buffer);
+                let from_register_timestamp = read_u64_pc(context, buffer);
+                let from_register_value = read_u64_pc(context, buffer);
 
                 context.outputs.push_back(OutputValue::Vector((
                     context.regs[from_register_timestamp as usize],
@@ -245,7 +245,4 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn read() {}
-}
+mod tests {}
