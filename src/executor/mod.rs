@@ -88,6 +88,8 @@ impl Context {
         end: Timestamp,
     ) {
         if cursor_idx as usize > self.cursors.len() {
+            self.cursors
+                .reserve(cursor_idx as usize - self.cursors.len());
             for i in self.cursors.len()..cursor_idx as usize {
                 self.cursors.push(None);
             }
