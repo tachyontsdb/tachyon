@@ -13,37 +13,28 @@ impl Writer {
     pub fn new(root: PathBuf) -> Self {
         Writer {
             open_data_files: HashMap::new(),
-            root: root,
+            root,
         }
     }
 
     pub fn write(&mut self, stream_id: u64, ts: Timestamp, v: Value) {
-        if !self.open_data_files.contains_key(&stream_id) {
-            self.open_data_files.insert(stream_id, TimeDataFile::new());
-        }
+        let file = self.open_data_files.entry(stream_id).or_default();
 
-        if let Some(file) = self.open_data_files.get_mut(&stream_id) {
-            file.write_data_to_file_in_mem(ts, v);
-            if file.size_of_entries() >= MAX_FILE_SIZE {
-                file.write(self.root.join(format!("{}", stream_id)));
-                self.open_data_files.remove_entry(&stream_id);
-            }
-        } else {
-            panic!("No file open in memory associated with {stream_id}")
+        file.write_data_to_file_in_mem(ts, v);
+        if file.size_of_entries() >= MAX_FILE_SIZE {
+            file.write(self.root.join(format!("{}", stream_id)));
+            self.open_data_files.remove_entry(&stream_id);
         }
     }
 
     pub fn batch_write(&mut self, stream_id: u64, batch: &[(Timestamp, Value)]) {
         let mut bytes_written: usize = 0;
-        let n_bytes = batch.len() * size_of::<(Timestamp, Value)>();
+        let n_bytes = std::mem::size_of_val(batch);
         let mut i = 0;
 
         while bytes_written != n_bytes {
-            if !self.open_data_files.contains_key(&stream_id) {
-                self.open_data_files.insert(stream_id, TimeDataFile::new());
-            }
+            let file = self.open_data_files.entry(stream_id).or_default();
 
-            let mut file = self.open_data_files.get_mut(&stream_id).unwrap();
             bytes_written += file.write_batch_data_to_file_in_mem(&batch[i..]);
             i = bytes_written / size_of::<(Timestamp, Value)>();
 

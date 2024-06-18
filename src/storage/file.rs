@@ -444,18 +444,15 @@ impl TimeDataFile {
         let space = MAX_FILE_SIZE - original_size;
         let n = usize::min(space / size_of::<(Timestamp, Value)>(), batch.len());
 
-        for i in 0..n {
-            self.write_data_to_file_in_mem(batch[i].0, batch[i].1);
+        for pair in batch.iter().take(n) {
+            self.write_data_to_file_in_mem(pair.0, pair.1);
         }
 
-        let bytes_written = self.size_of_entries() - original_size;
-        bytes_written
+        self.size_of_entries() - original_size
     }
 
     pub fn size_of_entries(&self) -> usize {
-        let size =
-            size_of::<Timestamp>() * self.timestamps.len() + size_of::<Value>() * self.values.len();
-        size
+        size_of::<Timestamp>() * self.timestamps.len() + size_of::<Value>() * self.values.len()
     }
 }
 
