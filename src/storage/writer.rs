@@ -32,6 +32,27 @@ impl Writer {
             panic!("No file open in memory associated with {stream_id}")
         }
     }
+
+    pub fn batch_write(&mut self, stream_id: u64, batch: &[(Timestamp, Value)]) {
+        let mut bytes_written: usize = 0;
+        let n_bytes = batch.len() * size_of::<(Timestamp, Value)>();
+        let mut i = 0;
+
+        while bytes_written != n_bytes {
+            if !self.open_data_files.contains_key(&stream_id) {
+                self.open_data_files.insert(stream_id, TimeDataFile::new());
+            }
+
+            let mut file = self.open_data_files.get_mut(&stream_id).unwrap();
+            bytes_written += file.write_batch_data_to_file_in_mem(&batch[i..]);
+            i = bytes_written / size_of::<(Timestamp, Value)>();
+
+            if file.size_of_entries() >= MAX_FILE_SIZE {
+                file.write(self.root.join(format!("{}", stream_id)));
+                self.open_data_files.remove_entry(&stream_id);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -84,6 +105,37 @@ mod tests {
             for stream_id in stream_ids {
                 writer.write(stream_id.into(), i as Timestamp, (i * 1000) as Value);
             }
+        }
+
+        clean(&stream_ids);
+    }
+
+    #[test]
+    fn test_batch_write_single_batch_in_two_files() {
+        let stream_ids = [0];
+        init(&stream_ids);
+
+        let n = (1.5 * MAX_ENTRIES as f32).round() as usize;
+        let mut writer = Writer::new("./tmp/db".into());
+        let mut entries: Vec<(u64, u64)> = Vec::<(Timestamp, Value)>::with_capacity(n);
+  
+        for i in 0..n {
+            entries.push((i as Timestamp, (i * 1000) as Value));
+        }
+
+        for stream_id in stream_ids {
+            writer.batch_write(stream_id.into(), &entries);
+        }
+
+        let old_n = n;
+        let n = (0.5 * MAX_ENTRIES as f32).round() as usize;
+        let mut entries: Vec<(u64, u64)> = Vec::<(Timestamp, Value)>::with_capacity(n);
+        for i in 0..n {
+            entries.push(((old_n + i) as Timestamp, ((old_n + i) * 1000) as Value));
+        }
+
+        for stream_id in stream_ids {
+            writer.batch_write(stream_id.into(), &entries);
         }
 
         clean(&stream_ids);

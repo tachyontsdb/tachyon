@@ -415,6 +415,8 @@ impl TimeDataFile {
     }
 
     pub fn write_data_to_file_in_mem(&mut self, timestamp: Timestamp, value: Value) {
+        assert!(self.size_of_entries() + size_of::<(Timestamp, Value)>() <= MAX_FILE_SIZE); // TODO: find new metric for max file size
+
         if self.header.count == 0 {
             self.header.first_value = value;
             self.header.min_timestamp = timestamp;
@@ -434,6 +436,20 @@ impl TimeDataFile {
 
         self.timestamps.push(timestamp);
         self.values.push(value);
+    }
+
+    // Returns the number of bytes written in memory
+    pub fn write_batch_data_to_file_in_mem(&mut self, batch: &[(Timestamp, Value)]) -> usize {
+        let original_size = self.size_of_entries();
+        let space = MAX_FILE_SIZE - original_size;
+        let n =  usize::min( space / size_of::<(Timestamp, Value)>(), batch.len() );
+
+        for i in 0..n {
+            self.write_data_to_file_in_mem( batch[i].0, batch[i].1);
+        }
+        
+        let bytes_written = self.size_of_entries() - original_size;
+        bytes_written
     }
 
     pub fn size_of_entries(&self) -> usize {
