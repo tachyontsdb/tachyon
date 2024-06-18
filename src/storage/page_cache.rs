@@ -70,7 +70,7 @@ pub struct SeqPageRead<'a> {
     file_id: FileId,
     cur_page_id: PageId,
     frame_id: FrameId,
-    pub page_cache: &'a mut PageCache,
+    page_cache: &'a mut PageCache,
     offset: usize,
 }
 

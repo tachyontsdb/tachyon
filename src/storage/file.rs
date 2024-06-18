@@ -6,7 +6,7 @@ use std::{
     io::{Error, Read, Seek, Write},
     mem::size_of,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    rc::Rc,
 };
 
 const MAGIC_SIZE: usize = 4;
@@ -122,7 +122,7 @@ impl Header {
     }
 }
 
-pub struct Cursor<'a> {
+pub struct Cursor {
     file_id: FileId,
     file_index: usize,
     header: Header,
@@ -135,7 +135,7 @@ pub struct Cursor<'a> {
 
     // length byte
     cur_length_byte: u8,
-    file_paths: Arc<[PathBuf]>,
+    file_paths: Rc<[PathBuf]>,
 
     seq_reader: SeqPageRead<'a>,
 
