@@ -1,4 +1,4 @@
-use std::{collections::HashMap, mem::size_of, path::PathBuf, path::Path};
+use std::{collections::HashMap, mem::size_of, path::Path, path::PathBuf};
 
 use crate::common::{Timestamp, Value};
 
