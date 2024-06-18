@@ -89,6 +89,7 @@ impl Drop for TestFile {
     fn drop(&mut self) {
         for path in &self.paths {
             std::fs::remove_file(path);
+            std::fs::remove_file(path);
         }
     }
 }

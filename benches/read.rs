@@ -6,7 +6,7 @@ use pprof::{
 use std::sync::Arc;
 use tachyon::storage::{file::*, page_cache::PageCache};
 
-const NUM_ITEMS: u64 = 10000000;
+const NUM_ITEMS: u64 = 100000;
 
 fn bench_read_sequential_timestamps(start: u64, end: u64, page_cache: &mut PageCache) -> u64 {
     let file_paths = Arc::new(["./tmp/bench_sequential_read.ty".into()]);
@@ -23,10 +23,10 @@ fn criterion_benchmark(c: &mut Criterion) {
     // setup tachyon benchmark
     let mut model = TimeDataFile::new();
     for i in 0..NUM_ITEMS {
-        model.write_data_to_file_in_mem(i, i + (i + 100));
+        model.write_data_to_file_in_mem(i, i + (i % 100));
     }
     model.write("./tmp/bench_sequential_read.ty".into());
-    let mut page_cache = PageCache::new(1000);
+    let mut page_cache = PageCache::new(512);
     c.bench_function(&format!("tachyon: read sequential 0-{}", NUM_ITEMS), |b| {
         b.iter(|| bench_read_sequential_timestamps(0, NUM_ITEMS, &mut page_cache))
     });
