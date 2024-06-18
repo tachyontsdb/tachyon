@@ -1,6 +1,8 @@
 use super::page_cache::{self, FileId, PageCache, SeqPageRead};
 use crate::common::{Timestamp, Value};
 use crate::storage::compression::CompressionEngine;
+use crate::storage::page_cache::page_cache_sequential_read;
+use std::cell::RefCell;
 use std::{
     fs::File,
     io::{Error, Read, Seek, Write},
@@ -137,14 +139,14 @@ pub struct Cursor {
     cur_length_byte: u8,
     file_paths: Rc<[PathBuf]>,
 
-    seq_reader: SeqPageRead<'a>,
+    seq_reader: SeqPageRead,
 
     next_timestamp: Timestamp,
     next_value: Value,
 }
 
 // TODO: Remove this
-impl<'a> Iterator for Cursor<'a> {
+impl Iterator for Cursor {
     type Item = (Timestamp, Value);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -152,19 +154,23 @@ impl<'a> Iterator for Cursor<'a> {
     }
 }
 
-impl<'a> Cursor<'a> {
+impl Cursor {
     // pre: file_paths[0] contains at least one timestamp t such that start <= t
     pub fn new(
-        file_paths: Arc<[PathBuf]>,
+        file_paths: Rc<[PathBuf]>,
         start: Timestamp,
         end: Timestamp,
-        page_cache: &'a mut PageCache,
+        page_cache: Rc<RefCell<PageCache>>,
     ) -> Result<Self, Error> {
         assert!(file_paths.len() > 0);
         assert!(start <= end);
 
-        let file_id = page_cache.register_or_get_file_id(&file_paths[0]);
-        let header = Header::parse(file_id, page_cache);
+        let mut page_cache_ref = page_cache.borrow_mut();
+
+        let file_id = page_cache_ref.register_or_get_file_id(&file_paths[0]);
+        let header = Header::parse(file_id, &mut page_cache_ref);
+
+        drop(page_cache_ref);
 
         let mut cursor = Self {
             file_id,
@@ -178,7 +184,7 @@ impl<'a> Cursor<'a> {
             cur_length_byte: 0,
             file_paths,
             last_deltas: (0, 0),
-            seq_reader: page_cache.sequential_read(file_id, MAGIC_SIZE + HEADER_SIZE),
+            seq_reader: page_cache_sequential_read(page_cache, file_id, MAGIC_SIZE + HEADER_SIZE),
 
             next_timestamp: 0,
             next_value: 0,
@@ -211,8 +217,9 @@ impl<'a> Cursor<'a> {
         self.file_id = self
             .seq_reader
             .page_cache
+            .borrow_mut()
             .register_or_get_file_id(&self.file_paths[self.file_index]);
-        self.header = Header::parse(self.file_id, self.seq_reader.page_cache);
+        self.header = Header::parse(self.file_id, &mut self.seq_reader.page_cache.borrow_mut());
         self.offset = MAGIC_SIZE + HEADER_SIZE;
 
         self.current_timestamp = self.header.min_timestamp;
@@ -342,7 +349,13 @@ impl TimeDataFile {
     pub fn read_data_file(path: PathBuf) -> Self {
         let mut page_cache = PageCache::new(100);
 
-        let mut cursor = Cursor::new(Arc::new([path]), 0, u64::MAX, &mut page_cache).unwrap();
+        let mut cursor = Cursor::new(
+            Rc::new([path]),
+            0,
+            u64::MAX,
+            Rc::new(RefCell::new(page_cache)),
+        )
+        .unwrap();
 
         let mut timestamps = Vec::new();
         let mut values = Vec::new();
@@ -467,7 +480,12 @@ mod tests {
         model.write(paths[0].clone());
 
         let mut page_cache = PageCache::new(10);
-        let cursor = Cursor::new(Arc::new([paths[0].clone()]), 0, 100, &mut page_cache);
+        let cursor = Cursor::new(
+            Rc::new([paths[0].clone()]),
+            0,
+            100,
+            Rc::new(RefCell::new(page_cache)),
+        );
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
@@ -490,8 +508,13 @@ mod tests {
 
         let mut page_cache = PageCache::new(10);
         page_cache.register_or_get_file_id(&paths[0]);
-        let mut cursor =
-            Cursor::new(Arc::new([paths[0].clone()]), 0, 100, &mut page_cache).unwrap();
+        let mut cursor = Cursor::new(
+            Rc::new([paths[0].clone()]),
+            0,
+            100,
+            Rc::new(RefCell::new(page_cache)),
+        )
+        .unwrap();
 
         let mut i = 0;
         loop {
@@ -528,10 +551,10 @@ mod tests {
             values.append(&mut local_values);
         }
 
-        let file_paths_arc: Arc<[PathBuf]> = file_paths.into();
+        let file_paths_arc: Rc<[PathBuf]> = file_paths.into();
         let mut page_cache = PageCache::new(10);
 
-        let cursor = Cursor::new(file_paths_arc, 0, 100, &mut page_cache);
+        let cursor = Cursor::new(file_paths_arc, 0, 100, Rc::new(RefCell::new(page_cache)));
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
@@ -572,7 +595,7 @@ mod tests {
 
         let file_paths_arc = file_paths.into();
         let mut page_cache = PageCache::new(10);
-        let cursor = Cursor::new(file_paths_arc, 5, 23, &mut page_cache);
+        let cursor = Cursor::new(file_paths_arc, 5, 23, Rc::new(RefCell::new(page_cache)));
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
@@ -604,7 +627,8 @@ mod tests {
         generate_ty_file(paths[0].clone(), &timestamps, &values);
 
         let mut page_cache = PageCache::new(100);
-        let mut cursor = Cursor::new(paths.into(), 1, 100000, &mut page_cache).unwrap();
+        let mut cursor =
+            Cursor::new(paths.into(), 1, 100000, Rc::new(RefCell::new(page_cache))).unwrap();
 
         let mut i = 0;
         loop {
@@ -630,7 +654,7 @@ mod tests {
             paths.into(),
             1,
             timestamps[timestamps.len() - 1],
-            &mut page_cache,
+            Rc::new(RefCell::new(page_cache)),
         )
         .unwrap();
 
@@ -668,7 +692,7 @@ mod tests {
             paths.into(),
             1,
             timestamps[timestamps.len() - 1],
-            &mut page_cache,
+            Rc::new(RefCell::new(page_cache)),
         )
         .unwrap();
 

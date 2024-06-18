@@ -49,6 +49,7 @@ pub enum OperationCode {
     ArithmeticRemainderImmediate,
 }
 
+const NUM_EXPECTED_INITIAL_CURSORS: usize = 10;
 const NUM_REGS: usize = 10;
 
 pub enum OutputValue {
@@ -59,10 +60,12 @@ pub enum OutputValue {
 pub struct Context {
     pc: usize,
     regs: [u64; NUM_REGS],
+
     file_paths_array: Rc<[Rc<[PathBuf]>]>,
-    cursors: HashMap<usize, Cursor>,
-    outputs: VecDeque<OutputValue>,
+    cursors: Vec<Option<Cursor>>,
     page_cache: Rc<RefCell<PageCache>>,
+
+    outputs: VecDeque<OutputValue>,
 }
 
 impl Context {
@@ -71,30 +74,58 @@ impl Context {
             pc: 0,
             regs: [0x00u64; NUM_REGS],
             file_paths_array,
-            cursors: HashMap::new(),
+            cursors: Vec::with_capacity(NUM_EXPECTED_INITIAL_CURSORS),
             outputs: VecDeque::new(),
             page_cache,
         }
     }
 
-    fn open_read(&mut self, cursor_idx: u64, file_paths_array_idx: u64, start: Timestamp, end: Timestamp) {
-        if self.cursors.contains_key(&(cursor_idx as usize)) {
+    fn open_read(
+        &mut self,
+        cursor_idx: u64,
+        file_paths_array_idx: u64,
+        start: Timestamp,
+        end: Timestamp,
+    ) {
+        if cursor_idx as usize > self.cursors.len() {
+            for i in self.cursors.len()..cursor_idx as usize {
+                self.cursors.push(None);
+            }
+        }
+
+        if self.cursors[cursor_idx as usize].is_some() {
             panic!("Cursor key already used!");
         }
 
-        self.cursors.insert(cursor_idx as usize, Cursor::new(self.file_paths_array[file_paths_array_idx as usize], start, end, self.page_cache).unwrap());
+        self.cursors.push(Some(
+            Cursor::new(
+                self.file_paths_array[file_paths_array_idx as usize].clone(),
+                start,
+                end,
+                self.page_cache.clone(),
+            )
+            .unwrap(),
+        ));
     }
 
     fn close_read(&mut self, cursor_idx: u64) {
-        self.cursors.remove(&(cursor_idx as usize));
+        self.cursors[cursor_idx as usize] = None;
     }
 
-    fn next(&mut self, cursor_idx: u64) {
-        self.cursors.get_mut(&(cursor_idx as usize)).unwrap().next();
+    fn next(&mut self, cursor_idx: u64) -> bool {
+        self.cursors[cursor_idx as usize]
+            .as_mut()
+            .unwrap()
+            .next()
+            .is_some()
     }
 
     fn fetch_vector(&mut self, cursor_idx: u64) -> (Timestamp, Value) {
-        self.cursors[&(cursor_idx as usize)].fetch()
+        self.cursors[cursor_idx as usize].as_ref().unwrap().fetch()
+    }
+
+    pub fn get_output(&mut self) -> Option<OutputValue> {
+        self.outputs.pop_front()
     }
 }
 
@@ -132,7 +163,11 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
 
             OperationCode::Next => {
                 let cursor_idx = read_u64_pc(&mut context, buffer);
-                context.next(cursor_idx);
+                let goto_success = read_u64_pc(&mut context, buffer);
+
+                if context.next(cursor_idx) {
+                    context.pc = goto_success as usize;
+                }
             }
             OperationCode::FetchVector => {
                 let cursor_idx = read_u64_pc(&mut context, buffer);
@@ -210,7 +245,5 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn read() {
-        let context = Context::new()
-    }
+    fn read() {}
 }
