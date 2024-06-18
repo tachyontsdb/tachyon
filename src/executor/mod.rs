@@ -65,7 +65,7 @@ pub struct Context {
     cursors: Vec<Option<Cursor>>,
     page_cache: Rc<RefCell<PageCache>>,
 
-    outputs: VecDeque<OutputValue>,
+    pub outputs: VecDeque<OutputValue>,
 }
 
 impl Context {
@@ -126,9 +126,9 @@ impl Context {
         self.cursors[cursor_idx as usize].as_ref().unwrap().fetch()
     }
 
-    pub fn get_output(&mut self) -> Option<OutputValue> {
-        self.outputs.pop_front()
-    }
+    // pub fn get_output(&mut self) -> Option<OutputValue> {
+    //     self.outputs.iter()
+    // }
 }
 
 fn read_u64_pc(context: &mut Context, buffer: &[u8]) -> u64 {

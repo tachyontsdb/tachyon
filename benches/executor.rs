@@ -46,8 +46,13 @@ fn bench_read_sequential_timestamps(mut context: Context, buffer: &[u8]) -> u64 
     execute(&mut context, buffer);
 
     let mut res = 0;
-    while let Some(OutputValue::Vector((timestamp, value))) = context.get_output() {
-        res += timestamp + value;
+    // while let Some(OutputValue::Vector((timestamp, value))) = context.get_output() {
+    //
+    // }
+    for item in context.outputs {
+        if let OutputValue::Vector((timestamp, value)) = item {
+            res += timestamp + value;
+        }
     }
     res
 }
