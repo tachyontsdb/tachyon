@@ -1,4 +1,4 @@
-use std::{collections::HashMap, mem::size_of, path::PathBuf};
+use std::{collections::HashMap, mem::size_of, path::PathBuf, path::Path};
 
 use crate::common::{Timestamp, Value};
 
@@ -22,7 +22,7 @@ impl Writer {
 
         file.write_data_to_file_in_mem(ts, v);
         if file.size_of_entries() >= MAX_FILE_SIZE {
-            file.write(self.root.join(format!("{}", stream_id)));
+            file.write(Writer::derive_file_path(&(self.root), stream_id, file));
             self.open_data_files.remove_entry(&stream_id);
         }
     }
@@ -39,84 +39,68 @@ impl Writer {
             i = bytes_written / size_of::<(Timestamp, Value)>();
 
             if file.size_of_entries() >= MAX_FILE_SIZE {
-                file.write(self.root.join(format!("{}", stream_id)));
+                file.write(Writer::derive_file_path(&(self.root), stream_id, file));
                 self.open_data_files.remove_entry(&stream_id);
             }
         }
+    }
+
+    fn derive_file_path(root: &Path, stream_id: u64, file: &TimeDataFile) -> PathBuf {
+        root.join(format!("{}/{}", stream_id, file.get_file_name()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::test_utils::*;
     use std::fs;
 
     const MAX_ENTRIES: usize = MAX_FILE_SIZE / (2 * size_of::<u64>());
 
-    fn init(stream_ids: &[u32]) {
-        fs::create_dir("./tmp/db");
-        for stream_id in stream_ids {
-            fs::create_dir(format!("./tmp/db/{}", stream_id));
-        }
-    }
-
-    fn clean(stream_ids: &[u32]) {
-        for stream_id in stream_ids {
-            fs::remove_dir_all(format!("./tmp/db/{}", stream_id));
-        }
-        fs::remove_dir("./tmp/db");
-    }
-
     #[test]
     fn test_write_single_complete_file() {
-        let stream_ids = [0];
-        init(&stream_ids);
+        set_up_dirs!(dirs, "0",);
 
-        let mut writer = Writer::new("./tmp/db".into());
+        let mut writer = Writer::new("./tmp/test_write_single_complete_file$".into());
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
         for i in 0..MAX_ENTRIES {
             writer.write(0, i as Timestamp, (i * 1000) as Value);
         }
-
-        clean(&stream_ids)
     }
 
     #[test]
     fn test_write_multiple_complete_files() {
         let stream_ids = [0, 1];
-        init(&stream_ids);
+        set_up_dirs!(dirs, "0", "1",);
 
-        let mut writer = Writer::new("./tmp/db".into());
+        let mut writer = Writer::new("./tmp/test_write_multiple_complete_files$".into());
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
         for i in 0..MAX_ENTRIES {
             for stream_id in stream_ids {
-                writer.write(stream_id.into(), i as Timestamp, (i * 1000) as Value);
+                writer.write(stream_id, i as Timestamp, (i * 1000) as Value);
             }
         }
-
-        clean(&stream_ids);
     }
 
     #[test]
     fn test_batch_write_single_batch_in_two_files() {
-        let stream_ids = [0];
-        init(&stream_ids);
+        let stream_id = 0;
+        set_up_dirs!(dirs, "0",);
 
         let n = (1.5 * MAX_ENTRIES as f32).round() as usize;
-        let mut writer = Writer::new("./tmp/db".into());
+        let mut writer = Writer::new("./tmp/test_batch_write_single_batch_in_two_files$".into());
         let mut entries: Vec<(u64, u64)> = Vec::<(Timestamp, Value)>::with_capacity(n);
 
         for i in 0..n {
             entries.push((i as Timestamp, (i * 1000) as Value));
         }
 
-        for stream_id in stream_ids {
-            writer.batch_write(stream_id.into(), &entries);
-        }
+        writer.batch_write(stream_id, &entries);
 
         let old_n = n;
         let n = (0.5 * MAX_ENTRIES as f32).round() as usize;
@@ -125,10 +109,6 @@ mod tests {
             entries.push(((old_n + i) as Timestamp, ((old_n + i) * 1000) as Value));
         }
 
-        for stream_id in stream_ids {
-            writer.batch_write(stream_id.into(), &entries);
-        }
-
-        clean(&stream_ids);
+        writer.batch_write(stream_id, &entries);
     }
 }
