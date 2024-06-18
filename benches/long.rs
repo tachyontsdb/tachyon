@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion, SamplingMode};
 use pprof::criterion::{Output, PProfProfiler};
 use rusqlite::{Connection, Statement};
-use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc};
 use tachyon::storage::{file::*, page_cache::PageCache};
 
 const NUM_ITEMS: u64 = 100_000_000;
@@ -30,8 +30,12 @@ fn bench_read_sqlite(stmt: &mut Statement) -> u64 {
     res
 }
 
-fn bench_read_sequential_timestamps(start: u64, end: u64, page_cache: &mut PageCache) -> u64 {
-    let file_paths = Arc::new(["./tmp/bench_sequential_read.ty".into()]);
+fn bench_read_sequential_timestamps(
+    start: u64,
+    end: u64,
+    page_cache: Rc<RefCell<PageCache>>,
+) -> u64 {
+    let file_paths = Rc::new(["./tmp/bench_sequential_read.ty".into()]);
     let cursor = Cursor::new(file_paths, start, end, page_cache).unwrap();
 
     let mut res = 0;
@@ -51,9 +55,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         model.write_data_to_file_in_mem(i, i + (i + 100));
     }
     model.write("./tmp/bench_sequential_read.ty".into());
-    let mut page_cache = PageCache::new(1000);
+    let page_cache = Rc::new(RefCell::new(PageCache::new(1000)));
     group.bench_function(&format!("tachyon: read sequential 0-{}", NUM_ITEMS), |b| {
-        b.iter(|| bench_read_sequential_timestamps(0, NUM_ITEMS, &mut page_cache))
+        b.iter(|| bench_read_sequential_timestamps(0, NUM_ITEMS, page_cache.clone()))
     });
 
     // setup SQLite benchmark
@@ -79,9 +83,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             timestamp: i,
             value: i + (i % 100),
         };
-        insert_stmt
-            .execute([&item.timestamp, &item.value])
-            .unwrap();
+        insert_stmt.execute([&item.timestamp, &item.value]).unwrap();
     }
     drop(insert_stmt);
     transaction.commit().unwrap();
