@@ -2,6 +2,7 @@ use super::page_cache::{self, FileId, PageCache, SeqPageRead};
 use crate::common::{Timestamp, Value};
 use crate::storage::compression::CompressionEngine;
 use crate::storage::page_cache::page_cache_sequential_read;
+use crate::utils::file_utils::FileReaderUtil;
 use std::cell::RefCell;
 use std::{
     fs::File,
@@ -16,52 +17,12 @@ const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
 const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
 
-struct FileReaderUtil;
 const VAR_U64_READERS: [fn(&[u8]) -> u64; 4] = [
     FileReaderUtil::read_u64_1,
     FileReaderUtil::read_u64_2,
     FileReaderUtil::read_u64_4,
     FileReaderUtil::read_u64_8,
 ];
-
-// TODO: Check this, changed
-impl FileReaderUtil {
-    fn read_u16(buffer: [u8; size_of::<u16>()]) -> u16 {
-        u16::from_le_bytes(buffer)
-    }
-
-    fn read_u32(buffer: [u8; size_of::<u32>()]) -> u32 {
-        u32::from_le_bytes(buffer)
-    }
-
-    fn read_u64(buffer: [u8; size_of::<u64>()]) -> u64 {
-        u64::from_le_bytes(buffer)
-    }
-
-    // Varint decoding
-    #[inline]
-    fn read_u64_1(buf: &[u8]) -> u64 {
-        buf[0] as u64
-    }
-
-    #[inline]
-    fn read_u64_2(buf: &[u8]) -> u64 {
-        ((buf[1] as u64) << 8) | (buf[0] as u64)
-    }
-    #[inline]
-    fn read_u64_4(buf: &[u8]) -> u64 {
-        ((buf[3] as u64) << 24) | ((buf[2] as u64) << 16) | ((buf[1] as u64) << 8) | (buf[0] as u64)
-    }
-
-    #[inline]
-    fn read_u64_8(buf: &[u8]) -> u64 {
-        let mut res = 0u64;
-        for (i, byte) in buf.iter().enumerate().take(8) {
-            res |= (*byte as u64) << (i * 8);
-        }
-        res
-    }
-}
 
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct Header {

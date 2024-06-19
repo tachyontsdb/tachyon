@@ -61,59 +61,59 @@ impl Buffer {
         Self(vec![OperationCode::Init as u8])
     }
 
+    pub fn len(&self) -> u64 {
+        self.0.len() as u64
+    }
+
     pub fn add_halt(&mut self) {
         self.0.push(OperationCode::Halt as u8);
     }
 
     pub fn add_open_read(
         &mut self,
-        cursor_idx: [u8; size_of::<u64>()],
-        file_paths_array_idx: [u8; size_of::<u64>()],
-        start: [u8; size_of::<Timestamp>()],
-        end: [u8; size_of::<Timestamp>()],
+        cursor_idx: &[u8; size_of::<u16>()],
+        file_paths_array_idx: &[u8; size_of::<u32>()],
+        start: &[u8; size_of::<Timestamp>()],
+        end: &[u8; size_of::<Timestamp>()],
     ) {
         self.0.push(OperationCode::OpenRead as u8);
-        self.0.extend_from_slice(&cursor_idx);
-        self.0.extend_from_slice(&file_paths_array_idx);
-        self.0.extend_from_slice(&start);
-        self.0.extend_from_slice(&end);
+        self.0.extend_from_slice(cursor_idx);
+        self.0.extend_from_slice(file_paths_array_idx);
+        self.0.extend_from_slice(start);
+        self.0.extend_from_slice(end);
     }
 
-    pub fn add_close_read(&mut self, cursor_idx: [u8; size_of::<u64>()]) {
+    pub fn add_close_read(&mut self, cursor_idx: &[u8; size_of::<u16>()]) {
         self.0.push(OperationCode::CloseRead as u8);
-        self.0.extend_from_slice(&cursor_idx);
+        self.0.extend_from_slice(cursor_idx);
     }
 
     pub fn add_fetch_vector(
         &mut self,
-        cursor_idx: [u8; size_of::<u64>()],
-        to_register_timestamp: [u8; size_of::<Timestamp>()],
-        to_register_value: [u8; size_of::<Value>()],
+        cursor_idx: &[u8; size_of::<u16>()],
+        to_register_timestamp: u8,
+        to_register_value: u8,
     ) {
         self.0.push(OperationCode::FetchVector as u8);
-        self.0.extend_from_slice(&cursor_idx);
-        self.0.extend_from_slice(&to_register_timestamp);
-        self.0.extend_from_slice(&to_register_value);
+        self.0.extend_from_slice(cursor_idx);
+        self.0.push(to_register_timestamp);
+        self.0.push(to_register_value);
     }
 
-    pub fn add_output_vector(
-        &mut self,
-        from_register_timestamp: [u8; size_of::<Timestamp>()],
-        from_register_value: [u8; size_of::<Value>()],
-    ) {
+    pub fn add_output_vector(&mut self, from_register_timestamp: u8, from_register_value: u8) {
         self.0.push(OperationCode::OutputVector as u8);
-        self.0.extend_from_slice(&from_register_timestamp);
-        self.0.extend_from_slice(&from_register_value);
+        self.0.push(from_register_timestamp);
+        self.0.push(from_register_value);
     }
 
     pub fn add_next(
         &mut self,
-        cursor_idx: [u8; size_of::<u64>()],
-        goto_success: [u8; size_of::<u64>()],
+        cursor_idx: &[u8; size_of::<u16>()],
+        goto_success: &[u8; size_of::<u64>()],
     ) {
         self.0.push(OperationCode::Next as u8);
-        self.0.extend_from_slice(&cursor_idx);
-        self.0.extend_from_slice(&goto_success);
+        self.0.extend_from_slice(cursor_idx);
+        self.0.extend_from_slice(goto_success);
     }
 }
 
@@ -129,7 +129,7 @@ pub struct VirtualMachine {
 
     file_paths_array: Rc<[Rc<[PathBuf]>]>,
     page_cache: Rc<RefCell<PageCache>>,
-    buffer: Buffer,
+    buffer: Rc<Buffer>,
 
     cursors: Vec<Option<Cursor>>,
 }
@@ -138,7 +138,7 @@ impl VirtualMachine {
     pub fn new(
         file_paths_array: Rc<[Rc<[PathBuf]>]>,
         page_cache: Rc<RefCell<PageCache>>,
-        buffer: Buffer,
+        buffer: Rc<Buffer>,
     ) -> Self {
         Self {
             pc: 0,
@@ -152,8 +152,8 @@ impl VirtualMachine {
 
     fn open_read(
         &mut self,
-        cursor_idx: u64,
-        file_paths_array_idx: u64,
+        cursor_idx: u16,
+        file_paths_array_idx: u32,
         start: Timestamp,
         end: Timestamp,
     ) {
@@ -180,11 +180,11 @@ impl VirtualMachine {
         ));
     }
 
-    fn close_read(&mut self, cursor_idx: u64) {
+    fn close_read(&mut self, cursor_idx: u16) {
         self.cursors[cursor_idx as usize] = None;
     }
 
-    fn next(&mut self, cursor_idx: u64) -> bool {
+    fn next(&mut self, cursor_idx: u16) -> bool {
         self.cursors[cursor_idx as usize]
             .as_mut()
             .unwrap()
@@ -192,8 +192,29 @@ impl VirtualMachine {
             .is_some()
     }
 
-    fn fetch_vector(&mut self, cursor_idx: u64) -> (Timestamp, Value) {
+    fn fetch_vector(&mut self, cursor_idx: u16) -> (Timestamp, Value) {
         self.cursors[cursor_idx as usize].as_ref().unwrap().fetch()
+    }
+
+    fn read_u8_pc(&mut self) -> u8 {
+        let ret = self.buffer.0[self.pc];
+        self.pc += 1;
+        ret
+    }
+
+    fn read_u16_pc(&mut self) -> u16 {
+        let ret = ((self.buffer.0[self.pc + 1] as u16) << 8) | (self.buffer.0[self.pc] as u16);
+        self.pc += 2;
+        ret
+    }
+
+    fn read_u32_pc(&mut self) -> u32 {
+        let ret = ((self.buffer.0[self.pc + 3] as u32) << 24)
+            | ((self.buffer.0[self.pc + 2] as u32) << 16)
+            | ((self.buffer.0[self.pc + 1] as u32) << 8)
+            | (self.buffer.0[self.pc] as u32);
+        self.pc += 4;
+        ret
     }
 
     fn read_u64_pc(&mut self) -> u64 {
@@ -216,20 +237,20 @@ impl VirtualMachine {
                 }
 
                 OperationCode::OpenRead => {
-                    let cursor_idx = self.read_u64_pc();
-                    let file_paths_array_idx = self.read_u64_pc();
+                    let cursor_idx = self.read_u16_pc();
+                    let file_paths_array_idx = self.read_u32_pc();
                     let start = self.read_u64_pc();
                     let end = self.read_u64_pc();
 
                     self.open_read(cursor_idx, file_paths_array_idx, start, end);
                 }
                 OperationCode::CloseRead => {
-                    let cursor_idx = self.read_u64_pc();
+                    let cursor_idx = self.read_u16_pc();
                     self.close_read(cursor_idx);
                 }
 
                 OperationCode::Next => {
-                    let cursor_idx = self.read_u64_pc();
+                    let cursor_idx = self.read_u16_pc();
                     let goto_success = self.read_u64_pc();
 
                     if self.next(cursor_idx) {
@@ -237,9 +258,9 @@ impl VirtualMachine {
                     }
                 }
                 OperationCode::FetchVector => {
-                    let cursor_idx = self.read_u64_pc();
-                    let to_register_timestamp = self.read_u64_pc();
-                    let to_register_value = self.read_u64_pc();
+                    let cursor_idx = self.read_u16_pc();
+                    let to_register_timestamp = self.read_u8_pc();
+                    let to_register_value = self.read_u8_pc();
 
                     let (timestamp, value) = self.fetch_vector(cursor_idx);
                     self.regs[to_register_timestamp as usize] = timestamp;
@@ -252,8 +273,8 @@ impl VirtualMachine {
                 }
                 OperationCode::GotoEq => {
                     let address = self.read_u64_pc();
-                    let register1 = self.read_u64_pc();
-                    let register2 = self.read_u64_pc();
+                    let register1 = self.read_u8_pc();
+                    let register2 = self.read_u8_pc();
 
                     let value1 = self.regs[register1 as usize];
                     let value2 = self.regs[register2 as usize];
@@ -263,8 +284,8 @@ impl VirtualMachine {
                 }
                 OperationCode::GotoNeq => {
                     let address = self.read_u64_pc();
-                    let register1 = self.read_u64_pc();
-                    let register2 = self.read_u64_pc();
+                    let register1 = self.read_u8_pc();
+                    let register2 = self.read_u8_pc();
 
                     let value1 = self.regs[register1 as usize];
                     let value2 = self.regs[register2 as usize];
@@ -274,12 +295,12 @@ impl VirtualMachine {
                 }
 
                 OperationCode::OutputScalar => {
-                    let from_register = self.read_u64_pc();
+                    let from_register = self.read_u8_pc();
                     return OutputValue::Scalar(self.regs[from_register as usize]);
                 }
                 OperationCode::OutputVector => {
-                    let from_register_timestamp = self.read_u64_pc();
-                    let from_register_value = self.read_u64_pc();
+                    let from_register_timestamp = self.read_u8_pc();
+                    let from_register_value = self.read_u8_pc();
 
                     return OutputValue::Vector((
                         self.regs[from_register_timestamp as usize],
@@ -311,4 +332,7 @@ impl VirtualMachine {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    #[test]
+    fn test() {}
+}

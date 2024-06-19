@@ -16,21 +16,17 @@ fn get_buffer() -> Buffer {
     let mut buffer = Buffer::new();
 
     buffer.add_open_read(
-        u64::to_le_bytes(0),
-        u64::to_le_bytes(0),
-        u64::to_le_bytes(0),
-        u64::to_le_bytes(NUM_ITEMS),
+        &u16::to_le_bytes(0),
+        &u32::to_le_bytes(0),
+        &u64::to_le_bytes(0),
+        &u64::to_le_bytes(NUM_ITEMS),
     );
 
-    buffer.add_fetch_vector(
-        u64::to_le_bytes(0),
-        u64::to_le_bytes(0),
-        u64::to_le_bytes(1),
-    );
-
-    buffer.add_output_vector(u64::to_le_bytes(0), u64::to_le_bytes(1));
-    buffer.add_next(u64::to_le_bytes(0), u64::to_le_bytes(34));
-    buffer.add_close_read(u64::to_le_bytes(0));
+    let index = buffer.len();
+    buffer.add_fetch_vector(&u16::to_le_bytes(0), 0, 1);
+    buffer.add_output_vector(0, 1);
+    buffer.add_next(&u16::to_le_bytes(0), &u64::to_le_bytes(index));
+    buffer.add_close_read(&u16::to_le_bytes(0));
     buffer.add_halt();
 
     buffer
@@ -47,6 +43,7 @@ fn bench_read_sequential_timestamps(mut vm: VirtualMachine) -> u64 {
             }
         }
     }
+    assert_eq!(res, 10004850000);
     res
 }
 
@@ -63,15 +60,15 @@ fn criterion_benchmark(c: &mut Criterion) {
     model.write(paths[0][0].clone());
 
     let page_cache = Rc::new(RefCell::new(PageCache::new(NUM_FRAMES)));
+    let buffer = Rc::new(get_buffer());
     c.bench_function(
         &format!("tachyon: read executor sequential 0-{}", NUM_ITEMS),
         |b| {
             b.iter(|| {
-                let buffer = get_buffer();
                 bench_read_sequential_timestamps(VirtualMachine::new(
                     paths.clone(),
                     page_cache.clone(),
-                    buffer,
+                    buffer.clone(),
                 ));
             });
         },
