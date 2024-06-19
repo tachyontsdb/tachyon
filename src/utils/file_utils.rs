@@ -34,9 +34,6 @@ impl FileReaderUtil {
 
     #[inline]
     pub fn read_u64_8(buf: &[u8]) -> u64 {
-        let ret = u64::from_le_bytes(buf.try_into().unwrap())
-            .try_into()
-            .unwrap();
-        ret
+        u64::from_le_bytes(buf.try_into().unwrap())
     }
 }
