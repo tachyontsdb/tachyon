@@ -5,13 +5,14 @@ use crate::{
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
+    mem::size_of,
     path::PathBuf,
     rc::Rc,
 };
 
 #[non_exhaustive]
 #[repr(u8)]
-pub enum OperationCode {
+enum OperationCode {
     NoOperation,
 
     Init,
@@ -49,34 +50,103 @@ pub enum OperationCode {
     ArithmeticRemainderImmediate,
 }
 
-const NUM_EXPECTED_INITIAL_CURSORS: usize = 10;
 const NUM_REGS: usize = 10;
+const NUM_EXPECTED_INITIAL_CURSORS: usize = 10;
+
+#[derive(Debug)]
+pub struct Buffer(Vec<u8>);
+
+impl Buffer {
+    pub fn new() -> Self {
+        Self(vec![OperationCode::Init as u8])
+    }
+
+    pub fn add_halt(&mut self) {
+        self.0.push(OperationCode::Halt as u8);
+    }
+
+    pub fn add_open_read(
+        &mut self,
+        cursor_idx: [u8; size_of::<u64>()],
+        file_paths_array_idx: [u8; size_of::<u64>()],
+        start: [u8; size_of::<Timestamp>()],
+        end: [u8; size_of::<Timestamp>()],
+    ) {
+        self.0.push(OperationCode::OpenRead as u8);
+        self.0.extend_from_slice(&cursor_idx);
+        self.0.extend_from_slice(&file_paths_array_idx);
+        self.0.extend_from_slice(&start);
+        self.0.extend_from_slice(&end);
+    }
+
+    pub fn add_close_read(&mut self, cursor_idx: [u8; size_of::<u64>()]) {
+        self.0.push(OperationCode::CloseRead as u8);
+        self.0.extend_from_slice(&cursor_idx);
+    }
+
+    pub fn add_fetch_vector(
+        &mut self,
+        cursor_idx: [u8; size_of::<u64>()],
+        to_register_timestamp: [u8; size_of::<Timestamp>()],
+        to_register_value: [u8; size_of::<Value>()],
+    ) {
+        self.0.push(OperationCode::FetchVector as u8);
+        self.0.extend_from_slice(&cursor_idx);
+        self.0.extend_from_slice(&to_register_timestamp);
+        self.0.extend_from_slice(&to_register_value);
+    }
+
+    pub fn add_output_vector(
+        &mut self,
+        from_register_timestamp: [u8; size_of::<Timestamp>()],
+        from_register_value: [u8; size_of::<Value>()],
+    ) {
+        self.0.push(OperationCode::OutputVector as u8);
+        self.0.extend_from_slice(&from_register_timestamp);
+        self.0.extend_from_slice(&from_register_value);
+    }
+
+    pub fn add_next(
+        &mut self,
+        cursor_idx: [u8; size_of::<u64>()],
+        goto_success: [u8; size_of::<u64>()],
+    ) {
+        self.0.push(OperationCode::Next as u8);
+        self.0.extend_from_slice(&cursor_idx);
+        self.0.extend_from_slice(&goto_success);
+    }
+}
 
 pub enum OutputValue {
     Scalar(Value),
     Vector((Timestamp, Value)),
+    Halted,
 }
 
-pub struct Context {
+pub struct VirtualMachine {
     pc: usize,
     regs: [u64; NUM_REGS],
 
     file_paths_array: Rc<[Rc<[PathBuf]>]>,
-    cursors: Vec<Option<Cursor>>,
     page_cache: Rc<RefCell<PageCache>>,
+    buffer: Buffer,
 
-    pub outputs: VecDeque<OutputValue>,
+    cursors: Vec<Option<Cursor>>,
 }
 
-impl Context {
-    pub fn new(file_paths_array: Rc<[Rc<[PathBuf]>]>, page_cache: Rc<RefCell<PageCache>>) -> Self {
+impl VirtualMachine {
+    pub fn new(
+        file_paths_array: Rc<[Rc<[PathBuf]>]>,
+        page_cache: Rc<RefCell<PageCache>>,
+        buffer: Buffer,
+    ) -> Self {
         Self {
             pc: 0,
             regs: [0x00u64; NUM_REGS],
             file_paths_array,
-            cursors: Vec::with_capacity(NUM_EXPECTED_INITIAL_CURSORS),
-            outputs: VecDeque::new(),
             page_cache,
+            buffer,
+            cursors: Vec::with_capacity(NUM_EXPECTED_INITIAL_CURSORS),
         }
     }
 
@@ -126,121 +196,117 @@ impl Context {
         self.cursors[cursor_idx as usize].as_ref().unwrap().fetch()
     }
 
-    // pub fn get_output(&mut self) -> Option<OutputValue> {
-    //     self.outputs.iter()
-    // }
-}
+    fn read_u64_pc(&mut self) -> u64 {
+        let ret = u64::from_le_bytes(self.buffer.0[self.pc..(self.pc + 8)].try_into().unwrap());
+        self.pc += 8;
+        ret
+    }
 
-fn read_u64_pc(context: &mut Context, buffer: &[u8]) -> u64 {
-    let ret = u64::from_le_bytes(buffer[context.pc..(context.pc + 8)].try_into().unwrap());
-    context.pc += 8;
-    ret
-}
+    pub fn execute_step(&mut self) -> OutputValue {
+        while self.pc < self.buffer.0.len() {
+            let opcode: OperationCode = unsafe { std::mem::transmute(self.buffer.0[self.pc]) };
+            self.pc += 1;
 
-pub fn execute(context: &mut Context, buffer: &[u8]) {
-    while context.pc < buffer.len() {
-        let opcode: OperationCode = unsafe { std::mem::transmute(buffer[context.pc]) };
-        context.pc += 1;
+            match opcode {
+                OperationCode::NoOperation => {}
 
-        match opcode {
-            OperationCode::NoOperation => {}
-
-            OperationCode::Init => {}
-            OperationCode::Halt => {
-                break;
-            }
-
-            OperationCode::OpenRead => {
-                let cursor_idx = read_u64_pc(context, buffer);
-                let file_paths_array_idx = read_u64_pc(context, buffer);
-                let start = read_u64_pc(context, buffer);
-                let end = read_u64_pc(context, buffer);
-
-                context.open_read(cursor_idx, file_paths_array_idx, start, end);
-            }
-            OperationCode::CloseRead => {
-                let cursor_idx = read_u64_pc(context, buffer);
-                context.close_read(cursor_idx);
-            }
-
-            OperationCode::Next => {
-                let cursor_idx = read_u64_pc(context, buffer);
-                let goto_success = read_u64_pc(context, buffer);
-
-                if context.next(cursor_idx) {
-                    context.pc = goto_success as usize;
+                OperationCode::Init => {}
+                OperationCode::Halt => {
+                    break;
                 }
-            }
-            OperationCode::FetchVector => {
-                let cursor_idx = read_u64_pc(context, buffer);
-                let to_register_timestamp = read_u64_pc(context, buffer);
-                let to_register_value = read_u64_pc(context, buffer);
 
-                let (timestamp, value) = context.fetch_vector(cursor_idx);
-                context.regs[to_register_timestamp as usize] = timestamp;
-                context.regs[to_register_value as usize] = value;
-            }
+                OperationCode::OpenRead => {
+                    let cursor_idx = self.read_u64_pc();
+                    let file_paths_array_idx = self.read_u64_pc();
+                    let start = self.read_u64_pc();
+                    let end = self.read_u64_pc();
 
-            OperationCode::Goto => {
-                let address = read_u64_pc(context, buffer);
-                context.pc = address as usize;
-            }
-            OperationCode::GotoEq => {
-                let address = read_u64_pc(context, buffer);
-                let register1 = read_u64_pc(context, buffer);
-                let register2 = read_u64_pc(context, buffer);
-
-                let value1 = context.regs[register1 as usize];
-                let value2 = context.regs[register2 as usize];
-                if value1 == value2 {
-                    context.pc = address as usize;
+                    self.open_read(cursor_idx, file_paths_array_idx, start, end);
                 }
-            }
-            OperationCode::GotoNeq => {
-                let address = read_u64_pc(context, buffer);
-                let register1 = read_u64_pc(context, buffer);
-                let register2 = read_u64_pc(context, buffer);
-
-                let value1 = context.regs[register1 as usize];
-                let value2 = context.regs[register2 as usize];
-                if value1 != value2 {
-                    context.pc = address as usize;
+                OperationCode::CloseRead => {
+                    let cursor_idx = self.read_u64_pc();
+                    self.close_read(cursor_idx);
                 }
-            }
 
-            OperationCode::OutputScalar => {
-                let from_register = read_u64_pc(context, buffer);
-                context
-                    .outputs
-                    .push_back(OutputValue::Scalar(context.regs[from_register as usize]));
-            }
-            OperationCode::OutputVector => {
-                let from_register_timestamp = read_u64_pc(context, buffer);
-                let from_register_value = read_u64_pc(context, buffer);
+                OperationCode::Next => {
+                    let cursor_idx = self.read_u64_pc();
+                    let goto_success = self.read_u64_pc();
 
-                context.outputs.push_back(OutputValue::Vector((
-                    context.regs[from_register_timestamp as usize],
-                    context.regs[from_register_value as usize],
-                )));
-            }
+                    if self.next(cursor_idx) {
+                        self.pc = goto_success as usize;
+                    }
+                }
+                OperationCode::FetchVector => {
+                    let cursor_idx = self.read_u64_pc();
+                    let to_register_timestamp = self.read_u64_pc();
+                    let to_register_value = self.read_u64_pc();
 
-            OperationCode::LogicalNot => todo!(),
-            OperationCode::LogicalAnd => todo!(),
-            OperationCode::LogicalOr => todo!(),
-            OperationCode::LogicalXor => todo!(),
-            OperationCode::LogicalShiftLeft => todo!(),
-            OperationCode::LogicalShiftRight => todo!(),
-            OperationCode::ArithmeticAdd => todo!(),
-            OperationCode::ArithmeticAddImmediate => todo!(),
-            OperationCode::ArithmeticSubtract => todo!(),
-            OperationCode::ArithmeticSubtractImmediate => todo!(),
-            OperationCode::ArithmeticMultiply => todo!(),
-            OperationCode::ArithmeticMultiplyImmediate => todo!(),
-            OperationCode::ArithmeticDivide => todo!(),
-            OperationCode::ArithmeticDivideImmediate => todo!(),
-            OperationCode::ArithmeticRemainder => todo!(),
-            OperationCode::ArithmeticRemainderImmediate => todo!(),
+                    let (timestamp, value) = self.fetch_vector(cursor_idx);
+                    self.regs[to_register_timestamp as usize] = timestamp;
+                    self.regs[to_register_value as usize] = value;
+                }
+
+                OperationCode::Goto => {
+                    let address = self.read_u64_pc();
+                    self.pc = address as usize;
+                }
+                OperationCode::GotoEq => {
+                    let address = self.read_u64_pc();
+                    let register1 = self.read_u64_pc();
+                    let register2 = self.read_u64_pc();
+
+                    let value1 = self.regs[register1 as usize];
+                    let value2 = self.regs[register2 as usize];
+                    if value1 == value2 {
+                        self.pc = address as usize;
+                    }
+                }
+                OperationCode::GotoNeq => {
+                    let address = self.read_u64_pc();
+                    let register1 = self.read_u64_pc();
+                    let register2 = self.read_u64_pc();
+
+                    let value1 = self.regs[register1 as usize];
+                    let value2 = self.regs[register2 as usize];
+                    if value1 != value2 {
+                        self.pc = address as usize;
+                    }
+                }
+
+                OperationCode::OutputScalar => {
+                    let from_register = self.read_u64_pc();
+                    return OutputValue::Scalar(self.regs[from_register as usize]);
+                }
+                OperationCode::OutputVector => {
+                    let from_register_timestamp = self.read_u64_pc();
+                    let from_register_value = self.read_u64_pc();
+
+                    return OutputValue::Vector((
+                        self.regs[from_register_timestamp as usize],
+                        self.regs[from_register_value as usize],
+                    ));
+                }
+
+                OperationCode::LogicalNot => todo!(),
+                OperationCode::LogicalAnd => todo!(),
+                OperationCode::LogicalOr => todo!(),
+                OperationCode::LogicalXor => todo!(),
+                OperationCode::LogicalShiftLeft => todo!(),
+                OperationCode::LogicalShiftRight => todo!(),
+                OperationCode::ArithmeticAdd => todo!(),
+                OperationCode::ArithmeticAddImmediate => todo!(),
+                OperationCode::ArithmeticSubtract => todo!(),
+                OperationCode::ArithmeticSubtractImmediate => todo!(),
+                OperationCode::ArithmeticMultiply => todo!(),
+                OperationCode::ArithmeticMultiplyImmediate => todo!(),
+                OperationCode::ArithmeticDivide => todo!(),
+                OperationCode::ArithmeticDivideImmediate => todo!(),
+                OperationCode::ArithmeticRemainder => todo!(),
+                OperationCode::ArithmeticRemainderImmediate => todo!(),
+            }
         }
+
+        OutputValue::Halted
     }
 }
 
