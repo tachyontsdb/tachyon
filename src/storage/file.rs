@@ -3,6 +3,7 @@ use crate::common::{Timestamp, Value};
 use crate::storage::compression::CompressionEngine;
 use crate::storage::page_cache::page_cache_sequential_read;
 use std::cell::RefCell;
+use std::mem;
 use std::{
     fs::File,
     io::{Error, Read, Seek, Write},
@@ -15,6 +16,8 @@ const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
 const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
+
+pub const MAX_NUM_ENTRIES: usize = 62500;
 
 struct FileReaderUtil;
 const VAR_U64_READERS: [fn(&[u8]) -> u64; 4] = [
@@ -430,6 +433,26 @@ impl TimeDataFile {
 
         self.timestamps.push(timestamp);
         self.values.push(value);
+    }
+
+    // Returns the number of entries written in memory
+    pub fn write_batch_data_to_file_in_mem(&mut self, batch: &[(Timestamp, Value)]) -> usize {
+        let space = MAX_NUM_ENTRIES - self.num_entries();
+        let n = usize::min(space, batch.len());
+
+        for pair in batch.iter().take(n) {
+            self.write_data_to_file_in_mem(pair.0, pair.1);
+        }
+
+        n
+    }
+
+    pub fn get_file_name(&self) -> String {
+        self.header.max_timestamp.to_string()
+    }
+
+    pub fn num_entries(&self) -> usize {
+        self.header.count as usize
     }
 }
 
