@@ -1,4 +1,9 @@
-use std::{collections::HashMap, mem::size_of, path::Path, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    mem::size_of,
+    path::{Path, PathBuf},
+};
 
 use crate::common::{Timestamp, Value};
 
@@ -43,6 +48,13 @@ impl Writer {
         }
     }
 
+    pub fn create_stream(&self, stream_id: u64) {
+        let stream = self.root.join(stream_id.to_string());
+        if !Path::new(&stream).exists() {
+            fs::create_dir(stream);
+        }
+    }
+
     fn derive_file_path(root: &Path, stream_id: u64, file: &TimeDataFile) -> PathBuf {
         root.join(format!("{}/{}", stream_id, file.get_file_name()))
     }
@@ -65,8 +77,12 @@ mod tests {
             paths.push(path.unwrap().path());
         }
 
-        fn extract_end(path_buf: &PathBuf) -> u32 {
-            let path = path_buf.clone().into_os_string().into_string().unwrap();
+        fn extract_end(path_buf: &Path) -> u32 {
+            let path = path_buf
+                .to_path_buf()
+                .into_os_string()
+                .into_string()
+                .unwrap();
 
             let suffix_opt = path
                 .rsplit('/')
@@ -92,21 +108,23 @@ mod tests {
 
     #[test]
     fn test_write_single_complete_file() {
-        set_up_dirs!(dirs, "0",);
-
-        let mut writer = Writer::new("./tmp/test_write_single_complete_file$".into());
+        set_up_dirs!(dirs, "db",);
+        let stream_id = 0;
+        let mut writer = Writer::new("./tmp/test_write_single_complete_file$db".into());
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
+        writer.create_stream(stream_id);
+
         for i in 0..MAX_NUM_ENTRIES {
             let ts = i as Timestamp;
-            let v = (1 * 1000) as Value;
-            writer.write(0, ts, v);
+            let v = (i * 1000) as Value;
+            writer.write(stream_id, ts, v);
             timestamps.push(ts);
             values.push(v);
         }
 
-        let files = get_files(&dirs[0]);
+        let files = get_files(&dirs[0].join(stream_id.to_string()));
 
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].timestamps, timestamps);
@@ -116,18 +134,22 @@ mod tests {
     #[test]
     fn test_write_multiple_streams_single_complete_files() {
         let stream_ids = [0, 1];
-        set_up_dirs!(dirs, "0", "1",);
+        set_up_dirs!(dirs, "db",);
 
         let mut writer =
-            Writer::new("./tmp/test_write_multiple_streams_single_complete_files$".into());
+            Writer::new("./tmp/test_write_multiple_streams_single_complete_files$db".into());
 
-        let mut timestamps = vec![Vec::<Timestamp>::new(), Vec::<Timestamp>::new()];
-        let mut values = vec![Vec::<Value>::new(), Vec::<Value>::new()];
+        let mut timestamps = [Vec::<Timestamp>::new(), Vec::<Timestamp>::new()];
+        let mut values = [Vec::<Value>::new(), Vec::<Value>::new()];
+
+        for stream_id in stream_ids {
+            writer.create_stream(stream_id);
+        }
 
         for i in 0..MAX_NUM_ENTRIES {
             for stream_id in stream_ids {
                 let ts = i as Timestamp;
-                let v = (1 * 1000) as Value;
+                let v = (i * 1000) as Value;
                 writer.write(stream_id, ts, v);
                 timestamps[stream_id as usize].push(ts);
                 values[stream_id as usize].push(v);
@@ -135,7 +157,7 @@ mod tests {
         }
 
         for stream_id in stream_ids {
-            let files = get_files(&dirs[stream_id as usize]);
+            let files = get_files(&dirs[0].join(stream_id.to_string()));
             assert_eq!(files.len(), 1);
             assert_eq!(files[0].timestamps, timestamps[0]);
             assert_eq!(files[0].values, values[0]);
@@ -145,17 +167,18 @@ mod tests {
     #[test]
     fn test_batch_write_single_batch_in_three_files() {
         let stream_id = 0;
-        set_up_dirs!(dirs, "0",);
+        set_up_dirs!(dirs, "db",);
 
         let n = (1.5 * MAX_NUM_ENTRIES as f32).round() as usize;
         let mut base: usize = 0;
-        let mut writer = Writer::new("./tmp/test_batch_write_single_batch_in_three_files$".into());
-        let mut timestamps_per_file = vec![
+        let mut writer =
+            Writer::new("./tmp/test_batch_write_single_batch_in_three_files$db".into());
+        let mut timestamps_per_file = [
             Vec::<Timestamp>::new(),
             Vec::<Timestamp>::new(),
             Vec::<Timestamp>::new(),
         ];
-        let mut values_per_file = vec![
+        let mut values_per_file = [
             Vec::<Value>::new(),
             Vec::<Value>::new(),
             Vec::<Value>::new(),
@@ -165,9 +188,9 @@ mod tests {
         fn create_and_write_batch(
             n: usize,
             base: usize,
-            timestamps_per_file: &mut Vec<Vec<Timestamp>>,
-            values_per_file: &mut Vec<Vec<Value>>,
-            count: &mut u32,
+            timestamps_per_file: &mut [Vec<Timestamp>],
+            values_per_file: &mut [Vec<Value>],
+            count: &mut usize,
             writer: &mut Writer,
             stream_id: u64,
         ) {
@@ -177,12 +200,14 @@ mod tests {
                 let ts = (base + i) as Timestamp;
                 let v = (i * 1000) as Value;
                 entries.push((ts, v));
-                timestamps_per_file[(count.clone() as usize / MAX_NUM_ENTRIES)].push(ts);
-                values_per_file[(count.clone() as usize / MAX_NUM_ENTRIES)].push(v);
+                timestamps_per_file[(*count / MAX_NUM_ENTRIES)].push(ts);
+                values_per_file[(*count / MAX_NUM_ENTRIES)].push(v);
                 *count += 1;
             }
             writer.batch_write(stream_id, &entries);
         }
+
+        writer.create_stream(stream_id);
 
         for _ in 0..2 {
             create_and_write_batch(
@@ -197,7 +222,7 @@ mod tests {
             base += n;
         }
 
-        let files = get_files(&dirs[0]);
+        let files = get_files(&dirs[0].join(stream_id.to_string()));
         assert_eq!(files.len(), 3);
 
         for i in 0..3 {

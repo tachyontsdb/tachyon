@@ -21,7 +21,7 @@ macro_rules! set_up_dirs {
             }
         };
         let _dirs = vec![$($x.to_string()),+];
-        let _name = _name.to_string() + "$/";
+        let _name = _name.to_string() + "$";
         let mut _new_dirs = vec![_name; _dirs.len()];
         for (i, dir) in _dirs.iter().enumerate() {
             _new_dirs[i] = _new_dirs[i].clone() + &dir;
