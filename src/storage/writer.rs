@@ -2,7 +2,7 @@ use std::{collections::HashMap, mem::size_of, path::Path, path::PathBuf};
 
 use crate::common::{Timestamp, Value};
 
-use super::file::{TimeDataFile, MAX_FILE_SIZE};
+use super::file::{TimeDataFile, MAX_NUM_ENTRIES};
 
 struct Writer {
     open_data_files: HashMap<u64, TimeDataFile>, // stream id to in-mem file
@@ -21,24 +21,22 @@ impl Writer {
         let file = self.open_data_files.entry(stream_id).or_default();
 
         file.write_data_to_file_in_mem(ts, v);
-        if file.size_of_entries() >= MAX_FILE_SIZE {
+        if file.num_entries() >= MAX_NUM_ENTRIES {
             file.write(Writer::derive_file_path(&(self.root), stream_id, file));
             self.open_data_files.remove_entry(&stream_id);
         }
     }
 
     pub fn batch_write(&mut self, stream_id: u64, batch: &[(Timestamp, Value)]) {
-        let mut bytes_written: usize = 0;
-        let n_bytes = std::mem::size_of_val(batch);
-        let mut i = 0;
+        let mut entries_written: usize = 0;
+        let num_entries = batch.len();
 
-        while bytes_written != n_bytes {
+        while entries_written != num_entries {
             let file = self.open_data_files.entry(stream_id).or_default();
 
-            bytes_written += file.write_batch_data_to_file_in_mem(&batch[i..]);
-            i = bytes_written / size_of::<(Timestamp, Value)>();
+            entries_written += file.write_batch_data_to_file_in_mem(&batch[entries_written..]);
 
-            if file.size_of_entries() >= MAX_FILE_SIZE {
+            if file.num_entries() >= MAX_NUM_ENTRIES {
                 file.write(Writer::derive_file_path(&(self.root), stream_id, file));
                 self.open_data_files.remove_entry(&stream_id);
             }
@@ -56,7 +54,41 @@ mod tests {
     use crate::utils::test_utils::*;
     use std::fs;
 
-    const MAX_ENTRIES: usize = MAX_FILE_SIZE / (2 * size_of::<u64>());
+    // Gets all files from directory sorted from smallest to highest file name suffix
+    fn get_files(dir: &Path) -> Vec<TimeDataFile> {
+        let read_dir = fs::read_dir(dir).unwrap();
+
+        let mut paths: Vec<PathBuf> = Vec::new();
+        let mut files: Vec<TimeDataFile> = Vec::new();
+
+        for path in read_dir {
+            paths.push(path.unwrap().path());
+        }
+
+        fn extract_end(path_buf: &PathBuf) -> u32 {
+            let path = path_buf.clone().into_os_string().into_string().unwrap();
+
+            let suffix_opt = path
+                .rsplit('/')
+                .next()
+                .and_then(|num_str| num_str.parse::<u32>().ok());
+
+            suffix_opt.expect("Expected file suffix to be u32")
+        }
+
+        paths.sort_by(|a, b| {
+            let num_a = extract_end(a);
+            let num_b = extract_end(b);
+
+            num_a.cmp(&num_b)
+        });
+
+        for path in paths {
+            files.push(TimeDataFile::read_data_file(path));
+        }
+
+        files
+    }
 
     #[test]
     fn test_write_single_complete_file() {
@@ -66,49 +98,111 @@ mod tests {
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
-        for i in 0..MAX_ENTRIES {
-            writer.write(0, i as Timestamp, (i * 1000) as Value);
+        for i in 0..MAX_NUM_ENTRIES {
+            let ts = i as Timestamp;
+            let v = (1 * 1000) as Value;
+            writer.write(0, ts, v);
+            timestamps.push(ts);
+            values.push(v);
         }
+
+        let files = get_files(&dirs[0]);
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].timestamps, timestamps);
+        assert_eq!(files[0].values, values);
     }
 
     #[test]
-    fn test_write_multiple_complete_files() {
+    fn test_write_multiple_streams_single_complete_files() {
         let stream_ids = [0, 1];
         set_up_dirs!(dirs, "0", "1",);
 
-        let mut writer = Writer::new("./tmp/test_write_multiple_complete_files$".into());
-        let mut timestamps = Vec::<Timestamp>::new();
-        let mut values = Vec::<Value>::new();
+        let mut writer =
+            Writer::new("./tmp/test_write_multiple_streams_single_complete_files$".into());
 
-        for i in 0..MAX_ENTRIES {
+        let mut timestamps = vec![Vec::<Timestamp>::new(), Vec::<Timestamp>::new()];
+        let mut values = vec![Vec::<Value>::new(), Vec::<Value>::new()];
+
+        for i in 0..MAX_NUM_ENTRIES {
             for stream_id in stream_ids {
-                writer.write(stream_id, i as Timestamp, (i * 1000) as Value);
+                let ts = i as Timestamp;
+                let v = (1 * 1000) as Value;
+                writer.write(stream_id, ts, v);
+                timestamps[stream_id as usize].push(ts);
+                values[stream_id as usize].push(v);
             }
+        }
+
+        for stream_id in stream_ids {
+            let files = get_files(&dirs[stream_id as usize]);
+            assert_eq!(files.len(), 1);
+            assert_eq!(files[0].timestamps, timestamps[0]);
+            assert_eq!(files[0].values, values[0]);
         }
     }
 
     #[test]
-    fn test_batch_write_single_batch_in_two_files() {
+    fn test_batch_write_single_batch_in_three_files() {
         let stream_id = 0;
         set_up_dirs!(dirs, "0",);
 
-        let n = (1.5 * MAX_ENTRIES as f32).round() as usize;
-        let mut writer = Writer::new("./tmp/test_batch_write_single_batch_in_two_files$".into());
-        let mut entries: Vec<(u64, u64)> = Vec::<(Timestamp, Value)>::with_capacity(n);
+        let n = (1.5 * MAX_NUM_ENTRIES as f32).round() as usize;
+        let mut base: usize = 0;
+        let mut writer = Writer::new("./tmp/test_batch_write_single_batch_in_three_files$".into());
+        let mut timestamps_per_file = vec![
+            Vec::<Timestamp>::new(),
+            Vec::<Timestamp>::new(),
+            Vec::<Timestamp>::new(),
+        ];
+        let mut values_per_file = vec![
+            Vec::<Value>::new(),
+            Vec::<Value>::new(),
+            Vec::<Value>::new(),
+        ];
+        let mut count = 0;
 
-        for i in 0..n {
-            entries.push((i as Timestamp, (i * 1000) as Value));
+        fn create_and_write_batch(
+            n: usize,
+            base: usize,
+            timestamps_per_file: &mut Vec<Vec<Timestamp>>,
+            values_per_file: &mut Vec<Vec<Value>>,
+            count: &mut u32,
+            writer: &mut Writer,
+            stream_id: u64,
+        ) {
+            let mut entries: Vec<(u64, u64)> = Vec::<(Timestamp, Value)>::with_capacity(n);
+
+            for i in 0..n {
+                let ts = (base + i) as Timestamp;
+                let v = (i * 1000) as Value;
+                entries.push((ts, v));
+                timestamps_per_file[(count.clone() as usize / MAX_NUM_ENTRIES)].push(ts);
+                values_per_file[(count.clone() as usize / MAX_NUM_ENTRIES)].push(v);
+                *count += 1;
+            }
+            writer.batch_write(stream_id, &entries);
         }
 
-        writer.batch_write(stream_id, &entries);
-
-        let old_n = n;
-        let n = (0.5 * MAX_ENTRIES as f32).round() as usize;
-        let mut entries: Vec<(u64, u64)> = Vec::<(Timestamp, Value)>::with_capacity(n);
-        for i in 0..n {
-            entries.push(((old_n + i) as Timestamp, ((old_n + i) * 1000) as Value));
+        for _ in 0..2 {
+            create_and_write_batch(
+                n,
+                base,
+                &mut timestamps_per_file,
+                &mut values_per_file,
+                &mut count,
+                &mut writer,
+                stream_id,
+            );
+            base += n;
         }
 
-        writer.batch_write(stream_id, &entries);
+        let files = get_files(&dirs[0]);
+        assert_eq!(files.len(), 3);
+
+        for i in 0..3 {
+            assert_eq!(files[i].timestamps, timestamps_per_file[i]);
+            assert_eq!(files[i].values, values_per_file[i]);
+        }
     }
 }

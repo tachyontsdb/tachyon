@@ -17,7 +17,7 @@ const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
 const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
 
-pub const MAX_FILE_SIZE: usize = 1024;
+pub const MAX_NUM_ENTRIES: usize = 62500;
 
 struct FileReaderUtil;
 const VAR_U64_READERS: [fn(&[u8]) -> u64; 4] = [
@@ -435,25 +435,24 @@ impl TimeDataFile {
         self.values.push(value);
     }
 
-    // Returns the number of bytes written in memory
+    // Returns the number of entries written in memory
     pub fn write_batch_data_to_file_in_mem(&mut self, batch: &[(Timestamp, Value)]) -> usize {
-        let original_size = self.size_of_entries();
-        let space = MAX_FILE_SIZE - original_size;
-        let n = usize::min(space / size_of::<(Timestamp, Value)>(), batch.len());
+        let space = MAX_NUM_ENTRIES - self.num_entries();
+        let n = usize::min(space, batch.len());
 
         for pair in batch.iter().take(n) {
             self.write_data_to_file_in_mem(pair.0, pair.1);
         }
 
-        self.size_of_entries() - original_size
+        n
     }
 
     pub fn get_file_name(&self) -> String {
         self.header.max_timestamp.to_string()
     }
 
-    pub fn size_of_entries(&self) -> usize {
-        size_of::<Timestamp>() * self.timestamps.len() + size_of::<Value>() * self.values.len()
+    pub fn num_entries(&self) -> usize {
+        self.header.count as usize
     }
 }
 
