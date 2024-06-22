@@ -39,6 +39,10 @@ harness = false
 name = "timescaledb"
 harness = false
 
+[[bench]]
+name = "sum"
+harness = false
+
 [profile.release]
 codegen-units = 1
 opt-level = 3
