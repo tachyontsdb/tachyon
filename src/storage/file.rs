@@ -219,7 +219,7 @@ impl Cursor {
                 ScanHint::Count => cursor.header.count as Value,
                 ScanHint::Min => cursor.header.min_value,
                 ScanHint::Max => cursor.header.max_value,
-                ScanHint::None => panic!("uh oh"),
+                ScanHint::None => unreachable!(),
             };
             cursor.values_read = cursor.header.count as u64;
         }
@@ -278,7 +278,7 @@ impl Cursor {
                 ScanHint::Count => self.header.count as Value,
                 ScanHint::Min => self.header.min_value,
                 ScanHint::Max => self.header.max_value,
-                ScanHint::None => panic!("uh oh"),
+                ScanHint::None => unreachable!(),
             };
             self.values_read = self.header.count as u64;
         } else if self.header.count > 1 {
