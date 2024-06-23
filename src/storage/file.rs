@@ -213,15 +213,7 @@ impl Cursor {
             && start <= cursor.header.min_timestamp
             && cursor.header.max_timestamp <= end
         {
-            cursor.current_timestamp = cursor.header.max_timestamp;
-            cursor.value = match cursor.scan_hint {
-                ScanHint::Sum => cursor.header.value_sum as Value,
-                ScanHint::Count => cursor.header.count as Value,
-                ScanHint::Min => cursor.header.min_value,
-                ScanHint::Max => cursor.header.max_value,
-                ScanHint::None => unreachable!(),
-            };
-            cursor.values_read = cursor.header.count as u64;
+            cursor.use_query_hint();
         }
         // check that file has values
         else if cursor.header.count > 1 {
@@ -240,6 +232,19 @@ impl Cursor {
         }
 
         Ok(cursor)
+    }
+
+    // Use the query hint
+    fn use_query_hint(&mut self) {
+        self.current_timestamp = self.header.max_timestamp;
+        self.value = match self.scan_hint {
+            ScanHint::Sum => self.header.value_sum as Value,
+            ScanHint::Count => self.header.count as Value,
+            ScanHint::Min => self.header.min_value,
+            ScanHint::Max => self.header.max_value,
+            ScanHint::None => unreachable!(),
+        };
+        self.values_read = self.header.count as u64;
     }
 
     fn load_next_file(&mut self) -> Option<()> {
@@ -268,19 +273,12 @@ impl Cursor {
 
         self.seq_reader.reset(self.file_id, self.offset);
 
+        // use the query hint if applicable on the next file
         if !matches!(self.scan_hint, ScanHint::None)
             && self.start <= self.header.min_timestamp
             && self.header.max_timestamp <= self.end
         {
-            self.current_timestamp = self.header.max_timestamp;
-            self.value = match self.scan_hint {
-                ScanHint::Sum => self.header.value_sum as Value,
-                ScanHint::Count => self.header.count as Value,
-                ScanHint::Min => self.header.min_value,
-                ScanHint::Max => self.header.max_value,
-                ScanHint::None => unreachable!(),
-            };
-            self.values_read = self.header.count as u64;
+            self.use_query_hint();
         } else if self.header.count > 1 {
             let mut l_buf = [0u8; 1];
             self.offset += self.seq_reader.read(&mut l_buf);
