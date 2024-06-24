@@ -127,10 +127,19 @@ impl Header {
     }
 }
 
+pub enum ScanHint {
+    None,
+    Sum,
+    Count,
+    Min,
+    Max,
+}
+
 pub struct Cursor {
     file_id: FileId,
     file_index: usize,
     header: Header,
+    start: Timestamp,
     end: Timestamp,
     current_timestamp: Timestamp,
     value: Value,
@@ -146,6 +155,8 @@ pub struct Cursor {
 
     next_timestamp: Timestamp,
     next_value: Value,
+
+    scan_hint: ScanHint,
 }
 
 // TODO: Remove this
@@ -164,6 +175,7 @@ impl Cursor {
         start: Timestamp,
         end: Timestamp,
         page_cache: Rc<RefCell<PageCache>>,
+        scan_hint: ScanHint,
     ) -> Result<Self, Error> {
         assert!(file_paths.len() > 0);
         assert!(start <= end);
@@ -181,6 +193,7 @@ impl Cursor {
             current_timestamp: header.min_timestamp,
             value: header.first_value,
             header,
+            start,
             end,
             values_read: 1,
             offset: MAGIC_SIZE + HEADER_SIZE,
@@ -191,9 +204,19 @@ impl Cursor {
 
             next_timestamp: 0,
             next_value: 0,
+
+            scan_hint,
         };
 
-        if cursor.header.count > 1 {
+        // check if we can use hint
+        if !matches!(cursor.scan_hint, ScanHint::None)
+            && start <= cursor.header.min_timestamp
+            && cursor.header.max_timestamp <= end
+        {
+            cursor.use_query_hint();
+        }
+        // check that file has values
+        else if cursor.header.count > 1 {
             let mut l_buf = [0u8; 1];
             cursor.offset += cursor.seq_reader.read(&mut l_buf);
             cursor.cur_length_byte = l_buf[0];
@@ -211,6 +234,19 @@ impl Cursor {
         Ok(cursor)
     }
 
+    // Use the query hint
+    fn use_query_hint(&mut self) {
+        self.current_timestamp = self.header.max_timestamp;
+        self.value = match self.scan_hint {
+            ScanHint::Sum => self.header.value_sum as Value,
+            ScanHint::Count => self.header.count as Value,
+            ScanHint::Min => self.header.min_value,
+            ScanHint::Max => self.header.max_value,
+            ScanHint::None => unreachable!(),
+        };
+        self.values_read = self.header.count as u64;
+    }
+
     fn load_next_file(&mut self) -> Option<()> {
         self.file_index += 1;
 
@@ -223,6 +259,11 @@ impl Cursor {
             .borrow_mut()
             .register_or_get_file_id(&self.file_paths[self.file_index]);
         self.header = Header::parse(self.file_id, &mut self.seq_reader.page_cache.borrow_mut());
+
+        if self.header.min_timestamp > self.end {
+            return None;
+        }
+
         self.offset = MAGIC_SIZE + HEADER_SIZE;
 
         self.current_timestamp = self.header.min_timestamp;
@@ -232,7 +273,13 @@ impl Cursor {
 
         self.seq_reader.reset(self.file_id, self.offset);
 
-        if self.header.count > 1 {
+        // use the query hint if applicable on the next file
+        if !matches!(self.scan_hint, ScanHint::None)
+            && self.start <= self.header.min_timestamp
+            && self.header.max_timestamp <= self.end
+        {
+            self.use_query_hint();
+        } else if self.header.count > 1 {
             let mut l_buf = [0u8; 1];
             self.offset += self.seq_reader.read(&mut l_buf);
             self.cur_length_byte = l_buf[0];
@@ -357,6 +404,7 @@ impl TimeDataFile {
             0,
             u64::MAX,
             Rc::new(RefCell::new(page_cache)),
+            ScanHint::None,
         )
         .unwrap();
 
@@ -508,6 +556,7 @@ mod tests {
             0,
             100,
             Rc::new(RefCell::new(page_cache)),
+            ScanHint::None,
         );
         assert!(cursor.is_ok());
 
@@ -536,6 +585,7 @@ mod tests {
             0,
             100,
             Rc::new(RefCell::new(page_cache)),
+            ScanHint::None,
         )
         .unwrap();
 
@@ -577,7 +627,13 @@ mod tests {
         let file_paths_arc: Rc<[PathBuf]> = file_paths.into();
         let mut page_cache = PageCache::new(10);
 
-        let cursor = Cursor::new(file_paths_arc, 0, 100, Rc::new(RefCell::new(page_cache)));
+        let cursor = Cursor::new(
+            file_paths_arc,
+            0,
+            100,
+            Rc::new(RefCell::new(page_cache)),
+            ScanHint::None,
+        );
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
@@ -618,7 +674,13 @@ mod tests {
 
         let file_paths_arc = file_paths.into();
         let mut page_cache = PageCache::new(10);
-        let cursor = Cursor::new(file_paths_arc, 5, 23, Rc::new(RefCell::new(page_cache)));
+        let cursor = Cursor::new(
+            file_paths_arc,
+            5,
+            23,
+            Rc::new(RefCell::new(page_cache)),
+            ScanHint::None,
+        );
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
@@ -650,8 +712,14 @@ mod tests {
         generate_ty_file(paths[0].clone(), &timestamps, &values);
 
         let mut page_cache = PageCache::new(100);
-        let mut cursor =
-            Cursor::new(paths.into(), 1, 100000, Rc::new(RefCell::new(page_cache))).unwrap();
+        let mut cursor = Cursor::new(
+            paths.into(),
+            1,
+            100000,
+            Rc::new(RefCell::new(page_cache)),
+            ScanHint::None,
+        )
+        .unwrap();
 
         let mut i = 0;
         loop {
@@ -678,6 +746,7 @@ mod tests {
             1,
             timestamps[timestamps.len() - 1],
             Rc::new(RefCell::new(page_cache)),
+            ScanHint::None,
         )
         .unwrap();
 
@@ -716,6 +785,7 @@ mod tests {
             1,
             timestamps[timestamps.len() - 1],
             Rc::new(RefCell::new(page_cache)),
+            ScanHint::None,
         )
         .unwrap();
 
@@ -730,5 +800,114 @@ mod tests {
             }
         }
         assert_eq!(i, timestamps.len());
+    }
+
+    #[test]
+    fn test_scan_hints_sum() {
+        set_up_files!(file_paths, "1.ty", "2.ty", "3.ty",);
+
+        let mut timestamp = 0;
+        let mut timestamps = Vec::new();
+        let mut values = Vec::new();
+
+        for file_path in &file_paths {
+            let mut local_timestamps = Vec::new();
+            let mut local_values = Vec::new();
+            for i in 0..10u64 {
+                local_timestamps.push(timestamp);
+                local_values.push(timestamp + 1);
+                timestamp += 1;
+            }
+
+            generate_ty_file(file_path.into(), &local_timestamps, &local_values);
+            timestamps.append(&mut local_timestamps);
+            values.append(&mut local_values);
+        }
+
+        let file_paths_arc: Rc<[PathBuf]> = file_paths.into();
+        let mut page_cache = Rc::new(RefCell::new(PageCache::new(10)));
+
+        let get_value = |start: Timestamp, end: Timestamp, hint: ScanHint| -> (Value, i32) {
+            let mut cursor =
+                Cursor::new(file_paths_arc.clone(), start, end, page_cache.clone(), hint).unwrap();
+            let mut i = 0;
+            let mut res = 0;
+            loop {
+                let (timestamp, value) = cursor.fetch();
+                res += value;
+                i += 1;
+                if cursor.next().is_none() {
+                    break;
+                }
+            }
+
+            (res, i)
+        };
+
+        let (res, i) = get_value(0, 30, ScanHint::Sum);
+        assert_eq!(i, 3);
+        assert_eq!(res, 465);
+
+        let (res, i) = get_value(5, 28, ScanHint::Sum);
+        assert_eq!(res, 420);
+        assert_eq!(i, 15);
+
+        let (res, i) = get_value(0, 9, ScanHint::Sum);
+        assert_eq!(res, 55);
+    }
+
+    #[test]
+    fn test_scan_hints_min() {
+        set_up_files!(file_paths, "1.ty", "2.ty", "3.ty",);
+
+        let mut timestamp = 0;
+        let mut timestamps = Vec::new();
+        let mut values = Vec::new();
+
+        for file_path in &file_paths {
+            let mut local_timestamps = Vec::new();
+            let mut local_values = Vec::new();
+            for i in 0..10u64 {
+                local_timestamps.push(timestamp);
+                local_values.push(timestamp + 1);
+                timestamp += 1;
+            }
+
+            generate_ty_file(file_path.into(), &local_timestamps, &local_values);
+            timestamps.append(&mut local_timestamps);
+            values.append(&mut local_values);
+        }
+
+        let file_paths_arc: Rc<[PathBuf]> = file_paths.into();
+        let mut page_cache = Rc::new(RefCell::new(PageCache::new(10)));
+
+        let get_value = |start: Timestamp, end: Timestamp, hint: ScanHint| -> (Value, i32) {
+            let mut cursor =
+                Cursor::new(file_paths_arc.clone(), start, end, page_cache.clone(), hint).unwrap();
+
+            let mut i = 0;
+            let mut res = Value::MAX;
+            loop {
+                let (timestamp, value) = cursor.fetch();
+                res = res.min(value);
+                i += 1;
+                if cursor.next().is_none() {
+                    break;
+                }
+            }
+
+            (res, i)
+        };
+
+        let (res, i) = get_value(0, 30, ScanHint::Min);
+        assert_eq!(res, 1);
+        assert_eq!(i, 3);
+
+        let (res, i) = get_value(5, 28, ScanHint::Min);
+        assert_eq!(res, 6);
+        assert_eq!(i, 15);
+
+        let (res, i) = get_value(2, 9, ScanHint::Min);
+        assert_eq!(res, 3);
     }
 }

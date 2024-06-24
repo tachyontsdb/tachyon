@@ -1,6 +1,9 @@
 use crate::{
     common::{Timestamp, Value},
-    storage::{file::Cursor, page_cache::PageCache},
+    storage::{
+        file::{Cursor, ScanHint},
+        page_cache::PageCache,
+    },
 };
 use std::{
     cell::RefCell,
@@ -105,6 +108,7 @@ impl Context {
                 start,
                 end,
                 self.page_cache.clone(),
+                ScanHint::None,
             )
             .unwrap(),
         ));
