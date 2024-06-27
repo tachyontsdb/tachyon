@@ -2,6 +2,7 @@ use std::{
     collections::HashSet,
     fs::{self, ReadDir},
     hash::Hash,
+    path::PathBuf,
     result,
 };
 
@@ -18,24 +19,33 @@ struct IdsEntry {
 }
 
 trait IndexerStore {
-    fn insert_new_id(&self, root_dir: &str, stream: &str, matchers: &Matchers);
+    fn insert_new_id(&self, stream: &str, matchers: &Matchers);
     fn get_ids(&self, conn: &Connection, name: &str, value: &str) -> IdsEntry;
     fn get_stream_and_matcher_ids(
         &self,
-        root_dir: &str,
         stream: &str,
         matchers: &Matchers,
     ) -> Vec<HashSet<u128>>;
 }
 
-struct SQLiteIndexerStore {}
+struct SQLiteIndexerStore {
+    db_path: PathBuf,
+}
+
+impl SQLiteIndexerStore {
+    fn new(root_dir: &PathBuf) -> Self {
+        let mut db_path = root_dir.clone();
+        db_path.set_file_name("indexer.sqlite");
+
+        Self { db_path: db_path }
+    }
+}
 
 impl IndexerStore for SQLiteIndexerStore {
-    fn insert_new_id(&self, root_dir: &str, stream: &str, matchers: &Matchers) {
+    fn insert_new_id(&self, stream: &str, matchers: &Matchers) {
         let new_id = Uuid::new_v4();
 
-        let mut conn: Connection =
-            Connection::open(format!("{}/indexer.sqlite", root_dir)).unwrap();
+        let mut conn = Connection::open(&self.db_path).unwrap();
         let mut stmt = conn
             .prepare("INSERT INTO mapping (name, value, ids) VALUES (?, ?, ?)")
             .unwrap();
@@ -76,13 +86,12 @@ impl IndexerStore for SQLiteIndexerStore {
 
     fn get_stream_and_matcher_ids(
         &self,
-        root_dir: &str,
         stream: &str,
         matchers: &Matchers,
     ) -> Vec<HashSet<u128>> {
         let mut ids: Vec<HashSet<u128>> = vec![];
 
-        let conn: Connection = Connection::open(format!("{}/indexer.sqlite", root_dir)).unwrap();
+        let conn = Connection::open(&self.db_path).unwrap();
 
         ids.push(self.get_ids(&conn, "__name", stream).ids);
 
@@ -95,20 +104,18 @@ impl IndexerStore for SQLiteIndexerStore {
 }
 
 struct Indexer {
-    root_dir: String,
     store: Box<dyn IndexerStore>,
 }
 
 impl Indexer {
-    fn new(root_dir: String) -> Self {
+    fn new(root_dir: PathBuf) -> Self {
         Self {
-            root_dir,
-            store: Box::new(SQLiteIndexerStore {}),
+            store: Box::new(SQLiteIndexerStore::new(&root_dir)),
         }
     }
 
     fn insert_new_id(&self, stream: &str, matchers: &Matchers) {
-        self.store.insert_new_id(&self.root_dir, stream, matchers);
+        self.store.insert_new_id(stream, matchers);
     }
 
     fn get_intersecting_ids(&self, id_lists: &[HashSet<u128>]) -> HashSet<u128> {
@@ -141,9 +148,7 @@ impl Indexer {
         start: Timestamp,
         end: Timestamp,
     ) -> Result<Vec<String>, &'static str> {
-        let id_lists = self
-            .store
-            .get_stream_and_matcher_ids(&self.root_dir, &stream, &matchers);
+        let id_lists = self.store.get_stream_and_matcher_ids(&stream, &matchers);
         let intersecting_ids = self.get_intersecting_ids(&id_lists);
 
         for id in intersecting_ids {
@@ -155,7 +160,7 @@ impl Indexer {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, hash::Hash};
+    use std::{collections::HashSet, hash::Hash, path::PathBuf};
 
     use promql_parser::label::{MatchOp, Matcher, Matchers};
     use rusqlite::Connection;
@@ -164,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_intersection() {
-        let indexer = Indexer::new("root_dir".to_string());
+        let indexer = Indexer::new(PathBuf::from("root_dir/"));
 
         let hs1 = HashSet::from([1, 2, 3, 4, 5]);
         let hs2 = HashSet::from([1, 3, 5]);
@@ -191,7 +196,7 @@ mod tests {
         )
         .unwrap();
 
-        let indexer = Indexer::new("tmp".to_string());
+        let indexer = Indexer::new(PathBuf::from("tmp/"));
         let matchers = Matchers::new(vec![
             Matcher::new(MatchOp::Equal, "app", "dummy"),
             Matcher::new(MatchOp::Equal, "service", "backend"),
@@ -200,7 +205,7 @@ mod tests {
         indexer.insert_new_id("https", &matchers);
         let ids = indexer
             .store
-            .get_stream_and_matcher_ids("tmp", "https", &matchers);
+            .get_stream_and_matcher_ids("https", &matchers);
 
         println!("{:?}", ids);
     }
