@@ -21,11 +21,7 @@ struct IdsEntry {
 trait IndexerStore {
     fn insert_new_id(&self, stream: &str, matchers: &Matchers);
     fn get_ids(&self, conn: &Connection, name: &str, value: &str) -> IdsEntry;
-    fn get_stream_and_matcher_ids(
-        &self,
-        stream: &str,
-        matchers: &Matchers,
-    ) -> Vec<HashSet<u128>>;
+    fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<u128>>;
 }
 
 struct SQLiteIndexerStore {
@@ -35,8 +31,7 @@ struct SQLiteIndexerStore {
 impl SQLiteIndexerStore {
     fn new(root_dir: &PathBuf) -> Self {
         let mut db_path = root_dir.clone();
-        db_path.set_file_name("indexer.sqlite");
-
+        db_path.push("indexer.sqlite");
         Self { db_path: db_path }
     }
 }
@@ -84,11 +79,7 @@ impl IndexerStore for SQLiteIndexerStore {
         }
     }
 
-    fn get_stream_and_matcher_ids(
-        &self,
-        stream: &str,
-        matchers: &Matchers,
-    ) -> Vec<HashSet<u128>> {
+    fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<u128>> {
         let mut ids: Vec<HashSet<u128>> = vec![];
 
         let conn = Connection::open(&self.db_path).unwrap();
@@ -169,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_intersection() {
-        let indexer = Indexer::new(PathBuf::from("root_dir/"));
+        let indexer = Indexer::new(PathBuf::from(""));
 
         let hs1 = HashSet::from([1, 2, 3, 4, 5]);
         let hs2 = HashSet::from([1, 3, 5]);
@@ -196,16 +187,14 @@ mod tests {
         )
         .unwrap();
 
-        let indexer = Indexer::new(PathBuf::from("tmp/"));
+        let indexer = Indexer::new(PathBuf::from("./tmp/"));
         let matchers = Matchers::new(vec![
             Matcher::new(MatchOp::Equal, "app", "dummy"),
             Matcher::new(MatchOp::Equal, "service", "backend"),
         ]);
 
         indexer.insert_new_id("https", &matchers);
-        let ids = indexer
-            .store
-            .get_stream_and_matcher_ids("https", &matchers);
+        let ids = indexer.store.get_stream_and_matcher_ids("https", &matchers);
 
         println!("{:?}", ids);
     }
