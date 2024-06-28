@@ -20,7 +20,7 @@ struct IdsEntry {
 
 trait IndexerStore {
     fn insert_new_id(&self, stream: &str, matchers: &Matchers) -> Uuid;
-    fn insert_new_file(&self, id: &Uuid, file: &PathBuf, start: &Timestamp, end: &Timestamp);
+    fn insert_new_file(&self, id: &Uuid, file: &Path, start: &Timestamp, end: &Timestamp);
     fn get_ids(&self, conn: &Connection, name: &str, value: &str) -> IdsEntry;
     fn get_stream_and_matcher_ids(
         &self,
@@ -32,7 +32,7 @@ trait IndexerStore {
         streams: &HashSet<Uuid>,
         start: &Timestamp,
         end: &Timestamp,
-    ) -> Vec<Box<PathBuf>>;
+    ) -> Vec<PathBuf>;
 }
 
 struct SQLiteIndexerStore {
@@ -40,7 +40,7 @@ struct SQLiteIndexerStore {
 }
 
 impl SQLiteIndexerStore {
-    fn new(root_dir: &PathBuf) -> Self {
+    fn new(root_dir: &Path) -> Self {
         Self {
             db_path: root_dir.join("indexer.sqlite"),
         }
@@ -77,7 +77,7 @@ impl IndexerStore for SQLiteIndexerStore {
         new_id
     }
 
-    fn insert_new_file(&self, id: &Uuid, file: &PathBuf, start: &Timestamp, end: &Timestamp) {
+    fn insert_new_file(&self, id: &Uuid, file: &Path, start: &Timestamp, end: &Timestamp) {
         let mut conn = Connection::open(&self.db_path).unwrap();
         conn.execute(
             "INSERT INTO id_to_files (id, filename, start, end) VALUES (?, ?, ?, ?)",
@@ -117,8 +117,8 @@ impl IndexerStore for SQLiteIndexerStore {
         stream_ids: &HashSet<Uuid>,
         start: &Timestamp,
         end: &Timestamp,
-    ) -> Vec<Box<PathBuf>> {
-        let mut paths: Vec<Box<PathBuf>> = Vec::new();
+    ) -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = Vec::new();
 
         let mut conn = Connection::open(&self.db_path).unwrap();
         let mut stmt = conn
@@ -130,9 +130,7 @@ impl IndexerStore for SQLiteIndexerStore {
                 let mapped_rows = rows.mapped(|row| row.get::<usize, String>(0));
 
                 for row in mapped_rows {
-                    if let Ok(filename) = row {
-                        paths.push(Box::new(PathBuf::from(filename)));
-                    }
+                    paths.push(PathBuf::from(row.unwrap()));
                 }
             }
         }
@@ -154,16 +152,11 @@ impl Indexer {
         }
     }
 
-    fn insert_new_id(
-        &self,
-        stream: &str,
-        matchers: &Matchers,
-    ) -> Uuid {
-        let new_id = self.store.insert_new_id(stream, matchers);
-        new_id
+    fn insert_new_id(&self, stream: &str, matchers: &Matchers) -> Uuid {
+        self.store.insert_new_id(stream, matchers)
     }
 
-    fn insert_new_file(&self, id: &Uuid, file: &PathBuf, start: &Timestamp, end: &Timestamp) {
+    fn insert_new_file(&self, id: &Uuid, file: &Path, start: &Timestamp, end: &Timestamp) {
         self.store.insert_new_file(id, file, start, end);
     }
 
@@ -196,14 +189,12 @@ impl Indexer {
         matchers: &Matchers,
         start: &Timestamp,
         end: &Timestamp,
-    ) -> Vec<Box<PathBuf>> {
-        let id_lists = self.store.get_stream_and_matcher_ids(&stream, &matchers);
+    ) -> Vec<PathBuf> {
+        let id_lists = self.store.get_stream_and_matcher_ids(stream, matchers);
         let intersecting_ids = self.get_intersecting_ids(&id_lists);
-        let files = self
+        self
             .store
-            .get_files_for_stream_ids(&intersecting_ids, start, end);
-
-        files
+            .get_files_for_stream_ids(&intersecting_ids, start, end)
     }
 }
 
@@ -240,7 +231,7 @@ mod tests {
     fn test_get_required_files() {
         // SQLite Setup
         let mut conn = Connection::open("./tmp/indexer.sqlite").unwrap();
-        
+
         conn.execute("DROP TABLE if exists stream_to_ids", ())
             .unwrap();
         conn.execute(
@@ -278,7 +269,7 @@ mod tests {
             Matcher::new(MatchOp::Equal, "service", "backend"),
         ]);
 
-        let id = indexer.insert_new_id(&stream, &matchers);
+        let id = indexer.insert_new_id(stream, &matchers);
 
         let file1 = PathBuf::from(format!("./tmp/{}/file1.ty", id));
         indexer.insert_new_file(&id, &file1, &1, &3);
@@ -290,8 +281,7 @@ mod tests {
         indexer.insert_new_file(&id, &file3, &5, &7);
 
         // Query indexer storage
-        let filenames_box = indexer.get_required_files(stream, &matchers, &2, &4);
-        let filenames_val: Vec<PathBuf> = filenames_box.iter().map(|f| *(*f).to_owned()).collect();
-        assert_eq!(filenames_val, Vec::from([file1, file2]));
+        let filenames = indexer.get_required_files(stream, &matchers, &2, &4);
+        assert_eq!(filenames, Vec::from([file1, file2]));
     }
 }
