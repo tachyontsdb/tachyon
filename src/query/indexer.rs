@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     fs::{self, ReadDir},
     hash::Hash,
-    path::PathBuf,
+    path::{Path, PathBuf},
     result,
 };
 
@@ -29,10 +29,10 @@ struct SQLiteIndexerStore {
 }
 
 impl SQLiteIndexerStore {
-    fn new(root_dir: &PathBuf) -> Self {
-        let mut db_path = root_dir.clone();
+    fn new(root_dir: &Path) -> Self {
+        let mut db_path = root_dir.to_path_buf();
         db_path.push("indexer.sqlite");
-        Self { db_path: db_path }
+        Self { db_path }
     }
 }
 
