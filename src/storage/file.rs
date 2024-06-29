@@ -1,7 +1,9 @@
+use super::compression::DecompressionEngine;
 use super::page_cache::{self, FileId, PageCache, SeqPageRead};
 use crate::common::{Timestamp, Value};
 use crate::storage::compression::CompressionEngine;
 use crate::storage::page_cache::page_cache_sequential_read;
+use crate::utils::file_utils::FileReaderUtil;
 use std::cell::RefCell;
 use std::mem;
 use std::{
@@ -19,68 +21,21 @@ const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
 
 pub const MAX_NUM_ENTRIES: usize = 62500;
 
-struct FileReaderUtil;
-const VAR_U64_READERS: [fn(&[u8]) -> u64; 4] = [
-    FileReaderUtil::read_u64_1,
-    FileReaderUtil::read_u64_2,
-    FileReaderUtil::read_u64_4,
-    FileReaderUtil::read_u64_8,
-];
-
-// TODO: Check this, changed
-impl FileReaderUtil {
-    fn read_u16(buffer: [u8; size_of::<u16>()]) -> u16 {
-        u16::from_le_bytes(buffer)
-    }
-
-    fn read_u32(buffer: [u8; size_of::<u32>()]) -> u32 {
-        u32::from_le_bytes(buffer)
-    }
-
-    fn read_u64(buffer: [u8; size_of::<u64>()]) -> u64 {
-        u64::from_le_bytes(buffer)
-    }
-
-    // Varint decoding
-    #[inline]
-    fn read_u64_1(buf: &[u8]) -> u64 {
-        buf[0] as u64
-    }
-
-    #[inline]
-    fn read_u64_2(buf: &[u8]) -> u64 {
-        ((buf[1] as u64) << 8) | (buf[0] as u64)
-    }
-    #[inline]
-    fn read_u64_4(buf: &[u8]) -> u64 {
-        ((buf[3] as u64) << 24) | ((buf[2] as u64) << 16) | ((buf[1] as u64) << 8) | (buf[0] as u64)
-    }
-
-    #[inline]
-    fn read_u64_8(buf: &[u8]) -> u64 {
-        let mut res = 0u64;
-        for (i, byte) in buf.iter().enumerate().take(8) {
-            res |= (*byte as u64) << (i * 8);
-        }
-        res
-    }
-}
-
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct Header {
-    version: u16,
+    pub version: u16,
 
-    stream_id: u64,
+    pub stream_id: u64,
 
-    min_timestamp: Timestamp,
-    max_timestamp: Timestamp,
+    pub min_timestamp: Timestamp,
+    pub max_timestamp: Timestamp,
 
-    value_sum: Value,
-    count: u32,
-    min_value: Value,
-    max_value: Value,
+    pub value_sum: Value,
+    pub count: u32,
+    pub min_value: Value,
+    pub max_value: Value,
 
-    first_value: Value,
+    pub first_value: Value,
 }
 
 const HEADER_SIZE: usize = 62;
@@ -95,15 +50,15 @@ impl Header {
         let buffer = &mut buffer[MAGIC_SIZE..];
 
         Self {
-            version: FileReaderUtil::read_u16(buffer[0..2].try_into().unwrap()),
-            stream_id: FileReaderUtil::read_u64(buffer[2..10].try_into().unwrap()),
-            min_timestamp: FileReaderUtil::read_u64(buffer[10..18].try_into().unwrap()),
-            max_timestamp: FileReaderUtil::read_u64(buffer[18..26].try_into().unwrap()),
-            value_sum: FileReaderUtil::read_u64(buffer[26..34].try_into().unwrap()),
-            count: FileReaderUtil::read_u32(buffer[34..38].try_into().unwrap()),
-            min_value: FileReaderUtil::read_u64(buffer[38..46].try_into().unwrap()),
-            max_value: FileReaderUtil::read_u64(buffer[46..54].try_into().unwrap()),
-            first_value: FileReaderUtil::read_u64(buffer[54..62].try_into().unwrap()),
+            version: FileReaderUtil::read_u64_2(&buffer[0..2]) as u16,
+            stream_id: FileReaderUtil::read_u64_8(&buffer[2..10]),
+            min_timestamp: FileReaderUtil::read_u64_8(&buffer[10..18]),
+            max_timestamp: FileReaderUtil::read_u64_8(&buffer[18..26]),
+            value_sum: FileReaderUtil::read_u64_8(&buffer[26..34]),
+            count: FileReaderUtil::read_u64_4(&buffer[34..38]) as u32,
+            min_value: FileReaderUtil::read_u64_8(&buffer[38..46]),
+            max_value: FileReaderUtil::read_u64_8(&buffer[46..54]),
+            first_value: FileReaderUtil::read_u64_8(&buffer[54..62]),
         }
     }
 
@@ -144,17 +99,11 @@ pub struct Cursor {
     current_timestamp: Timestamp,
     value: Value,
     values_read: u64,
-    offset: usize,
-    last_deltas: (i64, i64),
 
-    // length byte
-    cur_length_byte: u8,
     file_paths: Rc<[PathBuf]>,
 
-    seq_reader: SeqPageRead,
-
-    next_timestamp: Timestamp,
-    next_value: Value,
+    page_cache: Rc<RefCell<PageCache>>,
+    decomp_engine: DecompressionEngine<SeqPageRead>,
 
     scan_hint: ScanHint,
 }
@@ -187,6 +136,11 @@ impl Cursor {
 
         drop(page_cache_ref);
 
+        let decomp_engine = DecompressionEngine::new(
+            page_cache_sequential_read(page_cache.clone(), file_id, MAGIC_SIZE + HEADER_SIZE),
+            &header,
+        );
+
         let mut cursor = Self {
             file_id,
             file_index: 0,
@@ -196,14 +150,9 @@ impl Cursor {
             start,
             end,
             values_read: 1,
-            offset: MAGIC_SIZE + HEADER_SIZE,
-            cur_length_byte: 0,
             file_paths,
-            last_deltas: (0, 0),
-            seq_reader: page_cache_sequential_read(page_cache, file_id, MAGIC_SIZE + HEADER_SIZE),
-
-            next_timestamp: 0,
-            next_value: 0,
+            page_cache,
+            decomp_engine,
 
             scan_hint,
         };
@@ -214,12 +163,6 @@ impl Cursor {
             && cursor.header.max_timestamp <= end
         {
             cursor.use_query_hint();
-        }
-        // check that file has values
-        else if cursor.header.count > 1 {
-            let mut l_buf = [0u8; 1];
-            cursor.offset += cursor.seq_reader.read(&mut l_buf);
-            cursor.cur_length_byte = l_buf[0];
         }
 
         while cursor.current_timestamp < start {
@@ -254,24 +197,26 @@ impl Cursor {
             return None;
         }
         self.file_id = self
-            .seq_reader
             .page_cache
             .borrow_mut()
             .register_or_get_file_id(&self.file_paths[self.file_index]);
-        self.header = Header::parse(self.file_id, &mut self.seq_reader.page_cache.borrow_mut());
+        self.header = Header::parse(self.file_id, &mut self.page_cache.borrow_mut());
 
         if self.header.min_timestamp > self.end {
             return None;
         }
 
-        self.offset = MAGIC_SIZE + HEADER_SIZE;
-
         self.current_timestamp = self.header.min_timestamp;
         self.value = self.header.first_value;
         self.values_read = 1;
-        self.last_deltas = (0, 0);
-
-        self.seq_reader.reset(self.file_id, self.offset);
+        self.decomp_engine = DecompressionEngine::new(
+            page_cache_sequential_read(
+                self.page_cache.clone(),
+                self.file_id,
+                MAGIC_SIZE + HEADER_SIZE,
+            ),
+            &self.header,
+        );
 
         // use the query hint if applicable on the next file
         if !matches!(self.scan_hint, ScanHint::None)
@@ -279,10 +224,6 @@ impl Cursor {
             && self.header.max_timestamp <= self.end
         {
             self.use_query_hint();
-        } else if self.header.count > 1 {
-            let mut l_buf = [0u8; 1];
-            self.offset += self.seq_reader.read(&mut l_buf);
-            self.cur_length_byte = l_buf[0];
         }
         Some(())
     }
@@ -304,72 +245,11 @@ impl Cursor {
             return Some((self.current_timestamp, self.value));
         }
 
-        if self.values_read % 2 == 0 {
-            self.current_timestamp = self.next_timestamp;
-            self.value = self.next_value;
-            if self.current_timestamp > self.end {
-                return None;
-            }
-
-            self.values_read += 1;
-            return Some((self.current_timestamp, self.value));
-        }
-
-        // compute integer lengths
-        let indexes: [usize; 4] = [
-            ((self.cur_length_byte >> 6) & 0b11) as usize,
-            ((self.cur_length_byte >> 4) & 0b11) as usize,
-            ((self.cur_length_byte >> 2) & 0b11) as usize,
-            ((self.cur_length_byte) & 0b11) as usize,
-        ];
-
-        let total_varint_lengths = EXPONENTS[indexes[0]]
-            + EXPONENTS[indexes[1]]
-            + EXPONENTS[indexes[2]]
-            + EXPONENTS[indexes[3]];
-
-        // read deltas + next length byte
-        let mut buffer = [0u8; 2 * (size_of::<Timestamp>() + size_of::<Value>()) + 1];
-        self.offset += self
-            .seq_reader
-            .read(&mut buffer[0..total_varint_lengths + 1]);
-
-        let mut decoded_deltas = [0i64; 4];
-        let mut buf_offset = 0;
-
-        for i in 0..4 {
-            let encoded = VAR_U64_READERS[indexes[i]](
-                &buffer[buf_offset..buf_offset + EXPONENTS[indexes[i]]],
-            );
-            buf_offset += EXPONENTS[indexes[i]];
-            decoded_deltas[i] = CompressionEngine::zig_zag_decode(encoded);
-        }
-
-        // compute timestamp / value
-        self.last_deltas.0 += decoded_deltas[0];
-        self.current_timestamp = self
-            .current_timestamp
-            .wrapping_add_signed(self.last_deltas.0);
-
-        self.last_deltas.1 += decoded_deltas[1];
-        self.value = self.value.wrapping_add_signed(self.last_deltas.1);
-
+        (self.current_timestamp, self.value) = self.decomp_engine.next();
         if self.current_timestamp > self.end {
             return None;
         }
-
-        // compute next timestamp / value
-        self.last_deltas.0 += decoded_deltas[2];
-        self.next_timestamp = self
-            .current_timestamp
-            .wrapping_add_signed(self.last_deltas.0);
-
-        self.last_deltas.1 += decoded_deltas[3];
-        self.next_value = self.value.wrapping_add_signed(self.last_deltas.1);
-
-        // update state
         self.values_read += 1;
-        self.cur_length_byte = buffer[total_varint_lengths];
 
         Some((self.current_timestamp, self.value))
     }
