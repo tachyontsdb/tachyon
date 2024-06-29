@@ -1,7 +1,7 @@
 use super::compression::DecompressionEngine;
 use super::page_cache::{self, FileId, PageCache, SeqPageRead};
 use crate::common::{Timestamp, Value};
-use crate::storage::compression::CompressionEngine;
+use crate::storage::compression::{CompressionEngine, CompressionUtils};
 use crate::storage::page_cache::page_cache_sequential_read;
 use crate::utils::file_utils::FileReaderUtil;
 use std::cell::RefCell;
@@ -312,33 +312,19 @@ impl TimeDataFile {
         let mut file = File::create(path).unwrap();
 
         let header_bytes = self.header.write(&mut file).unwrap();
+        let mut comp_engine = CompressionEngine::new(file, &self.header);
 
-        let mut body = Vec::<u64>::new();
-
-        let mut last_deltas: (i64, i64) = (0, 0);
         for i in 1usize..(self.header.count as usize) {
-            // Assumption: difference will never exceed i64
-            let curr_deltas = (
-                (self.timestamps[i].wrapping_sub(self.timestamps[i - 1])) as i64,
-                (self.values[i].wrapping_sub(self.values[i - 1])) as i64,
-            );
-
-            body.push(CompressionEngine::zig_zag_encode(
-                curr_deltas.0 - last_deltas.0,
-            ));
-            body.push(CompressionEngine::zig_zag_encode(
-                curr_deltas.1 - last_deltas.1,
-            ));
-            last_deltas = curr_deltas
+            comp_engine.consume(self.timestamps[i], self.values[i]);
         }
-        let body_compressed = CompressionEngine::compress(&body);
+
         println!(
             "Original {}, compressed: {}",
-            (8 * body.len()),
-            (body_compressed.len()),
+            (8 * (self.timestamps.len() + self.values.len())),
+            (header_bytes + comp_engine.bytes_compressed()),
         );
-        file.write_all(&body_compressed).unwrap();
-        body_compressed.len() + header_bytes
+        comp_engine.flush_all();
+        header_bytes + comp_engine.bytes_compressed()
     }
 
     pub fn write_data_to_file_in_mem(&mut self, timestamp: Timestamp, value: Value) {
