@@ -287,7 +287,7 @@ mod tests {
             &format!(
                 "
                 CREATE TABLE {} (
-                    id TEXT,
+                    id INTEGER,
                     filename TEXT,
                     start INTEGER,
                     end INTEGER
