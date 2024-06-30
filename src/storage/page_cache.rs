@@ -193,10 +193,14 @@ impl PageCache {
                 data: [0; PAGE_SIZE],
             };
 
-            let bytes_read = self.open_files.get_mut(&file_id).unwrap().read_at(
-                &mut new_page_info.data,
-                ((PAGE_SIZE as PageId) * page_id) as u64,
-            );
+            self.open_files
+                .get_mut(&file_id)
+                .unwrap()
+                .read_at(
+                    &mut new_page_info.data,
+                    ((PAGE_SIZE as PageId) * page_id) as u64,
+                )
+                .unwrap();
 
             self.mapping
                 .insert(((file_id as u64) << 32) | (page_id as u64), frame_id);

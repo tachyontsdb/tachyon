@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     common::{Timestamp, Value},
-    utils::file_utils::FileReaderUtil,
+    utils::{common::static_assert, file_utils::FileReaderUtil},
 };
 
 use super::file::Header;
@@ -324,14 +324,36 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV1<T> {
 }
 
 /*
-000 -> 1 bit
-001 -> 2 bits
-010 -> 4 bits
-011 -> 1 byte
-100 -> 2 bytes
-101 -> 3 bytes
-110 -> 4 bytes
-111 -> 8 bytes
+    Compression Scheme V2:
+--------------------------------------------------------
+    Encoded Header 3 Bytes (Big-endian encoded)
+    ---------------------------------------------------------
+    | XXX | XXX | XX || X | XXX | XXX | X || XX | XXX | XXX |
+    ---------------------------------------------------------
+
+    || -> Byte Boundary
+    |  -> Chunk boundary (each 3 bits represents length encoding)
+
+    Each XXX represents the length of each integer of the chunk. It will be max length
+    among the integers in the chunk.
+
+    XXX
+    - 000 -> 1 bit
+    - 001 -> 2 bits
+    - 010 -> 4 bits
+    - 011 -> 1 byte
+    - 100 -> 2 bytes
+    - 101 -> 3 bytes
+    - 110 -> 4 bytes
+    - 111 -> 8 bytes
+
+    Following the 3-byte length header, 8 chunks follow, with each chunk containing 8-16 integers
+    (specified by V2_CHUNK_SIZE).
+
+    Each integer is either bitpacked (for 1,2,4 bit representations):
+        - e.g. 2 bits: 00 10 11 00 (values: 0, 2, 3, 0)
+
+    or encoded in little-endian format otherwise.
 */
 
 pub struct V2;
@@ -340,8 +362,12 @@ impl<R: Read, W: Write> CompressionScheme<R, W> for V2 {
     type Compressor = CompressionEngineV2<W>;
 }
 
-const V2_CHUNK_SIZE: usize = 8;
+const V2_CHUNK_SIZE: usize = 16;
+static_assert!(V2_CHUNK_SIZE % 8 == 0);
+
 const V2_NUM_CHUNKS_PER_LENGTH: usize = 8;
+static_assert!(V2_NUM_CHUNKS_PER_LENGTH <= 8);
+
 const V2_CODE_TO_BITS: [u8; 8] = [1, 2, 4, 8, 16, 24, 32, 64];
 const V2_INT_READERS: [fn(&[u8]) -> u64; 5] = [
     FileReaderUtil::read_u64_1,
@@ -459,8 +485,9 @@ impl<T: Write> CompressionEngineV2<T> {
             } else {
                 // varint encode each integer
                 for x in arr {
+                    let bytes_needed = (max_bits_needed / 8) as usize;
                     self.temp_buffer
-                        .extend_from_slice(&x.to_le_bytes()[..(max_bits_needed / 8) as usize])
+                        .extend_from_slice(&x.to_le_bytes()[..bytes_needed])
                 }
             }
 
@@ -631,6 +658,7 @@ mod tests {
         storage::{
             compression::{
                 CompressionEngine, CompressionUtils, DecompressionEngine, DecompressionEngineV2,
+                V2_CHUNK_SIZE,
             },
             file::Header,
         },
@@ -675,7 +703,7 @@ mod tests {
         let result = engine.result;
 
         // 0010 1000
-        assert_eq!(result.len(), 9);
+        assert_eq!(result.len(), (V2_CHUNK_SIZE / 8) * 6 + 3);
         assert_eq!(result[0], 0x28);
         assert_eq!(result[1], 0x0);
         assert_eq!(result[2], 0x0);
@@ -684,8 +712,8 @@ mod tests {
         assert_eq!(result[3], 0b10000000);
         assert_eq!(result[4], 0);
 
-        assert_eq!(result[5], 0b01000101);
-        assert_eq!(result[6], 0);
+        assert_eq!(result[(V2_CHUNK_SIZE * 2) / 8 + 3], 0b01000101);
+        assert_eq!(result[(V2_CHUNK_SIZE * 2) / 8 + 4], 0);
 
         let mut decomp = DecompressionEngineV2::<&[u8]>::new(&result, &Header::default());
 
