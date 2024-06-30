@@ -6,7 +6,7 @@ use pprof::{
 use std::{cell::RefCell, rc::Rc};
 use tachyon::storage::{file::*, page_cache::PageCache};
 
-const NUM_ITEMS: u64 = 10000000;
+const NUM_ITEMS: u64 = 100000;
 
 fn bench_read_sequential_timestamps(
     start: u64,

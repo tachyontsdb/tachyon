@@ -650,6 +650,8 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV2<T> {
     }
 }
 
+pub type DefaultScheme = V2;
+
 #[cfg(test)]
 mod tests {
     use std::{cell::RefCell, io::Write, rc::Rc};
