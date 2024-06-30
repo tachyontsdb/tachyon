@@ -1,4 +1,5 @@
 use std::{
+    cmp::max,
     io::{Read, Write},
     mem::size_of,
 };
@@ -32,8 +33,29 @@ impl CompressionUtils {
     }
 }
 
+pub trait CompressionEngine<T: Write> {
+    fn new(writer: T, header: &Header) -> Self
+    where
+        Self: Sized;
+    fn consume(&mut self, timestamp: Timestamp, value: Value);
+    fn bytes_compressed(&self) -> usize;
+    fn flush_all(&mut self);
+}
+
+pub trait DecompressionEngine<T: Read> {
+    fn new(reader: T, header: &Header) -> Self
+    where
+        Self: Sized;
+    fn next(&mut self) -> (Timestamp, Value);
+}
+
+pub trait CompressionScheme<R: Read, W: Write> {
+    type Decompressor: DecompressionEngine<R>;
+    type Compressor: CompressionEngine<W>;
+}
+
 /*
-    Compression Scheme:
+    Compression Scheme V1:
 --------------------------------------------------------
     Encoded Header
     ---------------------
@@ -49,7 +71,43 @@ impl CompressionUtils {
     Based on google compression algorithm: https://static.googleusercontent.com/media/research.google.com/en//people/jeff/WSDM09-keynote.pdf
 */
 
-pub struct CompressionEngine<T: Write> {
+/*
+
+Examples of Double Delta + Zig Zag
+
+Example 1
+1 5 6 9 12 13 19 23 24 29 32
+
+1st deltas
+4 1 3 3 1 6 4 1 5 3
+
+2nd deltas
+-3 2 0 -2 5 -3 -3 4 -2
+
+zig zag:
+5 4 0 3 10 5 5 8 3
+
+----------------------
+Example 2
+1 3 5 7 10 13 15 16 18 20 24
+
+1st
+2 2 2 3 3 2 1 2 2 4
+
+2nd
+0 0 1 0 -1 -1 1 0 2
+
+zig:
+0 0 2 0 1 1 2 0 4
+
+*/
+pub struct V1;
+impl<R: Read, W: Write> CompressionScheme<R, W> for V1 {
+    type Decompressor = DecompressionEngineV1<R>;
+    type Compressor = CompressionEngineV1<W>;
+}
+
+pub struct CompressionEngineV1<T: Write> {
     writer: T,
     last_timestamp: Timestamp,
     last_value: Value,
@@ -62,8 +120,8 @@ pub struct CompressionEngine<T: Write> {
     result: Vec<u8>,
 }
 
-impl<T: Write> CompressionEngine<T> {
-    pub fn new(writer: T, header: &Header) -> Self {
+impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
+    fn new(writer: T, header: &Header) -> Self {
         Self {
             writer,
             last_timestamp: header.min_timestamp,
@@ -77,7 +135,7 @@ impl<T: Write> CompressionEngine<T> {
         }
     }
 
-    pub fn consume(&mut self, timestamp: Timestamp, value: Value) {
+    fn consume(&mut self, timestamp: Timestamp, value: Value) {
         let curr_deltas = (
             (timestamp.wrapping_sub(self.last_timestamp)) as i64,
             (value.wrapping_sub(self.last_value)) as i64,
@@ -99,15 +157,18 @@ impl<T: Write> CompressionEngine<T> {
         self.last_deltas = curr_deltas;
     }
 
-    pub fn bytes_compressed(&self) -> usize {
+    fn bytes_compressed(&self) -> usize {
         self.result.len()
     }
 
-    pub fn flush_all(&mut self) {
+    fn flush_all(&mut self) {
         self.flush();
         self.writer.write_all(&self.result).unwrap();
     }
+}
 
+impl<T: Write> CompressionEngineV1<T> {
+    // called when the local buffer can be written along with length byte
     fn flush(&mut self) {
         if self.buffer_idx == 0 {
             return;
@@ -164,7 +225,7 @@ impl<T: Write> CompressionEngine<T> {
     }
 }
 
-pub struct DecompressionEngine<T: Read> {
+pub struct DecompressionEngineV1<T: Read> {
     reader: T,
 
     values_read: u32,
@@ -178,8 +239,8 @@ pub struct DecompressionEngine<T: Read> {
     next_value: Value,
 }
 
-impl<T: Read> DecompressionEngine<T> {
-    pub fn new(mut reader: T, header: &Header) -> Self {
+impl<T: Read> DecompressionEngine<T> for DecompressionEngineV1<T> {
+    fn new(mut reader: T, header: &Header) -> Self {
         let mut l_buf = [0u8; 1];
         if header.count > 1 {
             reader.read_exact(&mut l_buf).unwrap();
@@ -198,8 +259,7 @@ impl<T: Read> DecompressionEngine<T> {
         }
     }
 
-    #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> (Timestamp, Value) {
+    fn next(&mut self) -> (Timestamp, Value) {
         if self.values_read % 2 == 0 {
             self.current_timestamp = self.next_timestamp;
             self.value = self.next_value;
@@ -263,9 +323,380 @@ impl<T: Read> DecompressionEngine<T> {
     }
 }
 
+/*
+000 -> 1 bit
+001 -> 2 bits
+010 -> 4 bits
+011 -> 1 byte
+100 -> 2 bytes
+101 -> 3 bytes
+110 -> 4 bytes
+111 -> 8 bytes
+*/
+
+pub struct V2;
+impl<R: Read, W: Write> CompressionScheme<R, W> for V2 {
+    type Decompressor = DecompressionEngineV2<R>;
+    type Compressor = CompressionEngineV2<W>;
+}
+
+const V2_CHUNK_SIZE: usize = 8;
+const V2_NUM_CHUNKS_PER_LENGTH: usize = 8;
+const V2_CODE_TO_BITS: [u8; 8] = [1, 2, 4, 8, 16, 24, 32, 64];
+const V2_INT_READERS: [fn(&[u8]) -> u64; 5] = [
+    FileReaderUtil::read_u64_1,
+    FileReaderUtil::read_u64_2,
+    FileReaderUtil::read_u64_3,
+    FileReaderUtil::read_u64_4,
+    FileReaderUtil::read_u64_8,
+];
+
+pub struct CompressionEngineV2<T: Write> {
+    writer: T,
+    last_timestamp: Timestamp,
+    last_value: Value,
+    last_deltas: (i64, i64),
+    entries_written: u32,
+
+    ts_d_deltas: [u64; V2_CHUNK_SIZE],
+    v_d_deltas: [u64; V2_CHUNK_SIZE],
+    buffer_idx: usize,
+    chunk_idx: usize,
+    cur_length: u32,
+
+    result: Vec<u8>,
+    temp_buffer: Vec<u8>,
+}
+
+impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
+    fn new(writer: T, header: &Header) -> Self {
+        Self {
+            writer,
+            last_timestamp: header.min_timestamp,
+            last_value: header.first_value,
+            last_deltas: (0, 0),
+            entries_written: 0,
+
+            ts_d_deltas: [0; V2_CHUNK_SIZE],
+            v_d_deltas: [0; V2_CHUNK_SIZE],
+            buffer_idx: 0,
+            chunk_idx: 0,
+            cur_length: 0,
+            result: Vec::new(),
+            temp_buffer: Vec::new(),
+        }
+    }
+
+    fn consume(&mut self, timestamp: Timestamp, value: Value) {
+        let curr_deltas = (
+            (timestamp.wrapping_sub(self.last_timestamp)) as i64,
+            (value.wrapping_sub(self.last_value)) as i64,
+        );
+
+        let double_delta = curr_deltas.0 - self.last_deltas.0;
+        self.ts_d_deltas[self.buffer_idx] = CompressionUtils::zig_zag_encode(double_delta);
+
+        let double_delta = curr_deltas.1 - self.last_deltas.1;
+        self.v_d_deltas[self.buffer_idx] = CompressionUtils::zig_zag_encode(double_delta);
+
+        self.buffer_idx += 1;
+        if self.buffer_idx >= V2_CHUNK_SIZE {
+            self.flush();
+        }
+
+        self.entries_written += 1;
+        self.last_timestamp = timestamp;
+        self.last_value = value;
+        self.last_deltas = curr_deltas;
+    }
+
+    fn bytes_compressed(&self) -> usize {
+        self.result.len()
+    }
+
+    fn flush_all(&mut self) {
+        self.flush();
+        self.flush_chunk();
+        self.writer.write_all(&self.result).unwrap();
+    }
+}
+
+impl<T: Write> CompressionEngineV2<T> {
+    // called when the local buffer can be written along with length byte
+    fn flush(&mut self) {
+        if self.buffer_idx == 0 {
+            return;
+        }
+
+        // handle partially-filled buffers
+        for i in self.buffer_idx..self.ts_d_deltas.len() {
+            self.ts_d_deltas[i] = 0;
+            self.v_d_deltas[i] = 0;
+        }
+
+        // write the chunk for timestamps & deltas
+        for arr in [&self.ts_d_deltas, &self.v_d_deltas] {
+            let mut max_bits_needed = 0;
+            for x in arr {
+                max_bits_needed = max(max_bits_needed, Self::bits_needed_u64(*x));
+            }
+            self.cur_length |= (Self::length_encoding(max_bits_needed) as u32)
+                << (21 - 3 * (self.chunk_idx as u32));
+
+            if max_bits_needed < 8 {
+                // bitpack each value
+                let mut byte: u8 = 0;
+                let values_per_byte = 8 / max_bits_needed as usize;
+                for (i, x) in arr.iter().enumerate().take(V2_CHUNK_SIZE) {
+                    let shift =
+                        (8 - max_bits_needed - (max_bits_needed) * (i % values_per_byte) as u8);
+                    byte |= (*x as u8) << shift;
+                    if (i % values_per_byte == values_per_byte - 1) {
+                        self.temp_buffer.push(byte);
+                        byte = 0;
+                    }
+                }
+            } else {
+                // varint encode each integer
+                for x in arr {
+                    self.temp_buffer
+                        .extend_from_slice(&x.to_le_bytes()[..(max_bits_needed / 8) as usize])
+                }
+            }
+
+            self.chunk_idx += 1;
+        }
+
+        if self.chunk_idx >= V2_NUM_CHUNKS_PER_LENGTH {
+            self.flush_chunk();
+        }
+
+        self.buffer_idx = 0;
+    }
+
+    fn flush_chunk(&mut self) {
+        if self.chunk_idx == 0 {
+            return;
+        }
+
+        self.result
+            .extend_from_slice(&self.cur_length.to_be_bytes()[1..]);
+        self.result.append(&mut self.temp_buffer);
+        self.chunk_idx = 0;
+        self.cur_length = 0;
+    }
+
+    fn length_encoding(n: u8) -> u8 {
+        if n == 1 {
+            0b000
+        } else if n == 2 {
+            0b001
+        } else if n == 4 {
+            0b010
+        } else if n == 8 {
+            0b011
+        } else if n == 16 {
+            0b100
+        } else if n == 24 {
+            0b101
+        } else if n == 32 {
+            0b110
+        } else if n == 64 {
+            0b111
+        } else {
+            panic!("Unknown bit length: {}.", n);
+        }
+    }
+
+    fn bits_needed_u64(n: u64) -> u8 {
+        if n < (1 << 1) {
+            1
+        } else if n < (1 << 2) {
+            2
+        } else if n < (1 << 4) {
+            4
+        } else if n < (1 << 8) {
+            8
+        } else if n < (1 << 16) {
+            16
+        } else if n < (1 << 24) {
+            24
+        } else if n < (1 << 32) {
+            32
+        } else {
+            64
+        }
+    }
+}
+
+pub struct DecompressionEngineV2<T: Read> {
+    reader: T,
+
+    values_read: u32,
+    cur_length: u32,
+
+    chunk_idx: u32,
+    buffer_idx: u32,
+
+    current_timestamp: Timestamp,
+    value: Value,
+    last_deltas: (i64, i64),
+
+    ts_d_deltas: [i64; V2_CHUNK_SIZE],
+    v_d_deltas: [i64; V2_CHUNK_SIZE],
+}
+
+impl<T: Read> DecompressionEngine<T> for DecompressionEngineV2<T> {
+    fn new(mut reader: T, header: &Header) -> Self {
+        Self {
+            reader,
+
+            values_read: 1,
+            cur_length: 0,
+
+            chunk_idx: V2_NUM_CHUNKS_PER_LENGTH as u32,
+            buffer_idx: V2_CHUNK_SIZE as u32,
+
+            current_timestamp: header.min_timestamp,
+            value: header.first_value,
+            last_deltas: (0, 0),
+
+            ts_d_deltas: [0; V2_CHUNK_SIZE],
+            v_d_deltas: [0; V2_CHUNK_SIZE],
+        }
+    }
+
+    fn next(&mut self) -> (Timestamp, Value) {
+        if self.buffer_idx >= V2_CHUNK_SIZE as u32 {
+            // read the next chunk
+            if self.chunk_idx >= V2_NUM_CHUNKS_PER_LENGTH as u32 {
+                let mut buf = [0u8; 4];
+                self.reader.read_exact(&mut buf[1..]).unwrap();
+                self.cur_length = u32::from_be_bytes(buf);
+                self.chunk_idx = 0;
+            }
+
+            for arr in [&mut self.ts_d_deltas, &mut self.v_d_deltas] {
+                let length_code = (self.cur_length >> (21 - 3 * (self.chunk_idx))) & 0b111;
+                let num_bits = V2_CODE_TO_BITS[length_code as usize];
+
+                let num_bytes = (num_bits as usize) * V2_CHUNK_SIZE / 8;
+                let mut buf = [0u8; V2_CHUNK_SIZE * 8];
+                self.reader.read_exact(&mut buf[..num_bytes]).unwrap();
+
+                // decode timestamp deltas
+                if num_bits < 8 {
+                    for (i, x) in arr.iter_mut().enumerate().take(V2_CHUNK_SIZE) {
+                        let byte_idx = (num_bits as usize) * i / 8;
+                        let bit_idx = ((num_bits as usize) * i) % 8;
+                        let shift = 8 - num_bits as usize - bit_idx;
+
+                        let encoded = ((buf[byte_idx] >> shift) & ((1 << num_bits) - 1)) as u64;
+                        *x = CompressionUtils::zig_zag_decode(encoded);
+                    }
+                } else {
+                    for (i, x) in arr.iter_mut().enumerate().take(V2_CHUNK_SIZE) {
+                        let byte_idx = (num_bits as usize) / 8 * i;
+                        let val = V2_INT_READERS[length_code as usize - 3](
+                            &buf[byte_idx..byte_idx + num_bits as usize / 8],
+                        );
+                        *x = CompressionUtils::zig_zag_decode(val);
+                    }
+                }
+                self.chunk_idx += 1;
+            }
+
+            self.buffer_idx = 0;
+        }
+
+        self.last_deltas.0 += self.ts_d_deltas[self.buffer_idx as usize];
+        self.last_deltas.1 += self.v_d_deltas[self.buffer_idx as usize];
+
+        self.current_timestamp = self
+            .current_timestamp
+            .wrapping_add_signed(self.last_deltas.0);
+
+        self.value = self.value.wrapping_add_signed(self.last_deltas.1);
+        self.values_read += 1;
+        self.buffer_idx += 1;
+        (self.current_timestamp, self.value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::storage::compression::{CompressionEngine, CompressionUtils};
+    use std::{cell::RefCell, io::Write, rc::Rc};
+
+    use crate::{
+        storage::{
+            compression::{
+                CompressionEngine, CompressionUtils, DecompressionEngine, DecompressionEngineV2,
+            },
+            file::Header,
+        },
+        utils::file_utils::FileReaderUtil,
+    };
+
+    use super::CompressionEngineV2;
+    #[test]
+    fn test_shift() {
+        fn case(max_bits_needed: u8, i: u8) -> u8 {
+            let values_per_byte = 8 / max_bits_needed;
+            (8 - max_bits_needed - (max_bits_needed) * (i % values_per_byte))
+        }
+
+        assert_eq!(case(1, 0), 7);
+        assert_eq!(case(1, 1), 6);
+        assert_eq!(case(1, 7), 0);
+        assert_eq!(case(1, 8), 7);
+
+        assert_eq!(case(2, 0), 6);
+        assert_eq!(case(2, 1), 4);
+        assert_eq!(case(2, 3), 0);
+
+        assert_eq!(case(4, 0), 4);
+        assert_eq!(case(4, 1), 0);
+        assert_eq!(case(4, 2), 4);
+    }
+
+    #[test]
+    fn test_compression_v2() {
+        let mut header = Header::default();
+        let mut engine = CompressionEngineV2::<Vec<u8>>::new(Vec::new(), &header);
+
+        // d2: 1 0
+        // d2: 2 -3
+
+        // d2: 2, 0 (2 bytes)
+        // d2: 4, 5 (4 bytes)
+        engine.consume(1, 2);
+        engine.consume(2, 1);
+        engine.flush_all();
+        let result = engine.result;
+
+        // 0010 1000
+        assert_eq!(result.len(), 9);
+        assert_eq!(result[0], 0x28);
+        assert_eq!(result[1], 0x0);
+        assert_eq!(result[2], 0x0);
+
+        // 0b1000
+        assert_eq!(result[3], 0b10000000);
+        assert_eq!(result[4], 0);
+
+        assert_eq!(result[5], 0b01000101);
+        assert_eq!(result[6], 0);
+
+        let mut decomp = DecompressionEngineV2::<&[u8]>::new(&result, &Header::default());
+
+        let (time, value) = decomp.next();
+        assert_eq!(time, 1);
+        assert_eq!(value, 2);
+
+        let (time, value) = decomp.next();
+        assert_eq!(time, 2);
+        assert_eq!(value, 1);
+    }
 
     #[test]
     fn test_zig_zag() {
@@ -274,6 +705,7 @@ mod tests {
         assert_eq!(2, CompressionUtils::zig_zag_encode(1));
         assert_eq!(3, CompressionUtils::zig_zag_encode(-2));
         assert_eq!(4, CompressionUtils::zig_zag_encode(2));
+        assert_eq!(379, CompressionUtils::zig_zag_encode(-190));
         assert_eq!(80, CompressionUtils::zig_zag_encode(40));
         assert_eq!(254, CompressionUtils::zig_zag_encode(127));
         assert_eq!(256, CompressionUtils::zig_zag_encode(128));

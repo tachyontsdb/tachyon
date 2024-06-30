@@ -1,7 +1,7 @@
-use super::compression::DecompressionEngine;
+use super::compression::{DecompressionEngine, V2};
 use super::page_cache::{self, FileId, PageCache, SeqPageRead};
 use crate::common::{Timestamp, Value};
-use crate::storage::compression::{CompressionEngine, CompressionUtils};
+use crate::storage::compression::{CompressionEngine, CompressionScheme, CompressionUtils, V1};
 use crate::storage::page_cache::page_cache_sequential_read;
 use crate::utils::file_utils::FileReaderUtil;
 use std::cell::RefCell;
@@ -103,7 +103,7 @@ pub struct Cursor {
     file_paths: Rc<[PathBuf]>,
 
     page_cache: Rc<RefCell<PageCache>>,
-    decomp_engine: DecompressionEngine<SeqPageRead>,
+    decomp_engine: <V2 as CompressionScheme<SeqPageRead, File>>::Decompressor,
 
     scan_hint: ScanHint,
 }
@@ -136,7 +136,7 @@ impl Cursor {
 
         drop(page_cache_ref);
 
-        let decomp_engine = DecompressionEngine::new(
+        let decomp_engine = <V2 as CompressionScheme<SeqPageRead, File>>::Decompressor::new(
             page_cache_sequential_read(page_cache.clone(), file_id, MAGIC_SIZE + HEADER_SIZE),
             &header,
         );
@@ -209,7 +209,7 @@ impl Cursor {
         self.current_timestamp = self.header.min_timestamp;
         self.value = self.header.first_value;
         self.values_read = 1;
-        self.decomp_engine = DecompressionEngine::new(
+        self.decomp_engine = <V2 as CompressionScheme<SeqPageRead, File>>::Decompressor::new(
             page_cache_sequential_read(
                 self.page_cache.clone(),
                 self.file_id,
@@ -312,7 +312,8 @@ impl TimeDataFile {
         let mut file = File::create(path).unwrap();
 
         let header_bytes = self.header.write(&mut file).unwrap();
-        let mut comp_engine = CompressionEngine::new(file, &self.header);
+        let mut comp_engine =
+            <V2 as CompressionScheme<SeqPageRead, File>>::Compressor::new(file, &self.header);
 
         for i in 1usize..(self.header.count as usize) {
             comp_engine.consume(self.timestamps[i], self.values[i]);
