@@ -232,7 +232,7 @@ pub struct DecompressionEngineV1<T: Read> {
     cur_length_byte: u8,
 
     current_timestamp: Timestamp,
-    value: Value,
+    current_value: Value,
     last_deltas: (i64, i64),
 
     next_timestamp: Timestamp,
@@ -252,7 +252,7 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV1<T> {
             cur_length_byte: l_buf[0],
 
             current_timestamp: header.min_timestamp,
-            value: header.first_value,
+            current_value: header.first_value,
             last_deltas: (0, 0),
             next_timestamp: 0,
             next_value: 0,
@@ -262,9 +262,9 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV1<T> {
     fn next(&mut self) -> (Timestamp, Value) {
         if self.values_read % 2 == 0 {
             self.current_timestamp = self.next_timestamp;
-            self.value = self.next_value;
+            self.current_value = self.next_value;
             self.values_read += 1;
-            return (self.current_timestamp, self.value);
+            return (self.current_timestamp, self.current_value);
         }
 
         // compute integer lengths
@@ -304,7 +304,7 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV1<T> {
             .wrapping_add_signed(self.last_deltas.0);
 
         self.last_deltas.1 += decoded_deltas[1];
-        self.value = self.value.wrapping_add_signed(self.last_deltas.1);
+        self.current_value = self.current_value.wrapping_add_signed(self.last_deltas.1);
 
         // compute next timestamp / value
         self.last_deltas.0 += decoded_deltas[2];
@@ -313,13 +313,13 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV1<T> {
             .wrapping_add_signed(self.last_deltas.0);
 
         self.last_deltas.1 += decoded_deltas[3];
-        self.next_value = self.value.wrapping_add_signed(self.last_deltas.1);
+        self.next_value = self.current_value.wrapping_add_signed(self.last_deltas.1);
 
         // update state
         self.values_read += 1;
         self.cur_length_byte = buffer[total_varint_lengths];
 
-        (self.current_timestamp, self.value)
+        (self.current_timestamp, self.current_value)
     }
 }
 
@@ -347,8 +347,8 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV1<T> {
     - 110 -> 4 bytes
     - 111 -> 8 bytes
 
-    Following the 3-byte length header, 8 chunks follow, with each chunk containing 8-16 integers
-    (specified by V2_CHUNK_SIZE).
+    Following the 3-byte length header, V2_NUM_CHUNKS_PER_LENGTH chunks follow, with each chunk containing
+    V2_CHUNK_SIZE integers.
 
     Each integer is either bitpacked (for 1,2,4 bit representations):
         - e.g. 2 bits: 00 10 11 00 (values: 0, 2, 3, 0)
@@ -514,45 +514,21 @@ impl<T: Write> CompressionEngineV2<T> {
     }
 
     fn length_encoding(n: u8) -> u8 {
-        if n == 1 {
-            0b000
-        } else if n == 2 {
-            0b001
-        } else if n == 4 {
-            0b010
-        } else if n == 8 {
-            0b011
-        } else if n == 16 {
-            0b100
-        } else if n == 24 {
-            0b101
-        } else if n == 32 {
-            0b110
-        } else if n == 64 {
-            0b111
-        } else {
-            panic!("Unknown bit length: {}.", n);
+        for i in 0u8..8u8 {
+            if n == V2_CODE_TO_BITS[i as usize] {
+                return i;
+            }
         }
+        panic!("Unknown bit length: {}.", n);
     }
 
     fn bits_needed_u64(n: u64) -> u8 {
-        if n < (1 << 1) {
-            1
-        } else if n < (1 << 2) {
-            2
-        } else if n < (1 << 4) {
-            4
-        } else if n < (1 << 8) {
-            8
-        } else if n < (1 << 16) {
-            16
-        } else if n < (1 << 24) {
-            24
-        } else if n < (1 << 32) {
-            32
-        } else {
-            64
+        for bits in &V2_CODE_TO_BITS[..7] {
+            if n < (1 << bits) {
+                return *bits;
+            }
         }
+        64
     }
 }
 
@@ -566,7 +542,7 @@ pub struct DecompressionEngineV2<T: Read> {
     buffer_idx: u32,
 
     current_timestamp: Timestamp,
-    value: Value,
+    current_value: Value,
     last_deltas: (i64, i64),
 
     ts_d_deltas: [i64; V2_CHUNK_SIZE],
@@ -585,7 +561,7 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV2<T> {
             buffer_idx: V2_CHUNK_SIZE as u32,
 
             current_timestamp: header.min_timestamp,
-            value: header.first_value,
+            current_value: header.first_value,
             last_deltas: (0, 0),
 
             ts_d_deltas: [0; V2_CHUNK_SIZE],
@@ -643,10 +619,10 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV2<T> {
             .current_timestamp
             .wrapping_add_signed(self.last_deltas.0);
 
-        self.value = self.value.wrapping_add_signed(self.last_deltas.1);
+        self.current_value = self.current_value.wrapping_add_signed(self.last_deltas.1);
         self.values_read += 1;
         self.buffer_idx += 1;
-        (self.current_timestamp, self.value)
+        (self.current_timestamp, self.current_value)
     }
 }
 
@@ -664,7 +640,7 @@ mod tests {
             },
             file::Header,
         },
-        utils::file_utils::FileReaderUtil,
+        utils::{common::static_assert, file_utils::FileReaderUtil},
     };
 
     use super::CompressionEngineV2;
@@ -690,9 +666,10 @@ mod tests {
     }
 
     #[test]
-    fn test_compression_v2() {
+    fn test_compression_v2_basic() {
         let mut header = Header::default();
-        let mut engine = CompressionEngineV2::<Vec<u8>>::new(Vec::new(), &header);
+        let mut result = Vec::new();
+        let mut engine = CompressionEngineV2::<&mut Vec<u8>>::new(&mut result, &header);
 
         // d2: 1 0
         // d2: 2 -3
@@ -702,7 +679,6 @@ mod tests {
         engine.consume(1, 2);
         engine.consume(2, 1);
         engine.flush_all();
-        let result = engine.result;
 
         // 0010 1000
         assert_eq!(result.len(), (V2_CHUNK_SIZE / 8) * 6 + 3);
@@ -726,6 +702,91 @@ mod tests {
         let (time, value) = decomp.next();
         assert_eq!(time, 2);
         assert_eq!(value, 1);
+    }
+
+    #[test]
+    fn test_compression_v2_read_back() {
+        let header = Header {
+            min_timestamp: 1,
+            first_value: 34,
+            ..Default::default()
+        };
+
+        let timestamps = [
+            1,
+            2,
+            20,
+            255,
+            2048,
+            2049,
+            10192,
+            30000,
+            120000,
+            120001,
+            120002,
+            120003,
+            130000,
+            130000 + u32::MAX as u64,
+            123456789012,
+            9876543210123,
+            u64::MAX,
+        ];
+
+        let values = [
+            23,
+            45,
+            u64::MAX,
+            2,
+            34,
+            1234567890123,
+            324234,
+            1,
+            435345,
+            345345,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            234,
+        ];
+        let mut res: Vec<u8> = Vec::new();
+        let mut engine = CompressionEngineV2::<&mut Vec<u8>>::new(&mut res, &header);
+        for i in 0..timestamps.len() {
+            engine.consume(timestamps[i], values[i])
+        }
+        engine.flush_all();
+
+        let mut decomp = DecompressionEngineV2::<&[u8]>::new(&res, &header);
+        for i in 0..timestamps.len() {
+            let (t, v) = decomp.next();
+            assert_eq!(t, timestamps[i]);
+            assert_eq!(v, values[i]);
+        }
+
+        let header = Header {
+            min_timestamp: 0,
+            first_value: 0,
+            ..Default::default()
+        };
+
+        let timestamps = [1, 2, 3];
+
+        let values = [5, 9, 12];
+        let mut res: Vec<u8> = Vec::new();
+        let mut engine = CompressionEngineV2::<&mut Vec<u8>>::new(&mut res, &header);
+        for i in 0..timestamps.len() {
+            engine.consume(timestamps[i], values[i])
+        }
+        engine.flush_all();
+
+        let mut decomp = DecompressionEngineV2::<&[u8]>::new(&res, &header);
+        for i in 0..timestamps.len() {
+            let (t, v) = decomp.next();
+            assert_eq!(t, timestamps[i]);
+            assert_eq!(v, values[i]);
+        }
     }
 
     #[test]
