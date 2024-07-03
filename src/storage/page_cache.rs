@@ -75,16 +75,6 @@ pub struct SeqPageRead {
 }
 
 impl SeqPageRead {
-    pub fn reset(&mut self, file_id: FileId, offset: usize) {
-        self.file_id = file_id;
-        self.offset = offset;
-        self.cur_page_id = (offset / PAGE_SIZE) as PageId;
-        self.frame_id = self
-            .page_cache
-            .borrow_mut()
-            .load_page(file_id, self.cur_page_id);
-    }
-
     pub fn read(&mut self, buffer: &mut [u8]) -> usize {
         let mut page_cache = self.page_cache.borrow_mut();
         let mut bytes_copied = 0;
@@ -125,6 +115,12 @@ impl SeqPageRead {
         }
 
         bytes_copied
+    }
+}
+
+impl Read for SeqPageRead {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        Ok(self.read(buf))
     }
 }
 
