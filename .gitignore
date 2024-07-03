@@ -6,3 +6,5 @@
 *.svg
 **profile.json
 .vscode
+/data
+__MACOSX

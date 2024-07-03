@@ -14,6 +14,9 @@ rustc-hash = "1.1.0"
 pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
 criterion = { version = "0.5.1", features = ["html_reports"] }
 postgres = "0.19.7"
+sysinfo = "0.30.12"
+csv = "1.3.0"
+flate2 = "1.0.30"
 
 [[bench]]
 name = "read"
@@ -25,10 +28,6 @@ harness = false
 
 [[bench]]
 name = "micro"
-harness = false
-
-[[bench]]
-name = "long"
 harness = false
 
 [[bench]]

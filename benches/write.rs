@@ -1,82 +1,98 @@
-// use std::sync::Arc;
+use std::iter::zip;
 
-// use criterion::{criterion_group, criterion_main, Criterion};
-// use rusqlite::{params, Connection, Result};
-// use tachyon::storage::file::*;
+use criterion::{criterion_group, criterion_main, Criterion};
+use csv::Reader;
+use pprof::{
+    criterion::{Output, PProfProfiler},
+    flamegraph::Options,
+};
+use tachyon::storage::file::*;
 
-// const NUM_ITEMS: u64 = 100000;
+const NUM_ITEMS: u64 = 100000;
 
-// #[derive(Debug)]
-// pub struct Item {
-//     timestamp: u64,
-//     value: u64,
-// }
+fn bench_write_sequential_timestamps(start: u64, end: u64) {
+    let mut model = TimeDataFile::new();
+    for i in start..=end {
+        model.write_data_to_file_in_mem(i, i + (i % 100));
+    }
+    model.write("./tmp/bench_sequential_write.ty".into());
+    std::fs::remove_file("./tmp/bench_sequential_write.ty").unwrap();
+}
 
-// fn bench_write_sqlite(conn: &Connection) -> u64 {
-//     // setup SQLite benchmark
-//     let mut res = 0;
-//     for i in 0..NUM_ITEMS {
-//         let item = Item {
-//             timestamp: i,
-//             value: i + (i % 100),
-//         };
-//         conn.execute(
-//             "
-//                     INSERT INTO Item (timestamp, value) VALUES (?1, ?2);
-//                 ",
-//             (&item.timestamp, &item.value),
-//         )
-//         .unwrap();
+fn bench_write_memory_dataset(timestamps: &[u64], values: &[u64]) {
+    let mut model = TimeDataFile::new();
+    for (ts, v) in zip(timestamps, values) {
+        model.write_data_to_file_in_mem(*ts, *v);
+    }
+    model.write("./tmp/bench_write_memory_dataset.ty".into());
+    std::fs::remove_file("./tmp/bench_write_memory_dataset.ty").unwrap();
+}
 
-//         res += item.timestamp + item.value;
-//     }
-//     res
-// }
+fn bench_write_voltage_dataset(timestamps: &[u64], values: &[u64]) {
+    let mut model = TimeDataFile::new();
+    for (ts, v) in zip(timestamps, values) {
+        model.write_data_to_file_in_mem(*ts, *v);
+    }
+    model.write("./tmp/bench_write_voltage_dataset.ty".into());
+    std::fs::remove_file("./tmp/bench_write_voltage_dataset.ty").unwrap();
+}
 
-// fn bench_write_sequential_timestamps() -> u64 {
-//     let mut model = TimeDataFile::new();
-//     let mut res = 0;
-//     for i in 0..NUM_ITEMS {
-//         model.write_data_to_file_in_mem(i.into(), i + (i % 100));
-//         res += i + (i + (i % 100));
-//     }
-//     model.write("./tmp/bench_sequential_read.ty".into());
-//     std::fs::remove_file("./tmp/bench_sequential_read.ty").unwrap();
-//     res
-// }
+fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
+    println!("Reading from: {}", path);
+    let mut rdr = Reader::from_path(path).unwrap();
 
-// fn criterion_benchmark(c: &mut Criterion) {
-//     c.bench_function(&format!("tachyon: write sequential 0-{}", NUM_ITEMS), |b| {
-//         b.iter(|| bench_write_sequential_timestamps())
-//     });
+    let mut timestamps = Vec::new();
+    let mut values = Vec::new();
+    for (i, result) in rdr.records().enumerate() {
+        if i > 0 {
+            let record = result.unwrap();
+            timestamps.push(record[0].parse::<u64>().unwrap());
+            values.push(record[1].parse::<u64>().unwrap());
+        }
+    }
+    println!("Done reading from: {}\n", path);
 
-//     let conn = Connection::open("./tmp/bench_sql.sqlite").unwrap();
-//     conn.execute(
-//         "
-//                 CREATE TABLE Item (
-//                     timestamp INTEGER,
-//                     value INTEGER
-//                 )
-//             ",
-//         (),
-//     )
-//     .unwrap();
+    (timestamps, values)
+}
 
-//     c.bench_function(&format!("SQLite: write sequential 0-{}", NUM_ITEMS), |b| {
-//         b.iter(|| bench_write_sqlite(&conn))
-//     });
+fn write_sequential(c: &mut Criterion) {
+    // setup tachyon benchmark
+    c.bench_function(&format!("tachyon: write sequential 0-{}", NUM_ITEMS), |b| {
+        b.iter(|| bench_write_sequential_timestamps(0, NUM_ITEMS))
+    });
+}
 
-//     // cleanup
-//     conn.execute(
-//         "
-//             DROP TABLE Item;
-//         ",
-//         (),
-//     )
-//     .unwrap();
-// }
+fn write_memory_dataset(c: &mut Criterion) {
+    let (timestamps, values) = read_from_csv("./data/memory_dataset.csv");
+    c.bench_function(
+        &format!(
+            "tachyon: write memory dataset ({} entries)",
+            timestamps.len()
+        ),
+        |b| b.iter(|| bench_write_memory_dataset(&timestamps, &values)),
+    );
+}
 
-// criterion_group!(benches, criterion_benchmark);
-// criterion_main!(benches);
+fn write_voltage_dataset(c: &mut Criterion) {
+    let (timestamps, values) = read_from_csv("./data/voltage_dataset.csv");
+    c.bench_function(
+        &format!(
+            "tachyon: write voltage dataset ({} entries)",
+            timestamps.len()
+        ),
+        |b| b.iter(|| bench_write_voltage_dataset(&timestamps, &values)),
+    );
+}
 
-fn main() {}
+fn get_config() -> Criterion {
+    let mut options = Options::default();
+    options.flame_chart = true;
+    Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(Some(options))))
+}
+
+criterion_group!(
+    name = benches;
+    config = get_config();
+    targets = write_sequential, write_memory_dataset, write_voltage_dataset
+);
+criterion_main!(benches);
