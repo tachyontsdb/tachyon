@@ -24,6 +24,8 @@ struct IdsEntry {
 }
 
 trait IndexerStore {
+    fn create_store(&self);
+    fn drop_store(&self);
     fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid;
     fn insert_new_file(&self, id: &Uuid, file: &Path, start: &Timestamp, end: &Timestamp);
     fn get_ids(&self, name: &str, value: &str) -> IdsEntry;
@@ -56,6 +58,57 @@ impl SQLiteIndexerStore {
 }
 
 impl IndexerStore for SQLiteIndexerStore {
+    fn create_store(&self) {
+        self.conn
+            .execute(
+                &format!(
+                    "
+                CREATE TABLE {} (
+                    name TEXT,
+                    value TEXT,
+                    ids TEXT
+                )
+                ",
+                    SQLITE_STREAM_TO_IDS_TABLE
+                ),
+                (),
+            )
+            .unwrap();
+
+        self.conn
+            .execute(
+                &format!(
+                    "
+                CREATE TABLE {} (
+                    id INTEGER,
+                    filename TEXT,
+                    start INTEGER,
+                    end INTEGER
+                )
+                ",
+                    SQLITE_ID_TO_FILENAME_TABLE
+                ),
+                (),
+            )
+            .unwrap();
+    }
+
+    fn drop_store(&self) {
+        self.conn
+            .execute(
+                &format!("DROP TABLE if exists {}", SQLITE_STREAM_TO_IDS_TABLE),
+                (),
+            )
+            .unwrap();
+
+        self.conn
+            .execute(
+                &format!("DROP TABLE if exists {}", SQLITE_ID_TO_FILENAME_TABLE),
+                (),
+            )
+            .unwrap();
+    }
+
     fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid {
         let new_id = Uuid::new_v4();
 
@@ -173,6 +226,14 @@ impl Indexer {
         }
     }
 
+    fn create_store(&self) {
+        self.store.create_store();
+    }
+
+    fn drop_store(&self) {
+        self.store.drop_store();
+    }
+
     fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid {
         self.store.insert_new_id(stream, matchers)
     }
@@ -253,52 +314,10 @@ mod tests {
     fn test_get_required_files() {
         set_up_dirs!(dirs, "db");
 
-        // SQLite Setup
-        let mut conn = Connection::open(dirs[0].join(SQLITE_DB_NAME).to_str().unwrap()).unwrap();
-
-        conn.execute(
-            &format!("DROP TABLE if exists {}", SQLITE_STREAM_TO_IDS_TABLE),
-            (),
-        )
-        .unwrap();
-        conn.execute(
-            &format!(
-                "
-                CREATE TABLE {} (
-                    name TEXT,
-                    value TEXT,
-                    ids TEXT
-                )
-                ",
-                SQLITE_STREAM_TO_IDS_TABLE
-            ),
-            (),
-        )
-        .unwrap();
-
-        conn.execute(
-            &format!("DROP TABLE if exists {}", SQLITE_ID_TO_FILENAME_TABLE),
-            (),
-        )
-        .unwrap();
-        conn.execute(
-            &format!(
-                "
-                CREATE TABLE {} (
-                    id INTEGER,
-                    filename TEXT,
-                    start INTEGER,
-                    end INTEGER
-                )
-                ",
-                SQLITE_ID_TO_FILENAME_TABLE
-            ),
-            (),
-        )
-        .unwrap();
-
         // Seeding indexer storage
         let mut indexer = Indexer::new(dirs[0].clone());
+        indexer.drop_store();
+        indexer.create_store();
         let stream = "https";
         let matchers = Matchers::new(vec![
             Matcher::new(MatchOp::Equal, "app", "dummy"),
