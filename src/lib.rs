@@ -3,7 +3,7 @@
 pub mod common;
 
 pub mod executor;
-pub mod storage;
 pub mod query;
+pub mod storage;
 
 mod utils;
