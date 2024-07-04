@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn test_write_single_complete_file() {
-        set_up_dirs!(dirs, "db",);
+        set_up_dirs!(dirs, "db");
         let stream_id = 0;
         let mut writer = Writer::new("./tmp/test_write_single_complete_file$db".into());
         let mut timestamps = Vec::<Timestamp>::new();
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn test_write_multiple_streams_single_complete_files() {
         let stream_ids = [0, 1];
-        set_up_dirs!(dirs, "db",);
+        set_up_dirs!(dirs, "db");
 
         let mut writer =
             Writer::new("./tmp/test_write_multiple_streams_single_complete_files$db".into());
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn test_batch_write_single_batch_in_three_files() {
         let stream_id = 0;
-        set_up_dirs!(dirs, "db",);
+        set_up_dirs!(dirs, "db");
 
         let n = (1.5 * MAX_NUM_ENTRIES as f32).round() as usize;
         let mut base: usize = 0;

@@ -228,8 +228,9 @@ mod tests {
     use rusqlite::Connection;
     use uuid::Uuid;
 
-    use crate::query::indexer::{
-        SQLITE_DB_NAME, SQLITE_ID_TO_FILENAME_TABLE, SQLITE_STREAM_TO_IDS_TABLE,
+    use crate::{
+        query::indexer::{SQLITE_DB_NAME, SQLITE_ID_TO_FILENAME_TABLE, SQLITE_STREAM_TO_IDS_TABLE},
+        utils::test_utils::{set_up_dirs, set_up_files},
     };
 
     use super::Indexer;
@@ -255,8 +256,11 @@ mod tests {
 
     #[test]
     fn test_get_required_files() {
+        set_up_dirs!(dirs, "db");
+
         // SQLite Setup
-        let mut conn = Connection::open(format!("./tmp/{}", SQLITE_DB_NAME)).unwrap();
+        let mut conn =
+            Connection::open(format!("{}/indexer.sqlite", dirs[0].to_str().unwrap())).unwrap();
 
         conn.execute(
             &format!("DROP TABLE if exists {}", SQLITE_STREAM_TO_IDS_TABLE),
@@ -300,7 +304,7 @@ mod tests {
         .unwrap();
 
         // Seeding indexer storage
-        let indexer = Indexer::new(PathBuf::from("./tmp/"));
+        let indexer = Indexer::new(dirs[0].clone());
         let stream = "https";
         let matchers = Matchers::new(vec![
             Matcher::new(MatchOp::Equal, "app", "dummy"),
@@ -309,13 +313,13 @@ mod tests {
 
         let id = indexer.insert_new_id(stream, &matchers);
 
-        let file1 = PathBuf::from(format!("./tmp/{}/file1.ty", id));
+        let file1 = PathBuf::from(format!("{}/{}/file1.ty", dirs[0].to_str().unwrap(), id));
         indexer.insert_new_file(&id, &file1, &1, &3);
 
-        let file2 = PathBuf::from(format!("./tmp/{}/file2.ty", id));
+        let file2 = PathBuf::from(format!("{}/{}/file2.ty", dirs[0].to_str().unwrap(), id));
         indexer.insert_new_file(&id, &file2, &3, &5);
 
-        let file3 = PathBuf::from(format!("./tmp/{}/file3.ty", id));
+        let file3 = PathBuf::from(format!("{}/{}/file3.ty", dirs[0].to_str().unwrap(), id));
         indexer.insert_new_file(&id, &file3, &5, &7);
 
         // Query indexer storage
