@@ -226,12 +226,12 @@ impl Indexer {
         }
     }
 
-    fn create_store(&self) {
-        self.store.create_store();
+    fn create_store(root_dir: PathBuf) {
+        SQLiteIndexerStore::new(&root_dir).create_store();
     }
 
-    fn drop_store(&self) {
-        self.store.drop_store();
+    fn drop_store(root_dir: PathBuf) {
+        SQLiteIndexerStore::new(&root_dir).drop_store();
     }
 
     fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid {
@@ -316,8 +316,8 @@ mod tests {
 
         // Seeding indexer storage
         let mut indexer = Indexer::new(dirs[0].clone());
-        indexer.drop_store();
-        indexer.create_store();
+        Indexer::drop_store(dirs[0].clone());
+        Indexer::create_store(dirs[0].clone());
         let stream = "https";
         let matchers = Matchers::new(vec![
             Matcher::new(MatchOp::Equal, "app", "dummy"),
