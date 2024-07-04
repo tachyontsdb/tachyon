@@ -12,7 +12,7 @@ rusqlite = { version = "0.31.0", features = ["uuid"] }
 rustc-hash = "1.1.0"
 serde = "1.0.203"
 serde_json = "1.0.117"
-uuid = { version = "1.8.0", features = ["v4", "serde"]}
+uuid = { version = "1.8.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
 pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
