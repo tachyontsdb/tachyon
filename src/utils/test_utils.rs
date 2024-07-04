@@ -6,7 +6,7 @@ use std::{
 pub const TEST_DIR: &str = "tmp";
 
 macro_rules! set_up_dirs {
-    ($dir_var:ident, $($x:expr),+ $(,)?, ) => {
+    ($dir_var:ident, $($x:expr),+ $(,)? ) => {
         let _name = {
             fn f() {}
             fn type_name_of<T>(_: T) -> &'static str {
@@ -147,7 +147,6 @@ impl TestFile {
 impl Drop for TestFile {
     fn drop(&mut self) {
         for path in &self.paths {
-            std::fs::remove_file(path);
             std::fs::remove_file(path);
         }
     }
