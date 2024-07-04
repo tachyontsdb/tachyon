@@ -181,23 +181,19 @@ impl Indexer {
         self.store.insert_new_file(id, file, start, end);
     }
 
-    fn get_intersecting_ids(&self, id_lists: &[HashSet<Uuid>]) -> HashSet<Uuid> {
+    fn get_intersecting_ids(&self, id_lists: &mut [HashSet<Uuid>]) -> HashSet<Uuid> {
         let mut intersection: HashSet<Uuid> = HashSet::new();
 
         if !id_lists.is_empty() {
-            let mut shortest_idx = 0;
-            let mut shortest_len = id_lists.len();
-            for (i, id_list) in id_lists.iter().enumerate() {
-                if id_list.len() < shortest_len {
-                    shortest_len = id_list.len();
-                    shortest_idx = i;
+            for i in 0..id_lists.len() {
+                if id_lists[0].len() > id_lists[i].len() {
+                    id_lists.swap(0, i);
                 }
             }
 
-            intersection = id_lists[shortest_idx]
+            intersection = id_lists[0]
                 .iter()
-                .filter(|k| id_lists[..shortest_idx].iter().all(|s| s.contains(k)))
-                .filter(|k| id_lists[shortest_idx + 1..].iter().all(|s| s.contains(k)))
+                .filter(|k| id_lists[1..].iter().all(|s| s.contains(k)))
                 .cloned()
                 .collect();
         }
@@ -212,8 +208,8 @@ impl Indexer {
         start: &Timestamp,
         end: &Timestamp,
     ) -> Vec<PathBuf> {
-        let id_lists = self.store.get_stream_and_matcher_ids(stream, matchers);
-        let intersecting_ids = self.get_intersecting_ids(&id_lists);
+        let mut id_lists = self.store.get_stream_and_matcher_ids(stream, matchers);
+        let intersecting_ids = self.get_intersecting_ids(&mut id_lists);
         self.store
             .get_files_for_stream_ids(&intersecting_ids, start, end)
     }
@@ -248,7 +244,7 @@ mod tests {
         let hs2 = HashSet::from([uuid1, uuid3, uuid5]);
         let hs3 = HashSet::from([uuid1, uuid5]);
 
-        let intersect = indexer.get_intersecting_ids(&Vec::from([hs1, hs2, hs3]));
+        let intersect = indexer.get_intersecting_ids(&mut Vec::from([hs1, hs2, hs3]));
 
         assert_eq!(intersect, HashSet::from([uuid1, uuid5]));
     }
