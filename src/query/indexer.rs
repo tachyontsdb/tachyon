@@ -67,7 +67,8 @@ impl IndexerStore for SQLiteIndexerStore {
                 CREATE TABLE {} (
                     name TEXT,
                     value TEXT,
-                    ids TEXT
+                    ids TEXT,
+                    PRIMARY KEY (name, value)
                 )
                 ",
                 SQLITE_STREAM_TO_IDS_TABLE
@@ -82,7 +83,8 @@ impl IndexerStore for SQLiteIndexerStore {
                     id INTEGER,
                     filename TEXT,
                     start INTEGER,
-                    end INTEGER
+                    end INTEGER,
+                    PRIMARY KEY (id, filename)
                 )
                 ",
                 SQLITE_ID_TO_FILENAME_TABLE
@@ -128,7 +130,7 @@ impl IndexerStore for SQLiteIndexerStore {
         let mut transaction = self.conn.transaction().unwrap();
         let mut stmt = transaction
             .prepare(&format!(
-                "INSERT INTO {} (name, value, ids) VALUES (?, ?, ?)",
+                "INSERT OR REPLACE INTO {} (name, value, ids) VALUES (?, ?, ?)",
                 SQLITE_STREAM_TO_IDS_TABLE
             ))
             .unwrap();
