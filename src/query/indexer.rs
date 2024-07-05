@@ -24,9 +24,11 @@ struct IdsEntry {
 }
 
 trait IndexerStore {
-    fn insert_new_id(&self, stream: &str, matchers: &Matchers) -> Uuid;
+    fn create_store(&self);
+    fn drop_store(&self);
+    fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid;
     fn insert_new_file(&self, id: &Uuid, file: &Path, start: &Timestamp, end: &Timestamp);
-    fn get_ids(&self, conn: &Connection, name: &str, value: &str) -> IdsEntry;
+    fn get_ids(&self, name: &str, value: &str) -> IdsEntry;
     fn get_stream_and_matcher_ids(
         &self,
         stream_ids: &str,
@@ -42,35 +44,88 @@ trait IndexerStore {
 
 struct SQLiteIndexerStore {
     db_path: PathBuf,
+    conn: Connection,
 }
 
 impl SQLiteIndexerStore {
     fn new(root_dir: &Path) -> Self {
+        let db_path = root_dir.join(SQLITE_DB_NAME);
         Self {
-            db_path: root_dir.join(SQLITE_DB_NAME),
+            conn: Connection::open(&db_path).unwrap(),
+            db_path,
         }
     }
 }
 
 impl IndexerStore for SQLiteIndexerStore {
-    fn insert_new_id(&self, stream: &str, matchers: &Matchers) -> Uuid {
+    fn create_store(&self) {
+        self.conn
+            .execute(
+                &format!(
+                    "
+                CREATE TABLE {} (
+                    name TEXT,
+                    value TEXT,
+                    ids TEXT
+                )
+                ",
+                    SQLITE_STREAM_TO_IDS_TABLE
+                ),
+                (),
+            )
+            .unwrap();
+
+        self.conn
+            .execute(
+                &format!(
+                    "
+                CREATE TABLE {} (
+                    id INTEGER,
+                    filename TEXT,
+                    start INTEGER,
+                    end INTEGER
+                )
+                ",
+                    SQLITE_ID_TO_FILENAME_TABLE
+                ),
+                (),
+            )
+            .unwrap();
+    }
+
+    fn drop_store(&self) {
+        self.conn
+            .execute(
+                &format!("DROP TABLE if exists {}", SQLITE_STREAM_TO_IDS_TABLE),
+                (),
+            )
+            .unwrap();
+
+        self.conn
+            .execute(
+                &format!("DROP TABLE if exists {}", SQLITE_ID_TO_FILENAME_TABLE),
+                (),
+            )
+            .unwrap();
+    }
+
+    fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid {
         let new_id = Uuid::new_v4();
-        let mut conn = Connection::open(&self.db_path).unwrap();
 
         // get old ids and add new one
-        let mut stream_ids = self.get_ids(&conn, "__name", stream);
+        let mut stream_ids = self.get_ids("__name", stream);
         stream_ids.ids.insert(new_id);
 
         let mut matcher_ids_map: HashMap<String, IdsEntry> = Default::default();
         for matcher in &matchers.matchers {
-            let mut matcher_ids = self.get_ids(&conn, &matcher.name, &matcher.value);
+            let mut matcher_ids = self.get_ids(&matcher.name, &matcher.value);
             matcher_ids.ids.insert(new_id);
 
             matcher_ids_map.insert(matcher.name.to_owned(), matcher_ids);
         }
 
         // commit changes to db
-        let mut transaction = conn.transaction().unwrap();
+        let mut transaction = self.conn.transaction().unwrap();
         let mut stmt = transaction
             .prepare(&format!(
                 "INSERT INTO {} (name, value, ids) VALUES (?, ?, ?)",
@@ -94,8 +149,7 @@ impl IndexerStore for SQLiteIndexerStore {
     }
 
     fn insert_new_file(&self, id: &Uuid, file: &Path, start: &Timestamp, end: &Timestamp) {
-        let mut conn = Connection::open(&self.db_path).unwrap();
-        conn.execute(
+        self.conn.execute(
             &format!(
                 "INSERT INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
                 SQLITE_ID_TO_FILENAME_TABLE
@@ -104,8 +158,8 @@ impl IndexerStore for SQLiteIndexerStore {
         );
     }
 
-    fn get_ids(&self, conn: &Connection, name: &str, value: &str) -> IdsEntry {
-        let result = conn.query_row(
+    fn get_ids(&self, name: &str, value: &str) -> IdsEntry {
+        let result = self.conn.query_row(
             &format!(
                 "SELECT ids FROM {} WHERE name = ? AND value = ?",
                 SQLITE_STREAM_TO_IDS_TABLE
@@ -124,11 +178,10 @@ impl IndexerStore for SQLiteIndexerStore {
 
     fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<Uuid>> {
         let mut ids: Vec<HashSet<Uuid>> = vec![];
-        let conn = Connection::open(&self.db_path).unwrap();
 
-        ids.push(self.get_ids(&conn, "__name", stream).ids);
+        ids.push(self.get_ids("__name", stream).ids);
         for matcher in &matchers.matchers {
-            ids.push(self.get_ids(&conn, &matcher.name, &matcher.value).ids);
+            ids.push(self.get_ids(&matcher.name, &matcher.value).ids);
         }
 
         ids
@@ -142,8 +195,7 @@ impl IndexerStore for SQLiteIndexerStore {
     ) -> Vec<PathBuf> {
         let mut paths: Vec<PathBuf> = Vec::new();
 
-        let mut conn = Connection::open(&self.db_path).unwrap();
-        let mut stmt = conn
+        let mut stmt = self.conn
             .prepare(&format!("SELECT filename FROM {} WHERE id = ? AND start BETWEEN ? AND ? OR end BETWEEN ? AND ?", SQLITE_ID_TO_FILENAME_TABLE))
             .unwrap();
 
@@ -174,7 +226,15 @@ impl Indexer {
         }
     }
 
-    fn insert_new_id(&self, stream: &str, matchers: &Matchers) -> Uuid {
+    fn create_store(root_dir: PathBuf) {
+        SQLiteIndexerStore::new(&root_dir).create_store();
+    }
+
+    fn drop_store(root_dir: PathBuf) {
+        SQLiteIndexerStore::new(&root_dir).drop_store();
+    }
+
+    fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid {
         self.store.insert_new_id(stream, matchers)
     }
 
@@ -182,23 +242,19 @@ impl Indexer {
         self.store.insert_new_file(id, file, start, end);
     }
 
-    fn get_intersecting_ids(&self, id_lists: &[HashSet<Uuid>]) -> HashSet<Uuid> {
+    fn get_intersecting_ids(&self, id_lists: &mut [HashSet<Uuid>]) -> HashSet<Uuid> {
         let mut intersection: HashSet<Uuid> = HashSet::new();
 
         if !id_lists.is_empty() {
-            let mut shortest_idx = 0;
-            let mut shortest_len = id_lists.len();
-            for (i, id_list) in id_lists.iter().enumerate() {
-                if id_list.len() < shortest_len {
-                    shortest_len = id_list.len();
-                    shortest_idx = i;
+            for i in 0..id_lists.len() {
+                if id_lists[0].len() > id_lists[i].len() {
+                    id_lists.swap(0, i);
                 }
             }
 
-            intersection = id_lists[shortest_idx]
+            intersection = id_lists[0]
                 .iter()
-                .filter(|k| id_lists[..shortest_idx].iter().all(|s| s.contains(k)))
-                .filter(|k| id_lists[shortest_idx + 1..].iter().all(|s| s.contains(k)))
+                .filter(|k| id_lists[1..].iter().all(|s| s.contains(k)))
                 .cloned()
                 .collect();
         }
@@ -213,8 +269,8 @@ impl Indexer {
         start: &Timestamp,
         end: &Timestamp,
     ) -> Vec<PathBuf> {
-        let id_lists = self.store.get_stream_and_matcher_ids(stream, matchers);
-        let intersecting_ids = self.get_intersecting_ids(&id_lists);
+        let mut id_lists = self.store.get_stream_and_matcher_ids(stream, matchers);
+        let intersecting_ids = self.get_intersecting_ids(&mut id_lists);
         self.store
             .get_files_for_stream_ids(&intersecting_ids, start, end)
     }
@@ -249,7 +305,7 @@ mod tests {
         let hs2 = HashSet::from([uuid1, uuid3, uuid5]);
         let hs3 = HashSet::from([uuid1, uuid5]);
 
-        let intersect = indexer.get_intersecting_ids(&Vec::from([hs1, hs2, hs3]));
+        let intersect = indexer.get_intersecting_ids(&mut Vec::from([hs1, hs2, hs3]));
 
         assert_eq!(intersect, HashSet::from([uuid1, uuid5]));
     }
@@ -258,53 +314,10 @@ mod tests {
     fn test_get_required_files() {
         set_up_dirs!(dirs, "db");
 
-        // SQLite Setup
-        let mut conn =
-            Connection::open(format!("{}/indexer.sqlite", dirs[0].to_str().unwrap())).unwrap();
-
-        conn.execute(
-            &format!("DROP TABLE if exists {}", SQLITE_STREAM_TO_IDS_TABLE),
-            (),
-        )
-        .unwrap();
-        conn.execute(
-            &format!(
-                "
-                CREATE TABLE {} (
-                    name TEXT,
-                    value TEXT,
-                    ids TEXT
-                )
-                ",
-                SQLITE_STREAM_TO_IDS_TABLE
-            ),
-            (),
-        )
-        .unwrap();
-
-        conn.execute(
-            &format!("DROP TABLE if exists {}", SQLITE_ID_TO_FILENAME_TABLE),
-            (),
-        )
-        .unwrap();
-        conn.execute(
-            &format!(
-                "
-                CREATE TABLE {} (
-                    id INTEGER,
-                    filename TEXT,
-                    start INTEGER,
-                    end INTEGER
-                )
-                ",
-                SQLITE_ID_TO_FILENAME_TABLE
-            ),
-            (),
-        )
-        .unwrap();
-
         // Seeding indexer storage
-        let indexer = Indexer::new(dirs[0].clone());
+        let mut indexer = Indexer::new(dirs[0].clone());
+        Indexer::drop_store(dirs[0].clone());
+        Indexer::create_store(dirs[0].clone());
         let stream = "https";
         let matchers = Matchers::new(vec![
             Matcher::new(MatchOp::Equal, "app", "dummy"),
