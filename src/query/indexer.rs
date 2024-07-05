@@ -197,12 +197,16 @@ impl IndexerStore for SQLiteIndexerStore {
     ) -> Vec<PathBuf> {
         let mut paths: Vec<PathBuf> = Vec::new();
 
-        let mut stmt = self.conn
-            .prepare(&format!("SELECT filename FROM {} WHERE id = ? AND (? BETWEEN start AND end OR start BETWEEN ? AND ?)", SQLITE_ID_TO_FILENAME_TABLE))
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT filename FROM {} WHERE id = ? AND ? <= end AND ? >= start",
+                SQLITE_ID_TO_FILENAME_TABLE
+            ))
             .unwrap();
 
         for stream_id in stream_ids {
-            if let Ok(rows) = stmt.query((stream_id, start, start, end)) {
+            if let Ok(rows) = stmt.query((stream_id, start, end)) {
                 let mapped_rows = rows.mapped(|row| row.get::<usize, String>(0));
 
                 for row in mapped_rows {
