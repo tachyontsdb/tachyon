@@ -12,6 +12,7 @@ pub trait ExecutorNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         panic!("Next scalar not implemented")
     }
+
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         panic!("Next vector not implemented")
     }
@@ -19,12 +20,16 @@ pub trait ExecutorNode {
 
 pub enum TNode {
     VectorSelect(VectorSelectNode),
+    Sum(SumNode),
+    Average(AverageNode),
 }
 
 impl ExecutorNode for TNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         match self {
             TNode::VectorSelect(sel) => sel.next_vector(conn),
+            TNode::Sum(sum) => sum.next_vector(conn),
+            TNode::Average(avg) => avg.next_vector(conn),
         }
     }
 }
@@ -86,5 +91,36 @@ impl ExecutorNode for VectorSelectNode {
         let res = self.cursor.fetch();
         self.cursor.next();
         Some(res)
+    }
+}
+
+pub struct SumNode {
+    child: Box<TNode>,
+}
+
+impl ExecutorNode for SumNode {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        todo!()
+    }
+}
+
+pub struct AverageNode {
+    child: Box<TNode>,
+}
+
+impl ExecutorNode for AverageNode {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        todo!()
+    }
+}
+
+mod test {
+    use promql_parser::parser;
+
+    #[test]
+    fn example_query() {
+        let stmt = r#"sum(http_requests_total)"#;
+        let ast = parser::parse(stmt);
+        println!("{:#?}", ast);
     }
 }

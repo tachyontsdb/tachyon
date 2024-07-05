@@ -2,7 +2,7 @@
 
 pub mod common;
 
-use api::{Connection, Stmt};
+use api::{Connection, Stmt, TachyonResult, TachyonResultType, TachyonResultUnion, VectorResult};
 use common::{Timestamp, Value};
 use std::path::PathBuf;
 
@@ -42,14 +42,31 @@ pub unsafe extern "C" fn tachyon_prepare(
     end: *const Timestamp,
 ) -> *mut Stmt {
     let ffi_str = core::ffi::CStr::from_ptr(str_ptr);
-    Box::into_raw(Box::new((*connection).prepare(
+    let stmt = (*connection).prepare(
         ffi_str.to_str().unwrap(),
         if start.is_null() { None } else { Some(*start) },
         if end.is_null() { None } else { Some(*end) },
-    )))
+    );
+    Box::into_raw(Box::new(stmt))
 }
 
-// TODO: tachyon_next
+/// # Safety
+#[no_mangle]
+pub unsafe extern "C" fn tachyon_next_vector(stmt: *mut Stmt) -> TachyonResult {
+    let result = unsafe { (*stmt).next_vector() };
+    match result {
+        None => TachyonResult {
+            t: TachyonResultType::Done,
+            r: TachyonResultUnion { scalar: 0 },
+        },
+        Some((timestamp, value)) => TachyonResult {
+            t: TachyonResultType::Vector,
+            r: TachyonResultUnion {
+                vector: VectorResult { timestamp, value },
+            },
+        },
+    }
+}
 
 /// # Safety
 #[no_mangle]

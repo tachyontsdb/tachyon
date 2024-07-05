@@ -17,8 +17,6 @@ use std::{
 const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
-const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
-
 pub const MAX_NUM_ENTRIES: usize = 62500;
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -322,7 +320,6 @@ impl TimeDataFile {
     }
 
     pub fn write(&self, path: PathBuf) -> usize {
-        println!("Writing to path {}", path.to_str().unwrap());
         let mut file = File::create(path).unwrap();
 
         let header_bytes = self.header.write(&mut file).unwrap();

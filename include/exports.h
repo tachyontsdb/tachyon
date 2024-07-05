@@ -8,17 +8,35 @@ extern "C" {
 #endif  // __cplusplus
 
 struct Connection;
+struct Stmt;
 
-extern Connection *tachyon_open(const char *const root_dir);
+struct TachyonResult {
+    enum class TachyonResultType : uint8_t {
+        Done,
+        Scalar,
+        Vector,
+    } t;
+    union {
+        uint64_t scalar;
+        struct {
+            uint64_t timestamp;
+            uint64_t value;
+        } vector;
+    } r;
+};
 
-extern void tachyon_close(Connection *connection);
+extern struct Connection *tachyon_open(const char *const root_dir);
 
-extern void tachyon_query(const Connection *const connection,
-                          const char *const str_ptr,
-                          const uint64_t *const start,
-                          const uint64_t *const end);
+extern void tachyon_close(struct Connection *connection);
 
-extern void tachyon_insert(const Connection *const Connection,
+extern Stmt *tachyon_query(const struct Connection *const connection,
+                           const char *const str_ptr,
+                           const uint64_t *const start,
+                           const uint64_t *const end);
+
+extern struct TachyonResult tachyon_next_vector(struct Stmt *stmt);
+
+extern void tachyon_insert(const struct Connection *const Connection,
                            const char *const str_ptr, uint64_t timestamp,
                            uint64_t value);
 

@@ -29,11 +29,7 @@ trait IndexerStore {
     fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid;
     fn insert_new_file(&self, id: &Uuid, file: &Path, start: &Timestamp, end: &Timestamp);
     fn get_ids(&self, name: &str, value: &str) -> IdsEntry;
-    fn get_stream_and_matcher_ids(
-        &self,
-        stream_ids: &str,
-        matchers: &Matchers,
-    ) -> Vec<HashSet<Uuid>>;
+    fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<Uuid>>;
     fn get_files_for_stream_id(
         &self,
         stream_id: &Uuid,
@@ -298,8 +294,9 @@ mod tests {
     use super::Indexer;
 
     #[test]
-    fn test_get_intersecting_ids() {
+    fn test_intersection() {
         set_up_dirs!(dirs, "db");
+        let indexer = Indexer::new(dirs[0].clone());
 
         let uuid1 = Uuid::new_v4();
         let uuid2 = Uuid::new_v4();
@@ -311,7 +308,6 @@ mod tests {
         let hs2 = HashSet::from([uuid1, uuid3, uuid5]);
         let hs3 = HashSet::from([uuid1, uuid5]);
 
-        let indexer = Indexer::new(dirs[0].clone());
         let intersect = indexer.compute_intersection(&mut Vec::from([hs1, hs2, hs3]));
 
         assert_eq!(intersect, HashSet::from([uuid1, uuid5]));
