@@ -228,11 +228,11 @@ impl Indexer {
         }
     }
 
-    fn create_store(root_dir: &PathBuf) {
+    fn create_store(root_dir: &Path) {
         SQLiteIndexerStore::new(root_dir).create_store();
     }
 
-    fn drop_store(root_dir: &PathBuf) {
+    fn drop_store(root_dir: &Path) {
         SQLiteIndexerStore::new(root_dir).drop_store();
     }
 
@@ -336,8 +336,16 @@ mod tests {
         indexer.insert_new_file(&id, &file3, &5, &7);
 
         // query indexer storage
-        let filenames = indexer.get_required_files(stream, &matchers, &2, &3);
-        assert_eq!(filenames, Vec::from([file1, file2]));
+        let mut filenames = indexer.get_required_files(stream, &matchers, &4, &4);
+        filenames.sort();
+        let mut expected = Vec::from([file2.clone()]);
+        assert_eq!(filenames, expected);
+
+        filenames = indexer.get_required_files(stream, &matchers, &2, &6);
+        filenames.sort();
+        expected = Vec::from([file1, file2, file3]);
+        expected.sort();
+        assert_eq!(filenames, expected);
 
         Indexer::drop_store(&dirs[0]);
     }
@@ -377,8 +385,11 @@ mod tests {
 
         // query indexer storage
         let matchers = Matchers::new(vec![Matcher::new(MatchOp::Equal, "app", "dummy")]);
-        let filenames = indexer.get_required_files(stream, &matchers, &2, &3);
-        assert_eq!(filenames, Vec::from([file1, file3]));
+        let mut filenames = indexer.get_required_files(stream, &matchers, &2, &3);
+        filenames.sort();
+        let mut expected = Vec::from([file1, file3]);
+        expected.sort();
+        assert_eq!(filenames, expected);
 
         Indexer::drop_store(&dirs[0]);
     }
