@@ -6,10 +6,16 @@ edition = "2021"
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[[bin]]
+name = "tachyon"
+path = "src/cli.rs"
+
 [dependencies]
+clap = { version = "4.5.8", features = ["derive"] }
 promql-parser = "0.4.0"
 rusqlite = { version = "0.31.0", features = ["uuid"] }
 rustc-hash = "1.1.0"
+rustyline = "14.0.0"
 serde = "1.0.203"
 serde_json = "1.0.117"
 uuid = { version = "1.8.0", features = ["v4", "serde"] }

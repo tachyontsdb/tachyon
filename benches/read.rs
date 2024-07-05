@@ -14,7 +14,7 @@ fn bench_read_sequential_timestamps(
     end: u64,
     page_cache: Rc<RefCell<PageCache>>,
 ) -> u64 {
-    let file_paths = Rc::new(["./tmp/bench_sequential_read.ty".into()]);
+    let file_paths = vec!["./tmp/bench_sequential_read.ty".into()];
     let cursor = Cursor::new(file_paths, start, end, page_cache, ScanHint::None).unwrap();
 
     let mut res = 0;
@@ -25,7 +25,7 @@ fn bench_read_sequential_timestamps(
 }
 
 fn bench_read_voltage_dataset(page_cache: Rc<RefCell<PageCache>>) -> u128 {
-    let file_paths = Rc::new(["./tmp/bench_voltage_read.ty".into()]);
+    let file_paths = vec!["./tmp/bench_voltage_read.ty".into()];
     let cursor = Cursor::new(file_paths, 0, u64::MAX, page_cache, ScanHint::None).unwrap();
 
     let mut res: u128 = 0;

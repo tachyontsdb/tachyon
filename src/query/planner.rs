@@ -1,123 +1,174 @@
+use promql_parser::label::Matcher;
 use promql_parser::parser::{
     self, AggregateExpr, BinaryExpr, Call, Expr, Extension, MatrixSelector, NumberLiteral,
     ParenExpr, StringLiteral, SubqueryExpr, UnaryExpr, VectorSelector,
 };
 
+use crate::api::Connection;
 use crate::common::{Timestamp, Value};
+use crate::executor::node::{TNode, VectorSelectNode};
 use crate::executor::{self, execute, Context, OperationCode::*};
 
 #[derive(Debug)]
-struct QueryPlanner<'a> {
+pub struct QueryPlanner<'a> {
     cursor_idx: u64,
     ast: &'a Expr,
+    start: Option<Timestamp>,
+    end: Option<Timestamp>,
 }
 
 impl<'a> QueryPlanner<'a> {
-    pub fn new(ast: &'a Expr) -> Self {
-        Self { cursor_idx: 0, ast }
+    pub fn new(ast: &'a Expr, start: Option<Timestamp>, end: Option<Timestamp>) -> Self {
+        Self {
+            cursor_idx: 0,
+            ast,
+            start,
+            end,
+        }
     }
 
-    pub fn plan(&mut self) -> Vec<u8> {
-        self.handle_expr(self.ast).unwrap()
+    pub fn plan(&mut self, conn: &mut Connection) -> TNode {
+        self.handle_expr(self.ast, conn).unwrap()
     }
 
-    fn handle_aggregate_expr(&mut self, expr: &AggregateExpr) -> Result<Vec<u8>, &'static str> {
+    fn handle_aggregate_expr(
+        &mut self,
+        expr: &AggregateExpr,
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
         Err("Aggregate expressions currently not supported.")
     }
 
-    fn handle_unary_expr(&mut self, expr: &UnaryExpr) -> Result<Vec<u8>, &'static str> {
-        let result = self.handle_expr(&expr.expr);
+    fn handle_unary_expr(
+        &mut self,
+        expr: &UnaryExpr,
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
+        let result = self.handle_expr(&expr.expr, conn);
         todo!()
     }
 
-    fn handle_binary_expr(&mut self, expr: &BinaryExpr) -> Result<Vec<u8>, &'static str> {
+    fn handle_binary_expr(
+        &mut self,
+        expr: &BinaryExpr,
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
         Err("Binary expressions currently not supported.")
     }
 
-    fn handle_paren_expr(&mut self, expr: &ParenExpr) -> Result<Vec<u8>, &'static str> {
-        self.handle_expr(&expr.expr)
+    fn handle_paren_expr(
+        &mut self,
+        expr: &ParenExpr,
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
+        self.handle_expr(&expr.expr, conn)
     }
 
-    fn handle_subquery_expr(&mut self, expr: &SubqueryExpr) -> Result<Vec<u8>, &'static str> {
+    fn handle_subquery_expr(
+        &mut self,
+        expr: &SubqueryExpr,
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
         Err("Subquery expressions currently not supported.")
     }
 
     fn handle_number_literal_expr(
         &mut self,
         expr: &NumberLiteral,
-    ) -> Result<Vec<u8>, &'static str> {
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
         todo!()
     }
 
     fn handle_string_literal_expr(
         &mut self,
         expr: &StringLiteral,
-    ) -> Result<Vec<u8>, &'static str> {
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
         todo!()
     }
 
     fn handle_vector_selector_expr(
         &mut self,
         expr: &VectorSelector,
-    ) -> Result<Vec<u8>, &'static str> {
-        let name = expr.name.as_ref().unwrap();
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
+        let start = if expr.at.is_some() {
+            let mut at_res = match expr.at.as_ref().unwrap() {
+                parser::AtModifier::Start => 0,
+                parser::AtModifier::End => u64::MAX,
+                parser::AtModifier::At(t) => t.elapsed().unwrap().as_millis() as u64,
+            };
 
-        // Create the context with the files
+            if expr.offset.is_some() {
+                at_res = match expr.offset.as_ref().unwrap() {
+                    parser::Offset::Pos(t) => at_res.saturating_add(t.as_millis() as u64),
+                    parser::Offset::Neg(t) => at_res.saturating_sub(t.as_millis() as u64),
+                }
+            }
+            at_res
+        } else {
+            self.start.unwrap()
+        };
 
-        let buffer = [Init, OpenRead, FetchVector, Next, Halt, OutputVector];
-        let file_paths = [""];
-        let cursor_idx = 0;
-        // executor::execute(context, buffer);
-        Ok(Vec::new())
+        let end = self.end.unwrap();
+
+        Ok(TNode::VectorSelect(VectorSelectNode::new(
+            conn,
+            expr.name.clone().unwrap(),
+            expr.matchers.clone(),
+            start,
+            end,
+        )))
     }
 
     fn handle_matrix_selector_expr(
         &mut self,
         expr: &MatrixSelector,
-    ) -> Result<Vec<u8>, &'static str> {
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
         todo!()
     }
 
-    fn handle_call_expr(&mut self, expr: &Call) -> Result<Vec<u8>, &'static str> {
+    fn handle_call_expr(
+        &mut self,
+        expr: &Call,
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
         Err("Call expressions currently not supported.")
     }
 
-    fn handle_extension_expr(&mut self, expr: &Extension) -> Result<Vec<u8>, &'static str> {
+    fn handle_extension_expr(
+        &mut self,
+        expr: &Extension,
+        conn: &mut Connection,
+    ) -> Result<TNode, &'static str> {
         Err("Extension expressions currently not supported.")
     }
 
-    fn handle_expr(&mut self, expr: &Expr) -> Result<Vec<u8>, &'static str> {
+    fn handle_expr(&mut self, expr: &Expr, conn: &mut Connection) -> Result<TNode, &'static str> {
         match expr {
-            Expr::Aggregate(aggregate_expr) => self.handle_aggregate_expr(aggregate_expr),
-            Expr::Unary(unary_expr) => self.handle_unary_expr(unary_expr),
-            Expr::Binary(binary_expr) => self.handle_binary_expr(binary_expr),
-            Expr::Paren(paren_expr) => self.handle_paren_expr(paren_expr),
-            Expr::Subquery(subquery_expr) => self.handle_subquery_expr(subquery_expr),
+            Expr::Aggregate(aggregate_expr) => self.handle_aggregate_expr(aggregate_expr, conn),
+            Expr::Unary(unary_expr) => self.handle_unary_expr(unary_expr, conn),
+            Expr::Binary(binary_expr) => self.handle_binary_expr(binary_expr, conn),
+            Expr::Paren(paren_expr) => self.handle_paren_expr(paren_expr, conn),
+            Expr::Subquery(subquery_expr) => self.handle_subquery_expr(subquery_expr, conn),
             Expr::NumberLiteral(number_literal_expr) => {
-                self.handle_number_literal_expr(number_literal_expr)
+                self.handle_number_literal_expr(number_literal_expr, conn)
             }
             Expr::StringLiteral(string_literal_expr) => {
-                self.handle_string_literal_expr(string_literal_expr)
+                self.handle_string_literal_expr(string_literal_expr, conn)
             }
             Expr::VectorSelector(vector_selector_expr) => {
-                self.handle_vector_selector_expr(vector_selector_expr)
+                self.handle_vector_selector_expr(vector_selector_expr, conn)
             }
             Expr::MatrixSelector(matrix_selector_expr) => {
-                self.handle_matrix_selector_expr(matrix_selector_expr)
+                self.handle_matrix_selector_expr(matrix_selector_expr, conn)
             }
-            Expr::Call(call_expr) => self.handle_call_expr(call_expr),
-            Expr::Extension(extension_expr) => self.handle_extension_expr(extension_expr),
+            Expr::Call(call_expr) => self.handle_call_expr(call_expr, conn),
+            Expr::Extension(extension_expr) => self.handle_extension_expr(extension_expr, conn),
         }
     }
-}
-
-fn query(s: &str, start: Option<Timestamp>, end: Option<Timestamp>) {
-    let ast = parser::parse(s).unwrap();
-    let mut planner = QueryPlanner::new(&ast);
-    let bytes = planner.plan();
-
-    // execute(context, buffer);
-    println!("{:#?}", planner);
 }
 
 #[cfg(test)]
@@ -126,9 +177,13 @@ mod tests {
 
     #[test]
     fn test_query() {
-        let query_string = r#"http_requests_total"#;
-        let start = None;
-        let end = None;
-        query(query_string, start, end);
+        let query_string = r#"http_requests_total{service = "web" or service = "nice"} @ 324"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::VectorSelector(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not a vector selector");
+            }
+        };
     }
 }
