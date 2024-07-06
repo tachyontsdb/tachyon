@@ -6,7 +6,7 @@ use promql_parser::parser::{
 
 use crate::api::Connection;
 use crate::common::{Timestamp, Value};
-use crate::executor::node::{TNode, VectorSelectNode};
+use crate::executor::node::{AverageNode, SumNode, TNode, VectorSelectNode};
 use crate::executor::{self, execute, Context, OperationCode::*};
 
 #[derive(Debug)]
@@ -36,7 +36,15 @@ impl<'a> QueryPlanner<'a> {
         expr: &AggregateExpr,
         conn: &mut Connection,
     ) -> Result<TNode, &'static str> {
-        Err("Aggregate expressions currently not supported.")
+        let child_node = self.handle_expr(&expr.expr, conn);
+
+        match expr.op.id() {
+            parser::token::T_SUM => Ok(TNode::Sum(SumNode::new(Box::new(child_node.unwrap())))),
+            parser::token::T_AVG => Ok(TNode::Average(AverageNode::new(Box::new(
+                child_node.unwrap(),
+            )))),
+            _ => panic!("Unknown aggregation token."),
+        }
     }
 
     fn handle_unary_expr(
@@ -183,6 +191,30 @@ mod tests {
             Expr::VectorSelector(selector) => println!("{:#?}", selector),
             _ => {
                 panic!("not a vector selector");
+            }
+        };
+    }
+
+    #[test]
+    fn test_query_1() {
+        let query_string = r#"sum(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not a aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_query_2() {
+        let query_string = r#"avg(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not a aggregate");
             }
         };
     }
