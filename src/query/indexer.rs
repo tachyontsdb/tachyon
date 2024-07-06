@@ -19,7 +19,7 @@ const SQLITE_STREAM_TO_IDS_TABLE: &str = "stream_to_ids";
 const SQLITE_ID_TO_FILENAME_TABLE: &str = "id_to_file";
 
 #[derive(Serialize, Deserialize, Debug)]
-struct IdsEntry {
+pub struct IdsEntry {
     ids: HashSet<Uuid>,
 }
 
@@ -29,14 +29,10 @@ trait IndexerStore {
     fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid;
     fn insert_new_file(&self, id: &Uuid, file: &Path, start: &Timestamp, end: &Timestamp);
     fn get_ids(&self, name: &str, value: &str) -> IdsEntry;
-    fn get_stream_and_matcher_ids(
+    fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<Uuid>>;
+    fn get_files_for_stream_id(
         &self,
-        stream_ids: &str,
-        matchers: &Matchers,
-    ) -> Vec<HashSet<Uuid>>;
-    fn get_files_for_stream_ids(
-        &self,
-        streams: &HashSet<Uuid>,
+        stream_id: &Uuid,
         start: &Timestamp,
         end: &Timestamp,
     ) -> Vec<PathBuf>;
@@ -48,7 +44,7 @@ struct SQLiteIndexerStore {
 }
 
 impl SQLiteIndexerStore {
-    fn new(root_dir: &Path) -> Self {
+    pub fn new(root_dir: &Path) -> Self {
         let db_path = root_dir.join(SQLITE_DB_NAME);
         Self {
             conn: Connection::open(&db_path).unwrap(),
@@ -189,9 +185,9 @@ impl IndexerStore for SQLiteIndexerStore {
         ids
     }
 
-    fn get_files_for_stream_ids(
+    fn get_files_for_stream_id(
         &self,
-        stream_ids: &HashSet<Uuid>,
+        stream_id: &Uuid,
         start: &Timestamp,
         end: &Timestamp,
     ) -> Vec<PathBuf> {
@@ -205,50 +201,54 @@ impl IndexerStore for SQLiteIndexerStore {
             ))
             .unwrap();
 
-        for stream_id in stream_ids {
-            if let Ok(rows) = stmt.query((stream_id, start, end)) {
-                let mapped_rows = rows.mapped(|row| row.get::<usize, String>(0));
+        let mapped_rows = stmt
+            .query((stream_id, start, end))
+            .unwrap()
+            .mapped(|row| row.get::<usize, String>(0));
 
-                for row in mapped_rows {
-                    paths.push(PathBuf::from(row.unwrap()));
-                }
-            }
+        for row in mapped_rows {
+            paths.push(PathBuf::from(row.unwrap()));
         }
 
         paths
     }
 }
 
-struct Indexer {
+pub struct Indexer {
     store: Box<dyn IndexerStore>,
     root_dir: PathBuf,
 }
 
 impl Indexer {
-    fn new(root_dir: PathBuf) -> Self {
+    pub fn new(root_dir: PathBuf) -> Self {
         Self {
             store: Box::new(SQLiteIndexerStore::new(&root_dir)),
             root_dir,
         }
     }
 
-    fn create_store(root_dir: &Path) {
-        SQLiteIndexerStore::new(root_dir).create_store();
+    pub fn create_store(&mut self) {
+        self.store.create_store();
     }
 
-    fn drop_store(root_dir: &Path) {
-        SQLiteIndexerStore::new(root_dir).drop_store();
+    pub fn drop_store(&mut self) {
+        self.store.drop_store();
     }
 
-    fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid {
+    pub fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid {
         self.store.insert_new_id(stream, matchers)
     }
 
-    fn insert_new_file(&self, id: &Uuid, file: &Path, start: &Timestamp, end: &Timestamp) {
+    pub fn insert_new_file(&self, id: &Uuid, file: &Path, start: &Timestamp, end: &Timestamp) {
         self.store.insert_new_file(id, file, start, end);
     }
 
-    fn get_intersecting_ids(id_lists: &mut [HashSet<Uuid>]) -> HashSet<Uuid> {
+    pub fn get_stream_ids(&self, stream: &str, matchers: &Matchers) -> HashSet<Uuid> {
+        let mut id_lists = self.store.get_stream_and_matcher_ids(stream, matchers);
+        self.compute_intersection(&mut id_lists)
+    }
+
+    fn compute_intersection(&self, id_lists: &mut [HashSet<Uuid>]) -> HashSet<Uuid> {
         let mut intersection: HashSet<Uuid> = HashSet::new();
 
         if !id_lists.is_empty() {
@@ -268,17 +268,13 @@ impl Indexer {
         intersection
     }
 
-    fn get_required_files(
+    pub fn get_required_files(
         &self,
-        stream: &str,
-        matchers: &Matchers,
+        stream_id: &Uuid,
         start: &Timestamp,
         end: &Timestamp,
     ) -> Vec<PathBuf> {
-        let mut id_lists = self.store.get_stream_and_matcher_ids(stream, matchers);
-        let intersecting_ids = Self::get_intersecting_ids(&mut id_lists);
-        self.store
-            .get_files_for_stream_ids(&intersecting_ids, start, end)
+        self.store.get_files_for_stream_id(stream_id, start, end)
     }
 }
 
@@ -298,7 +294,10 @@ mod tests {
     use super::Indexer;
 
     #[test]
-    fn test_get_intersecting_ids() {
+    fn test_intersection() {
+        set_up_dirs!(dirs, "db");
+        let indexer = Indexer::new(dirs[0].clone());
+
         let uuid1 = Uuid::new_v4();
         let uuid2 = Uuid::new_v4();
         let uuid3 = Uuid::new_v4();
@@ -309,7 +308,7 @@ mod tests {
         let hs2 = HashSet::from([uuid1, uuid3, uuid5]);
         let hs3 = HashSet::from([uuid1, uuid5]);
 
-        let intersect = Indexer::get_intersecting_ids(&mut Vec::from([hs1, hs2, hs3]));
+        let intersect = indexer.compute_intersection(&mut Vec::from([hs1, hs2, hs3]));
 
         assert_eq!(intersect, HashSet::from([uuid1, uuid5]));
     }
@@ -320,9 +319,8 @@ mod tests {
 
         // seed indexer storage
         let mut indexer = Indexer::new(dirs[0].clone());
-        Indexer::drop_store(&dirs[0]);
-        Indexer::create_store(&dirs[0]);
-
+        indexer.drop_store();
+        indexer.create_store();
         let stream = "https";
         let matchers = Matchers::new(vec![
             Matcher::new(MatchOp::Equal, "app", "dummy"),
@@ -340,18 +338,18 @@ mod tests {
         indexer.insert_new_file(&id, &file3, &5, &7);
 
         // query indexer storage
-        let mut filenames = indexer.get_required_files(stream, &matchers, &4, &4);
+        let mut filenames = indexer.get_required_files(&id, &4, &4);
         filenames.sort();
         let mut expected = Vec::from([file2.clone()]);
         assert_eq!(filenames, expected);
 
-        filenames = indexer.get_required_files(stream, &matchers, &2, &6);
+        filenames = indexer.get_required_files(&id, &2, &6);
         filenames.sort();
         expected = Vec::from([file1, file2, file3]);
         expected.sort();
         assert_eq!(filenames, expected);
 
-        Indexer::drop_store(&dirs[0]);
+        indexer.drop_store();
     }
 
     #[test]
@@ -360,8 +358,8 @@ mod tests {
 
         // seed indexer storage
         let mut indexer = Indexer::new(dirs[0].clone());
-        Indexer::drop_store(&dirs[0]);
-        Indexer::create_store(&dirs[0]);
+        indexer.drop_store();
+        indexer.create_store();
 
         let stream = "https";
         let matchers1 = Matchers::new(vec![
@@ -387,14 +385,6 @@ mod tests {
         let file4 = PathBuf::from(format!("{}/{}/file4.ty", dirs[0].to_str().unwrap(), id2));
         indexer.insert_new_file(&id2, &file4, &5, &8);
 
-        // query indexer storage
-        let matchers = Matchers::new(vec![Matcher::new(MatchOp::Equal, "app", "dummy")]);
-        let mut filenames = indexer.get_required_files(stream, &matchers, &2, &3);
-        filenames.sort();
-        let mut expected = Vec::from([file1, file3]);
-        expected.sort();
-        assert_eq!(filenames, expected);
-
-        Indexer::drop_store(&dirs[0]);
+        indexer.drop_store();
     }
 }

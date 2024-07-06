@@ -12,6 +12,8 @@ use std::{
     rc::Rc,
 };
 
+pub mod node;
+
 #[non_exhaustive]
 #[repr(u8)]
 pub enum OperationCode {
@@ -64,7 +66,7 @@ pub struct Context {
     pc: usize,
     regs: [u64; NUM_REGS],
 
-    file_paths_array: Rc<[Rc<[PathBuf]>]>,
+    file_paths_array: Rc<[Vec<PathBuf>]>,
     cursors: Vec<Option<Cursor>>,
     page_cache: Rc<RefCell<PageCache>>,
 
@@ -72,7 +74,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new(file_paths_array: Rc<[Rc<[PathBuf]>]>, page_cache: Rc<RefCell<PageCache>>) -> Self {
+    pub fn new(file_paths_array: Rc<[Vec<PathBuf>]>, page_cache: Rc<RefCell<PageCache>>) -> Self {
         Self {
             pc: 0,
             regs: [0x00u64; NUM_REGS],

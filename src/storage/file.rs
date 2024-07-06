@@ -17,8 +17,6 @@ use std::{
 const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
-const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
-
 pub const MAX_NUM_ENTRIES: usize = 62500;
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -100,12 +98,14 @@ pub struct Cursor {
     value: Value,
     values_read: u64,
 
-    file_paths: Rc<[PathBuf]>,
+    file_paths: Vec<PathBuf>,
 
     page_cache: Rc<RefCell<PageCache>>,
     decomp_engine: <DefaultScheme as CompressionScheme<SeqPageRead, File>>::Decompressor,
 
     scan_hint: ScanHint,
+
+    is_done: bool,
 }
 
 // TODO: Remove this
@@ -120,13 +120,13 @@ impl Iterator for Cursor {
 impl Cursor {
     // pre: file_paths[0] contains at least one timestamp t such that start <= t
     pub fn new(
-        file_paths: Rc<[PathBuf]>,
+        file_paths: Vec<PathBuf>,
         start: Timestamp,
         end: Timestamp,
         page_cache: Rc<RefCell<PageCache>>,
         scan_hint: ScanHint,
     ) -> Result<Self, Error> {
-        assert!(file_paths.len() > 0);
+        assert!(!file_paths.is_empty());
         assert!(start <= end);
 
         let mut page_cache_ref = page_cache.borrow_mut();
@@ -156,6 +156,7 @@ impl Cursor {
             decomp_engine,
 
             scan_hint,
+            is_done: false,
         };
 
         // check if we can use hint
@@ -232,12 +233,15 @@ impl Cursor {
 
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<(Timestamp, Value)> {
-        if self.current_timestamp > self.end {
+        if self.is_done {
             return None;
         }
 
         if self.values_read == self.header.count as u64 {
-            self.load_next_file()?;
+            if self.load_next_file().is_none() {
+                self.is_done = true;
+                return None;
+            }
 
             // this should never be triggered
             if self.current_timestamp > self.end {
@@ -249,6 +253,7 @@ impl Cursor {
 
         (self.current_timestamp, self.value) = self.decomp_engine.next();
         if self.current_timestamp > self.end {
+            self.is_done = true;
             return None;
         }
         self.values_read += 1;
@@ -259,6 +264,10 @@ impl Cursor {
     // not valid after next returns none
     pub fn fetch(&self) -> (Timestamp, Value) {
         (self.current_timestamp, self.value)
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.is_done
     }
 }
 
@@ -282,7 +291,7 @@ impl TimeDataFile {
         let mut page_cache = PageCache::new(100);
 
         let mut cursor = Cursor::new(
-            Rc::new([path]),
+            vec![path],
             0,
             u64::MAX,
             Rc::new(RefCell::new(page_cache)),
@@ -419,7 +428,7 @@ mod tests {
 
         let mut page_cache = PageCache::new(10);
         let cursor = Cursor::new(
-            Rc::new([paths[0].clone()]),
+            vec![paths[0].clone()],
             0,
             100,
             Rc::new(RefCell::new(page_cache)),
@@ -448,7 +457,7 @@ mod tests {
         let mut page_cache = PageCache::new(10);
         page_cache.register_or_get_file_id(&paths[0]);
         let mut cursor = Cursor::new(
-            Rc::new([paths[0].clone()]),
+            vec![paths[0].clone()],
             0,
             100,
             Rc::new(RefCell::new(page_cache)),
@@ -491,11 +500,10 @@ mod tests {
             values.append(&mut local_values);
         }
 
-        let file_paths_arc: Rc<[PathBuf]> = file_paths.into();
         let mut page_cache = PageCache::new(10);
 
         let cursor = Cursor::new(
-            file_paths_arc,
+            file_paths,
             0,
             100,
             Rc::new(RefCell::new(page_cache)),
@@ -539,10 +547,9 @@ mod tests {
             values.append(&mut local_values);
         }
 
-        let file_paths_arc = file_paths.into();
         let mut page_cache = PageCache::new(10);
         let cursor = Cursor::new(
-            file_paths_arc,
+            file_paths,
             5,
             23,
             Rc::new(RefCell::new(page_cache)),
@@ -580,7 +587,7 @@ mod tests {
 
         let mut page_cache = PageCache::new(100);
         let mut cursor = Cursor::new(
-            paths.into(),
+            paths,
             1,
             100000,
             Rc::new(RefCell::new(page_cache)),
@@ -609,7 +616,7 @@ mod tests {
 
         let mut page_cache = PageCache::new(100);
         let mut cursor = Cursor::new(
-            paths.into(),
+            paths,
             1,
             timestamps[timestamps.len() - 1],
             Rc::new(RefCell::new(page_cache)),
@@ -648,7 +655,7 @@ mod tests {
 
         let mut page_cache = PageCache::new(100);
         let mut cursor = Cursor::new(
-            paths.into(),
+            paths,
             1,
             timestamps[timestamps.len() - 1],
             Rc::new(RefCell::new(page_cache)),
@@ -691,12 +698,11 @@ mod tests {
             values.append(&mut local_values);
         }
 
-        let file_paths_arc: Rc<[PathBuf]> = file_paths.into();
         let mut page_cache = Rc::new(RefCell::new(PageCache::new(10)));
 
         let get_value = |start: Timestamp, end: Timestamp, hint: ScanHint| -> (Value, i32) {
             let mut cursor =
-                Cursor::new(file_paths_arc.clone(), start, end, page_cache.clone(), hint).unwrap();
+                Cursor::new(file_paths.clone(), start, end, page_cache.clone(), hint).unwrap();
             let mut i = 0;
             let mut res = 0;
             loop {
@@ -745,12 +751,11 @@ mod tests {
             values.append(&mut local_values);
         }
 
-        let file_paths_arc: Rc<[PathBuf]> = file_paths.into();
         let mut page_cache = Rc::new(RefCell::new(PageCache::new(10)));
 
         let get_value = |start: Timestamp, end: Timestamp, hint: ScanHint| -> (Value, i32) {
             let mut cursor =
-                Cursor::new(file_paths_arc.clone(), start, end, page_cache.clone(), hint).unwrap();
+                Cursor::new(file_paths.clone(), start, end, page_cache.clone(), hint).unwrap();
 
             let mut i = 0;
             let mut res = Value::MAX;

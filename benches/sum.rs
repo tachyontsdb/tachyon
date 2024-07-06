@@ -12,7 +12,7 @@ fn bench_sum_sequential_timestamps(
     start: u64,
     end: u64,
     page_cache: Rc<RefCell<PageCache>>,
-    file_paths: Rc<[PathBuf]>,
+    file_paths: Vec<PathBuf>,
 ) -> u64 {
     let mut cursor = Cursor::new(file_paths, start, end, page_cache, ScanHint::None).unwrap();
 
@@ -32,7 +32,7 @@ fn bench_sum_sequential_timestamps_with_hint(
     start: u64,
     end: u64,
     page_cache: Rc<RefCell<PageCache>>,
-    file_paths: Rc<[PathBuf]>,
+    file_paths: Vec<PathBuf>,
 ) -> u64 {
     let mut cursor = Cursor::new(file_paths, start, end, page_cache, ScanHint::Sum).unwrap();
 
@@ -69,11 +69,11 @@ fn criterion_benchmark(c: &mut Criterion) {
     model.write("./tmp/bench_sequential_sum_3.ty".into());
 
     let page_cache = Rc::new(RefCell::new(PageCache::new(512)));
-    let file_paths = Rc::new([
+    let file_paths = vec![
         "./tmp/bench_sequential_sum.ty".into(),
         "./tmp/bench_sequential_sum_2.ty".into(),
         "./tmp/bench_sequential_sum_3.ty".into(),
-    ]);
+    ];
 
     c.bench_function(&format!("tachyon: sum sequential 0-{}", NUM_ITEMS), |b| {
         b.iter(|| {

@@ -829,7 +829,6 @@ mod tests {
             CompressionUtils::zig_zag_decode(CompressionUtils::zig_zag_encode(-12))
         );
 
-        println!("{}", CompressionUtils::zig_zag_encode(130));
         assert_eq!(
             130,
             CompressionUtils::zig_zag_decode(CompressionUtils::zig_zag_encode(130))
