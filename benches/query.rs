@@ -27,7 +27,7 @@ fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
 }
 
 fn bench_query(query: &str, start: Option<u64>, end: Option<u64>, conn: &mut Connection) {
-    let mut stmt = conn.prepare(&query, start, end);
+    let mut stmt = conn.prepare(query, start, end);
 
     match stmt.return_type() {
         TachyonResultType::Scalar => {
