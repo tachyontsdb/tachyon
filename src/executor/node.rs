@@ -54,6 +54,7 @@ impl VectorSelectNode {
         matchers: Matchers,
         start: Timestamp,
         end: Timestamp,
+        hint: ScanHint,
     ) -> Self {
         let stream_ids: Vec<Uuid> = conn
             .indexer
@@ -75,14 +76,7 @@ impl VectorSelectNode {
         VectorSelectNode {
             stream_ids,
             stream_idx: 0,
-            cursor: Cursor::new(
-                file_paths,
-                start,
-                end,
-                conn.page_cache.clone(),
-                ScanHint::None,
-            )
-            .unwrap(),
+            cursor: Cursor::new(file_paths, start, end, conn.page_cache.clone(), hint).unwrap(),
         }
     }
 }

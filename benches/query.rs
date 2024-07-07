@@ -43,15 +43,15 @@ fn bench_query(query: &str, start: Option<u64>, end: Option<u64>, conn: &mut Con
     }
 }
 
-const QUERIES: [&str; 3] = [
-    r#"http_requests_total{service = "web"}"#,
-    r#"sum(http_requests_total{service = "web"})"#,
-    r#"avg(http_requests_total{service = "web"})"#,
-];
-
 fn vector_selector_benchmark(c: &mut Criterion) {
     let root_dir = PathBuf::from_str("./tmp/db").unwrap();
     fs::create_dir_all(&root_dir).unwrap();
+
+    let queries = vec![
+        // r#"http_requests_total{service = "web"}"#,
+        r#"sum(http_requests_total{service = "web"})"#,
+        // r#"avg(http_requests_total{service = "web"})"#,
+    ];
 
     let mut conn = Connection::new(root_dir.clone());
 
@@ -65,7 +65,7 @@ fn vector_selector_benchmark(c: &mut Criterion) {
 
     conn.writer.flush_all();
 
-    for query in QUERIES {
+    for query in queries {
         c.bench_function(&format!("tachyon: query benchmark for: {}", query), |b| {
             b.iter(|| bench_query(query, Some(0), Some(1300000000), &mut conn))
         });
