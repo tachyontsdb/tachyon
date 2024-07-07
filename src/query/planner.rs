@@ -41,9 +41,12 @@ impl<'a> QueryPlanner<'a> {
             parser::token::T_SUM => Ok(TNode::Sum(SumNode::new(Box::new(
                 self.handle_expr(&expr.expr, conn, ScanHint::Sum).unwrap(),
             )))),
-            parser::token::T_AVG => Ok(TNode::Average(AverageNode::new(Box::new(
-                self.handle_expr(&expr.expr, conn, ScanHint::None).unwrap(),
-            )))),
+            parser::token::T_AVG => Ok(TNode::Average(AverageNode::new(
+                Box::new(SumNode::new(Box::new(
+                    self.handle_expr(&expr.expr, conn, ScanHint::Sum).unwrap(),
+                ))),
+                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Count).unwrap()),
+            ))),
             _ => panic!("Unknown aggregation token."),
         }
     }

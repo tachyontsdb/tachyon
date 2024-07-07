@@ -48,9 +48,9 @@ fn vector_selector_benchmark(c: &mut Criterion) {
     fs::create_dir_all(&root_dir).unwrap();
 
     let queries = vec![
-        // r#"http_requests_total{service = "web"}"#,
+        r#"http_requests_total{service = "web"}"#,
         r#"sum(http_requests_total{service = "web"})"#,
-        // r#"avg(http_requests_total{service = "web"})"#,
+        r#"avg(http_requests_total{service = "web"})"#,
     ];
 
     let mut conn = Connection::new(root_dir.clone());
