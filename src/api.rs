@@ -108,7 +108,7 @@ impl BatchWriter {
 
 #[repr(C)]
 pub struct Stmt {
-    pub root: TNode,
+    root: TNode,
     connection: *mut Connection, // should be a reference, but has to be FFI-safe
 }
 
