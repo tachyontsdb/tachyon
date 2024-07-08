@@ -54,6 +54,7 @@ impl VectorSelectNode {
         matchers: Matchers,
         start: Timestamp,
         end: Timestamp,
+        hint: ScanHint,
     ) -> Self {
         let stream_ids: Vec<Uuid> = conn
             .indexer
@@ -75,14 +76,7 @@ impl VectorSelectNode {
         VectorSelectNode {
             stream_ids,
             stream_idx: 0,
-            cursor: Cursor::new(
-                file_paths,
-                start,
-                end,
-                conn.page_cache.clone(),
-                ScanHint::None,
-            )
-            .unwrap(),
+            cursor: Cursor::new(file_paths, start, end, conn.page_cache.clone(), hint).unwrap(),
         }
     }
 }
@@ -129,19 +123,20 @@ impl ExecutorNode for SumNode {
 }
 
 pub struct AverageNode {
+    sum: Box<SumNode>,
     child: Box<TNode>,
 }
 
 impl AverageNode {
-    pub fn new(child: Box<TNode>) -> Self {
-        Self { child }
+    pub fn new(sum: Box<SumNode>, child: Box<TNode>) -> Self {
+        Self { sum, child }
     }
 }
 
 impl ExecutorNode for AverageNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let mut sum = 0;
         let mut total = 0;
+        let sum = self.sum.next_scalar(conn).unwrap();
 
         loop {
             let pair = self.child.next_vector(conn);
@@ -150,14 +145,13 @@ impl ExecutorNode for AverageNode {
                 break;
             }
             let (t, v) = pair.unwrap();
-            sum += v;
-            total += 1;
+            total += v;
         }
 
         if (total == 0) {
             None
         } else {
-            Some(sum / total)
+            Some(sum / total) // TODO: Allow for floats
         }
     }
 }
