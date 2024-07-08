@@ -120,6 +120,14 @@ impl Stmt {
     pub fn next_vector(&mut self) -> Option<(Timestamp, Value)> {
         unsafe { self.root.next_vector(&mut *self.connection) }
     }
+
+    pub fn return_type(&self) -> TachyonResultType {
+        match self.root {
+            TNode::VectorSelect(_) => TachyonResultType::Vector,
+            TNode::Average(_) => TachyonResultType::Scalar,
+            TNode::Sum(_) => TachyonResultType::Scalar,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -255,5 +263,62 @@ mod tests {
         }
 
         assert_eq!(i, 4);
+    }
+
+    #[test]
+    fn test_e2e_aggregation() {
+        set_up_dirs!(dirs, "db");
+
+        let root_dir = dirs[0].clone();
+        let mut conn = Connection::new(root_dir);
+
+        let timestamps = [23, 29, 40, 51];
+        let values = [45, 47, 23, 48];
+        let mut expected_sum = 0;
+
+        for (t, v) in zip(timestamps, values) {
+            conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
+            expected_sum += v;
+        }
+
+        conn.writer.flush_all();
+
+        let mut stmt = conn.prepare(
+            r#"sum(http_requests_total{service = "web"})"#,
+            Some(23),
+            Some(51),
+        );
+
+        let actual_sum = stmt.next_scalar().unwrap();
+        assert_eq!(actual_sum, expected_sum);
+    }
+
+    #[test]
+    fn test_e2e_aggregation_2() {
+        set_up_dirs!(dirs, "db");
+
+        let root_dir = dirs[0].clone();
+        let mut conn = Connection::new(root_dir);
+
+        let timestamps = [23, 29, 40, 51];
+        let values = [45, 47, 24, 48];
+        let mut expected_avg = 0;
+
+        for (t, v) in zip(timestamps, values) {
+            conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
+            expected_avg += v;
+        }
+        expected_avg /= values.len() as u64;
+
+        conn.writer.flush_all();
+
+        let mut stmt = conn.prepare(
+            r#"avg(http_requests_total{service = "web"})"#,
+            Some(23),
+            Some(51),
+        );
+
+        let actual_avg = stmt.next_scalar().unwrap();
+        assert_eq!(actual_avg, expected_avg);
     }
 }

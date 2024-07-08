@@ -28,8 +28,15 @@ impl ExecutorNode for TNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         match self {
             TNode::VectorSelect(sel) => sel.next_vector(conn),
-            TNode::Sum(sum) => sum.next_vector(conn),
-            TNode::Average(avg) => avg.next_vector(conn),
+            _ => panic!("next_vector not implemented for this node"),
+        }
+    }
+
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        match self {
+            TNode::Sum(sel) => sel.next_scalar(conn),
+            TNode::Average(sel) => sel.next_scalar(conn),
+            _ => panic!("next_scalar not implemented for this node"),
         }
     }
 }
@@ -47,6 +54,7 @@ impl VectorSelectNode {
         matchers: Matchers,
         start: Timestamp,
         end: Timestamp,
+        hint: ScanHint,
     ) -> Self {
         let stream_ids: Vec<Uuid> = conn
             .indexer
@@ -60,7 +68,6 @@ impl VectorSelectNode {
         }
 
         let stream_id = stream_ids[0];
-        println!("STREAM ID: {}, start: {}, end: {}", stream_id, start, end);
         let file_paths = conn
             .indexer
             .borrow()
@@ -69,14 +76,7 @@ impl VectorSelectNode {
         VectorSelectNode {
             stream_ids,
             stream_idx: 0,
-            cursor: Cursor::new(
-                file_paths,
-                start,
-                end,
-                conn.page_cache.clone(),
-                ScanHint::None,
-            )
-            .unwrap(),
+            cursor: Cursor::new(file_paths, start, end, conn.page_cache.clone(), hint).unwrap(),
         }
     }
 }
@@ -98,19 +98,61 @@ pub struct SumNode {
     child: Box<TNode>,
 }
 
+impl SumNode {
+    pub fn new(child: Box<TNode>) -> Self {
+        Self { child }
+    }
+}
+
 impl ExecutorNode for SumNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        todo!()
+        let mut sum = 0;
+
+        loop {
+            let pair = self.child.next_vector(conn);
+
+            if (pair.is_none()) {
+                break;
+            }
+            let (t, v) = pair.unwrap();
+            sum += v;
+        }
+
+        Some(sum)
     }
 }
 
 pub struct AverageNode {
+    sum: Box<SumNode>,
     child: Box<TNode>,
+}
+
+impl AverageNode {
+    pub fn new(sum: Box<SumNode>, child: Box<TNode>) -> Self {
+        Self { sum, child }
+    }
 }
 
 impl ExecutorNode for AverageNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        todo!()
+        let mut total = 0;
+        let sum = self.sum.next_scalar(conn).unwrap();
+
+        loop {
+            let pair = self.child.next_vector(conn);
+
+            if (pair.is_none()) {
+                break;
+            }
+            let (t, v) = pair.unwrap();
+            total += v;
+        }
+
+        if (total == 0) {
+            None
+        } else {
+            Some(sum / total) // TODO: Allow for floats
+        }
     }
 }
 

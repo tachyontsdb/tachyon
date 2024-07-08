@@ -13,7 +13,6 @@ path = "src/cli.rs"
 [dependencies]
 clap = { version = "4.5.8", features = ["derive"] }
 csv = "1.3.0"
-plotters = "0.3.6"
 prettytable-rs = "0.10.0"
 promql-parser = "0.4.0"
 rusqlite = { version = "0.31.0", features = ["uuid"] }
@@ -54,6 +53,10 @@ harness = false
 
 [[bench]]
 name = "sum"
+harness = false
+
+[[bench]]
+name = "query"
 harness = false
 
 [profile.release]

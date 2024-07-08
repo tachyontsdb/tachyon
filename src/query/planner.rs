@@ -6,8 +6,9 @@ use promql_parser::parser::{
 
 use crate::api::Connection;
 use crate::common::{Timestamp, Value};
-use crate::executor::node::{TNode, VectorSelectNode};
+use crate::executor::node::{AverageNode, SumNode, TNode, VectorSelectNode};
 use crate::executor::{self, execute, Context, OperationCode::*};
+use crate::storage::file::ScanHint;
 
 #[derive(Debug)]
 pub struct QueryPlanner<'a> {
@@ -28,7 +29,7 @@ impl<'a> QueryPlanner<'a> {
     }
 
     pub fn plan(&mut self, conn: &mut Connection) -> TNode {
-        self.handle_expr(self.ast, conn).unwrap()
+        self.handle_expr(self.ast, conn, ScanHint::None).unwrap()
     }
 
     fn handle_aggregate_expr(
@@ -36,7 +37,18 @@ impl<'a> QueryPlanner<'a> {
         expr: &AggregateExpr,
         conn: &mut Connection,
     ) -> Result<TNode, &'static str> {
-        Err("Aggregate expressions currently not supported.")
+        match expr.op.id() {
+            parser::token::T_SUM => Ok(TNode::Sum(SumNode::new(Box::new(
+                self.handle_expr(&expr.expr, conn, ScanHint::Sum).unwrap(),
+            )))),
+            parser::token::T_AVG => Ok(TNode::Average(AverageNode::new(
+                Box::new(SumNode::new(Box::new(
+                    self.handle_expr(&expr.expr, conn, ScanHint::Sum).unwrap(),
+                ))),
+                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Count).unwrap()),
+            ))),
+            _ => panic!("Unknown aggregation token."),
+        }
     }
 
     fn handle_unary_expr(
@@ -44,7 +56,7 @@ impl<'a> QueryPlanner<'a> {
         expr: &UnaryExpr,
         conn: &mut Connection,
     ) -> Result<TNode, &'static str> {
-        let result = self.handle_expr(&expr.expr, conn);
+        let result = self.handle_expr(&expr.expr, conn, ScanHint::None);
         todo!()
     }
 
@@ -61,7 +73,7 @@ impl<'a> QueryPlanner<'a> {
         expr: &ParenExpr,
         conn: &mut Connection,
     ) -> Result<TNode, &'static str> {
-        self.handle_expr(&expr.expr, conn)
+        self.handle_expr(&expr.expr, conn, ScanHint::None)
     }
 
     fn handle_subquery_expr(
@@ -92,6 +104,7 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         expr: &VectorSelector,
         conn: &mut Connection,
+        hint: ScanHint,
     ) -> Result<TNode, &'static str> {
         let start = if expr.at.is_some() {
             let mut at_res = match expr.at.as_ref().unwrap() {
@@ -119,6 +132,7 @@ impl<'a> QueryPlanner<'a> {
             expr.matchers.clone(),
             start,
             end,
+            hint,
         )))
     }
 
@@ -146,7 +160,12 @@ impl<'a> QueryPlanner<'a> {
         Err("Extension expressions currently not supported.")
     }
 
-    fn handle_expr(&mut self, expr: &Expr, conn: &mut Connection) -> Result<TNode, &'static str> {
+    fn handle_expr(
+        &mut self,
+        expr: &Expr,
+        conn: &mut Connection,
+        hint: ScanHint,
+    ) -> Result<TNode, &'static str> {
         match expr {
             Expr::Aggregate(aggregate_expr) => self.handle_aggregate_expr(aggregate_expr, conn),
             Expr::Unary(unary_expr) => self.handle_unary_expr(unary_expr, conn),
@@ -160,7 +179,7 @@ impl<'a> QueryPlanner<'a> {
                 self.handle_string_literal_expr(string_literal_expr, conn)
             }
             Expr::VectorSelector(vector_selector_expr) => {
-                self.handle_vector_selector_expr(vector_selector_expr, conn)
+                self.handle_vector_selector_expr(vector_selector_expr, conn, hint)
             }
             Expr::MatrixSelector(matrix_selector_expr) => {
                 self.handle_matrix_selector_expr(matrix_selector_expr, conn)
@@ -183,6 +202,30 @@ mod tests {
             Expr::VectorSelector(selector) => println!("{:#?}", selector),
             _ => {
                 panic!("not a vector selector");
+            }
+        };
+    }
+
+    #[test]
+    fn test_query_1() {
+        let query_string = r#"sum(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not a aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_query_2() {
+        let query_string = r#"avg(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not a aggregate");
             }
         };
     }

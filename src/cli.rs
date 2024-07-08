@@ -1,15 +1,16 @@
 use std::{
+    fs::File,
+    io::Write,
     iter::zip,
     path::{Path, PathBuf},
 };
 
 use clap::{Parser, Subcommand};
 use csv::{Reader, Writer};
-use plotters::prelude::*;
 use prettytable::{row, Table};
 use rustyline::{error::ReadlineError, DefaultEditor};
 use tachyon::{
-    api::Connection,
+    api::{Connection, TachyonResultType},
     common::{Timestamp, Value},
     storage::file::TimeDataFile,
 };
@@ -83,29 +84,36 @@ fn repl(mut conn: Connection) {
 
 fn handle_query_command(conn: &mut Connection, query: String, path_opt: Option<String>) {
     let mut stmt = conn.prepare(&query, Some(0), Some(1719776339748));
-    let mut timeseries = Vec::<(f32, f32)>::new();
 
-    let mut max_value = Value::MIN;
-    let mut min_value = Value::MAX;
+    match stmt.return_type() {
+        TachyonResultType::Scalar => println!("{}", stmt.next_scalar().unwrap()),
+        TachyonResultType::Vector => {
+            let mut timeseries = Vec::<(f32, f32)>::new();
 
-    loop {
-        let val = stmt.next_vector();
-        if val.is_none() {
-            break;
+            let mut max_value = Value::MIN;
+            let mut min_value = Value::MAX;
+
+            loop {
+                let val = stmt.next_vector();
+                if val.is_none() {
+                    break;
+                }
+                let (time, val) = val.unwrap();
+                max_value = max_value.max(val);
+                min_value = min_value.min(val);
+
+                timeseries.push((time as f32, val as f32));
+            }
+
+            Chart::new(180, 60, timeseries[0].0, timeseries.last().unwrap().0)
+                .lineplot(&Shape::Lines(&timeseries))
+                .display();
+
+            if let Some(path) = path_opt {
+                export_as_csv(&path.into() as &PathBuf, &timeseries);
+            }
         }
-        let (time, val) = val.unwrap();
-        max_value = max_value.max(val);
-        min_value = min_value.min(val);
-
-        timeseries.push((time as f32, val as f32));
-    }
-
-    Chart::new(180, 60, timeseries[0].0, timeseries.last().unwrap().0)
-        .lineplot(&Shape::Lines(&timeseries))
-        .display();
-
-    if let Some(path) = path_opt {
-        export_as_graph(&path.into() as &PathBuf, timeseries, max_value, min_value);
+        TachyonResultType::Done => println!(),
     }
 }
 
@@ -144,32 +152,14 @@ fn handle_debug_command(_: Connection, file: String, output_csv: Option<String>)
     };
 }
 
-fn export_as_graph(path: &Path, timeseries: Vec<(f32, f32)>, max_value: Value, min_value: Value) {
-    let root = BitMapBackend::new(path, (640, 480)).into_drawing_area();
-    root.fill(&WHITE).unwrap();
-    let mut chart = ChartBuilder::on(&root)
-        .caption("Query result", ("sans-serif", 50).into_font())
-        .margin(5)
-        .x_label_area_size(30)
-        .y_label_area_size(30)
-        .build_cartesian_2d(
-            timeseries[0].0..timeseries.last().unwrap().0,
-            min_value as f32..max_value as f32,
-        )
-        .unwrap();
+fn export_as_csv(path: &Path, timeseries: &Vec<(f32, f32)>) {
+    let mut file = File::create(path).unwrap();
 
-    chart.configure_mesh();
+    file.write_all("timestamp,value\n".as_bytes()).unwrap();
 
-    chart.draw_series(LineSeries::new(timeseries, RED)).unwrap();
-
-    chart
-        .configure_series_labels()
-        .background_style(WHITE.mix(0.8))
-        .border_style(BLACK)
-        .draw()
-        .unwrap();
-
-    root.present().unwrap();
+    for (t, v) in timeseries {
+        file.write_all(format!("{},{}\n", t, v).as_bytes()).unwrap();
+    }
 }
 
 fn insert_from_csv(mut conn: Connection, matcher: String, file: String) {
