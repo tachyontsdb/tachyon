@@ -294,28 +294,67 @@ mod tests {
         assert_eq!(actual_sum, expected_sum);
     }
 
-    #[test]
-    fn test_e2e_count() {
+    fn test_e2e_count_header() {
         set_up_dirs!(dirs, "db");
 
         let root_dir = dirs[0].clone();
         let mut conn = Connection::new(root_dir);
 
-        let timestamps = [23, 29, 40, 51];
-        let values = [45, 47, 23, 48];
+        let timestamps = [11, 23, 29, 40, 51, 53];
+        let values = [0, 45, 47, 23, 48, 12];
         let mut expected_count = 0;
+
+        let start = 10;
+        let end = 54;
 
         for (t, v) in zip(timestamps, values) {
             conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
-            expected_count += 1;
+
+            if start <= t && t <= end {
+                expected_count += 1;
+            }
         }
 
         conn.writer.flush_all();
 
         let mut stmt = conn.prepare(
             r#"count(http_requests_total{service = "web"})"#,
-            Some(23),
-            Some(51),
+            Some(start),
+            Some(end),
+        );
+
+        let actual_count = stmt.next_scalar().unwrap();
+        assert_eq!(actual_count, expected_count);
+    }
+
+    #[test]
+    fn test_e2e_count_value() {
+        set_up_dirs!(dirs, "db");
+
+        let root_dir = dirs[0].clone();
+        let mut conn = Connection::new(root_dir);
+
+        let timestamps = [11, 23, 29, 40, 51, 53];
+        let values = [0, 45, 47, 23, 48, 12];
+        let mut expected_count = 0;
+
+        let start = 23;
+        let end = 51;
+
+        for (t, v) in zip(timestamps, values) {
+            conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
+
+            if start <= t && t <= end {
+                expected_count += 1;
+            }
+        }
+
+        conn.writer.flush_all();
+
+        let mut stmt = conn.prepare(
+            r#"count(http_requests_total{service = "web"})"#,
+            Some(start),
+            Some(end),
         );
 
         let actual_count = stmt.next_scalar().unwrap();
