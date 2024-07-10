@@ -50,6 +50,7 @@ fn vector_selector_benchmark(c: &mut Criterion) {
     let queries = vec![
         r#"http_requests_total{service = "web"}"#,
         r#"sum(http_requests_total{service = "web"})"#,
+        r#"count(http_requests_total{service = "web"})"#,
         r#"avg(http_requests_total{service = "web"})"#,
     ];
 
