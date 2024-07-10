@@ -21,6 +21,7 @@ pub trait ExecutorNode {
 pub enum TNode {
     VectorSelect(VectorSelectNode),
     Sum(SumNode),
+    Count(CountNode),
     Average(AverageNode),
 }
 
@@ -35,6 +36,7 @@ impl ExecutorNode for TNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         match self {
             TNode::Sum(sel) => sel.next_scalar(conn),
+            TNode::Count(sel) => sel.next_scalar(conn),
             TNode::Average(sel) => sel.next_scalar(conn),
             _ => panic!("next_scalar not implemented for this node"),
         }
@@ -122,21 +124,19 @@ impl ExecutorNode for SumNode {
     }
 }
 
-pub struct AverageNode {
-    sum: Box<SumNode>,
+pub struct CountNode {
     child: Box<TNode>,
 }
 
-impl AverageNode {
-    pub fn new(sum: Box<SumNode>, child: Box<TNode>) -> Self {
-        Self { sum, child }
+impl CountNode {
+    pub fn new(child: Box<TNode>) -> Self {
+        Self { child }
     }
 }
 
-impl ExecutorNode for AverageNode {
+impl ExecutorNode for CountNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let mut total = 0;
-        let sum = self.sum.next_scalar(conn).unwrap();
+        let mut count = 0;
 
         loop {
             let pair = self.child.next_vector(conn);
@@ -145,13 +145,34 @@ impl ExecutorNode for AverageNode {
                 break;
             }
             let (t, v) = pair.unwrap();
-            total += v;
+            count += v;
         }
 
-        if (total == 0) {
+        Some(count)
+    }
+}
+
+pub struct AverageNode {
+    sum: Box<SumNode>,
+    count: Box<CountNode>,
+}
+
+impl AverageNode {
+    pub fn new(sum: Box<SumNode>, count: Box<CountNode>) -> Self {
+        Self { sum, count }
+    }
+}
+
+impl ExecutorNode for AverageNode {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        let mut total = 0;
+        let sum = self.sum.next_scalar(conn).unwrap();
+        let count = self.count.next_scalar(conn).unwrap();
+
+        if (count == 0) {
             None
         } else {
-            Some(sum / total) // TODO: Allow for floats
+            Some(sum / count) // TODO: Allow for floats
         }
     }
 }

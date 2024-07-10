@@ -124,8 +124,9 @@ impl Stmt {
     pub fn return_type(&self) -> TachyonResultType {
         match self.root {
             TNode::VectorSelect(_) => TachyonResultType::Vector,
-            TNode::Average(_) => TachyonResultType::Scalar,
             TNode::Sum(_) => TachyonResultType::Scalar,
+            TNode::Count(_) => TachyonResultType::Scalar,
+            TNode::Average(_) => TachyonResultType::Scalar,
         }
     }
 }
@@ -266,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_e2e_aggregation() {
+    fn test_e2e_sum() {
         set_up_dirs!(dirs, "db");
 
         let root_dir = dirs[0].clone();
@@ -294,7 +295,35 @@ mod tests {
     }
 
     #[test]
-    fn test_e2e_aggregation_2() {
+    fn test_e2e_count() {
+        set_up_dirs!(dirs, "db");
+
+        let root_dir = dirs[0].clone();
+        let mut conn = Connection::new(root_dir);
+
+        let timestamps = [23, 29, 40, 51];
+        let values = [45, 47, 23, 48];
+        let mut expected_count = 0;
+
+        for (t, v) in zip(timestamps, values) {
+            conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
+            expected_count += 1;
+        }
+
+        conn.writer.flush_all();
+
+        let mut stmt = conn.prepare(
+            r#"count(http_requests_total{service = "web"})"#,
+            Some(23),
+            Some(51),
+        );
+
+        let actual_count = stmt.next_scalar().unwrap();
+        assert_eq!(actual_count, expected_count);
+    }
+
+    #[test]
+    fn test_e2e_avg() {
         set_up_dirs!(dirs, "db");
 
         let root_dir = dirs[0].clone();
