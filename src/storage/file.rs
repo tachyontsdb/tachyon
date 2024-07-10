@@ -197,7 +197,7 @@ impl Cursor {
     fn use_query_hint_for_value(&mut self, value: Value) {
         self.value = match self.scan_hint {
             ScanHint::Count => 1,
-            _ => value
+            _ => value,
         };
     }
 
