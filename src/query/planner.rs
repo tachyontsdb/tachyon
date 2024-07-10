@@ -6,7 +6,7 @@ use promql_parser::parser::{
 
 use crate::api::Connection;
 use crate::common::{Timestamp, Value};
-use crate::executor::node::{AverageNode, SumNode, TNode, VectorSelectNode};
+use crate::executor::node::{AverageNode, CountNode, SumNode, TNode, VectorSelectNode};
 use crate::executor::{self, execute, Context, OperationCode::*};
 use crate::storage::file::ScanHint;
 
@@ -41,11 +41,16 @@ impl<'a> QueryPlanner<'a> {
             parser::token::T_SUM => Ok(TNode::Sum(SumNode::new(Box::new(
                 self.handle_expr(&expr.expr, conn, ScanHint::Sum).unwrap(),
             )))),
+            parser::token::T_COUNT => Ok(TNode::Count(CountNode::new(Box::new(
+                self.handle_expr(&expr.expr, conn, ScanHint::Count).unwrap(),
+            )))),
             parser::token::T_AVG => Ok(TNode::Average(AverageNode::new(
                 Box::new(SumNode::new(Box::new(
                     self.handle_expr(&expr.expr, conn, ScanHint::Sum).unwrap(),
                 ))),
-                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Count).unwrap()),
+                Box::new(CountNode::new(Box::new(
+                    self.handle_expr(&expr.expr, conn, ScanHint::Count).unwrap(),
+                ))),
             ))),
             _ => panic!("Unknown aggregation token."),
         }
@@ -195,7 +200,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_query() {
+    fn test_vector_selector_query() {
         let query_string = r#"http_requests_total{service = "web" or service = "nice"} @ 324"#;
         let res = parser::parse(query_string).unwrap();
         match res {
@@ -207,25 +212,37 @@ mod tests {
     }
 
     #[test]
-    fn test_query_1() {
+    fn test_sum_query() {
         let query_string = r#"sum(http_requests_total{service = "web" or service = "nice"})"#;
         let res = parser::parse(query_string).unwrap();
         match res {
             Expr::Aggregate(selector) => println!("{:#?}", selector),
             _ => {
-                panic!("not a aggregate");
+                panic!("not an aggregate");
             }
         };
     }
 
     #[test]
-    fn test_query_2() {
+    fn test_count_query() {
+        let query_string = r#"count(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_avg_query() {
         let query_string = r#"avg(http_requests_total{service = "web" or service = "nice"})"#;
         let res = parser::parse(query_string).unwrap();
         match res {
             Expr::Aggregate(selector) => println!("{:#?}", selector),
             _ => {
-                panic!("not a aggregate");
+                panic!("not an aggregate");
             }
         };
     }
