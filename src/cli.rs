@@ -53,6 +53,19 @@ enum Commands {
 }
 
 fn repl(mut conn: Connection) {
+    println!(
+        r"
+ ______                 __                              ____    ____      
+/\__  _\               /\ \                            /\  _`\ /\  _`\    
+\/_/\ \/    __      ___\ \ \___   __  __    ___     ___\ \ \/\ \ \ \L\ \  
+   \ \ \  /'__`\   /'___\ \  _ `\/\ \/\ \  / __`\ /' _ `\ \ \ \ \ \  _ <' 
+    \ \ \/\ \L\.\_/\ \__/\ \ \ \ \ \ \_\ \/\ \L\ \/\ \/\ \ \ \_\ \ \ \L\ \
+     \ \_\ \__/.\_\ \____\\ \_\ \_\/`____ \ \____/\ \_\ \_\ \____/\ \____/
+      \/_/\/__/\/_/\/____/ \/_/\/_/`/___/> \/___/  \/_/\/_/\/___/  \/___/ 
+                                      /\___/                              
+                                      \/__/                               
+    "
+    );
     let mut rl = DefaultEditor::new().unwrap();
 
     loop {
@@ -77,7 +90,6 @@ fn repl(mut conn: Connection) {
 
         let line = input.unwrap();
 
-        println!("Input: {}", line);
         handle_query_command(&mut conn, line, None)
     }
 }
@@ -169,12 +181,10 @@ fn insert_from_csv(mut conn: Connection, matcher: String, file: String) {
 
         let mut timestamps = Vec::new();
         let mut values = Vec::new();
-        for (i, result) in rdr.records().enumerate() {
-            if i > 0 {
-                let record = result.unwrap();
-                timestamps.push(record[0].parse::<u64>().unwrap());
-                values.push(record[1].parse::<u64>().unwrap());
-            }
+        for result in rdr.records() {
+            let record = result.unwrap();
+            timestamps.push(record[0].parse::<u64>().unwrap());
+            values.push(record[1].parse::<u64>().unwrap());
         }
         println!("Done reading from: {}\n", path);
 

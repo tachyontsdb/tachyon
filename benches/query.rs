@@ -14,12 +14,10 @@ fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
 
     let mut timestamps = Vec::new();
     let mut values = Vec::new();
-    for (i, result) in rdr.records().enumerate() {
-        if i > 0 {
-            let record = result.unwrap();
-            timestamps.push(record[0].parse::<u64>().unwrap());
-            values.push(record[1].parse::<u64>().unwrap());
-        }
+    for result in rdr.records() {
+        let record = result.unwrap();
+        timestamps.push(record[0].parse::<u64>().unwrap());
+        values.push(record[1].parse::<u64>().unwrap());
     }
     println!("Done reading from: {}\n", path);
 
