@@ -125,7 +125,7 @@ impl ExecutorNode for SumNode {
 }
 
 pub struct CountNode {
-    child: Box<TNode>
+    child: Box<TNode>,
 }
 
 impl CountNode {
