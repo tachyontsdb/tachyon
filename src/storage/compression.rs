@@ -760,7 +760,7 @@ impl<T: Read> GoogleDecompressionEngine<T> {
         let mut offset: u64 = 0;
         loop {
             if self.buf_idx >= V2_CHUNK_SIZE {
-                self.reader.read(&mut self.buf);
+                let _ = self.reader.read(&mut self.buf).unwrap();
                 self.buf_idx = 0;
             }
             let mut byte = self.buf[self.buf_idx];
