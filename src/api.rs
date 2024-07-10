@@ -305,13 +305,13 @@ mod tests {
         let values = [0, 45, 47, 23, 48, 12];
         let mut expected_count = 0;
 
-        let start = Some(23);
-        let end = Some(51);
+        let start = 23;
+        let end = 51;
 
         for (t, v) in zip(timestamps, values) {
             conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
 
-            if start.unwrap() <= t && t <= end.unwrap() {
+            if start <= t && t <= end {
                 expected_count += 1;
             }
         }
@@ -320,8 +320,8 @@ mod tests {
 
         let mut stmt = conn.prepare(
             r#"count(http_requests_total{service = "web"})"#,
-            Some(23),
-            Some(51),
+            Some(start),
+            Some(end),
         );
 
         let actual_count = stmt.next_scalar().unwrap();
