@@ -159,6 +159,8 @@ impl Cursor {
             is_done: false,
         };
 
+        cursor.use_query_hint_for_value(cursor.value);
+
         // check if we can use hint
         if !matches!(cursor.scan_hint, ScanHint::None)
             && start <= cursor.header.min_timestamp
@@ -170,7 +172,7 @@ impl Cursor {
         while cursor.current_timestamp < start {
             if let Some((timestamp, value)) = cursor.next() {
                 cursor.current_timestamp = timestamp;
-                cursor.value = value;
+                cursor.use_query_hint_for_value(value);
             } else {
                 panic!("Unexpected end of file! File does not contain start timestamp.");
             }
@@ -190,6 +192,13 @@ impl Cursor {
             ScanHint::None => unreachable!(),
         };
         self.values_read = self.header.count as u64;
+    }
+
+    fn use_query_hint_for_value(&mut self, value: Value) {
+        self.value = match self.scan_hint {
+            ScanHint::Count => 1,
+            _ => value
+        };
     }
 
     fn load_next_file(&mut self) -> Option<()> {
@@ -252,6 +261,8 @@ impl Cursor {
         }
 
         (self.current_timestamp, self.value) = self.decomp_engine.next();
+        self.use_query_hint_for_value(self.value);
+
         if self.current_timestamp > self.end {
             self.is_done = true;
             return None;

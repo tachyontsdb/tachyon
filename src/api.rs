@@ -301,13 +301,19 @@ mod tests {
         let root_dir = dirs[0].clone();
         let mut conn = Connection::new(root_dir);
 
-        let timestamps = [23, 29, 40, 51];
-        let values = [45, 47, 23, 48];
+        let timestamps = [11, 23, 29, 40, 51, 53];
+        let values = [0, 45, 47, 23, 48, 12];
         let mut expected_count = 0;
+
+        let start = Some(23);
+        let end = Some(51);
 
         for (t, v) in zip(timestamps, values) {
             conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
-            expected_count += 1;
+
+            if start.unwrap() <= t && t <= end.unwrap() {
+                expected_count += 1;
+            }
         }
 
         conn.writer.flush_all();
