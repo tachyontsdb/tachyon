@@ -10,17 +10,30 @@ extern "C" {
 struct Connection;
 struct Stmt;
 
+enum TachyonResultType : uint8_t {
+    TachyonResultDone,
+    TachyoResultnScalar,
+    TachyonResultVector,
+};
+
+enum TachyonVectorValueType : uint64_t {
+    UnsignedInteger,
+    SignedInteger,
+    Float,
+};
+
 struct TachyonResult {
-    enum class TachyonResultType : uint8_t {
-        Done,
-        Scalar,
-        Vector,
-    } t;
+    TachyonResultType t;
     union {
         uint64_t scalar;
         struct {
             uint64_t timestamp;
-            uint64_t value;
+            TachyonVectorValueType t;
+            union {
+                uint64_t u;
+                int64_t s;
+                double d;
+            } value;
         } vector;
     } r;
 };
@@ -29,7 +42,7 @@ extern struct Connection *tachyon_open(const char *const root_dir);
 
 extern void tachyon_close(struct Connection *connection);
 
-extern Stmt *tachyon_query(const struct Connection *const connection,
+extern Stmt *tachyon_prepare(const struct Connection *const connection,
                            const char *const str_ptr,
                            const uint64_t *const start,
                            const uint64_t *const end);

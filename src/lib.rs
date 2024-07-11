@@ -20,8 +20,6 @@ pub unsafe extern "C" fn tachyon_open(root_dir: *const core::ffi::c_char) -> *mu
     let ffi_str = core::ffi::CStr::from_ptr(root_dir);
     let root_dir = PathBuf::from(ffi_str.to_str().unwrap());
 
-    todo!("Need to create dir for db if not exists");
-
     let connection = Connection::new(root_dir);
     Box::into_raw(Box::new(connection))
 }
