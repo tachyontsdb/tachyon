@@ -20,3 +20,9 @@ jobs:
         run: cargo clippy --release --all-targets --all-features -- -D warnings
       - name: Run tests
         run: cargo test --release --verbose
+      - name: Run C test
+        run: |
+          cd ./scripts/c/
+          chmod +x ./run.sh
+          ./run.sh
+        shell: bash
