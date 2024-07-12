@@ -1,6 +1,7 @@
 pub type Timestamp = u64;
 pub type Value = u64;
 
+#[derive(PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum TachyonValueType {
     UnsignedInteger,

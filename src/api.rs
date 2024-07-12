@@ -106,13 +106,6 @@ impl BatchWriter {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
-pub enum TachyonResultType {
-    Done,
-    Scalar,
-    Vector,
-}
-
 #[repr(C)]
 pub struct Stmt {
     root: TNode,
@@ -136,6 +129,14 @@ impl Stmt {
             TNode::Average(_) => TachyonResultType::Scalar,
         }
     }
+}
+
+#[derive(PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum TachyonResultType {
+    Done,
+    Scalar,
+    Vector,
 }
 
 #[cfg(test)]

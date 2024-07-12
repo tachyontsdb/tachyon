@@ -8,7 +8,10 @@ const uint64_t NUM_ITEMS = 1000;
 int main() {
     struct Connection *connection = tachyon_open("test_db");
 
+    uint64_t total_sum = 0;
     for (uint64_t i = 0; i < NUM_ITEMS; ++i) {
+        total_sum += i;
+
         union TachyonValue value;
         value.unsigned_integer = i;
         tachyon_insert(connection, "test_stream{test=\"asdf\"}", i, value);
@@ -42,6 +45,7 @@ int main() {
 
     union TachyonValue value;
     tachyon_next_scalar(stmt, &value);
+    assert(value.unsigned_integer == total_sum);
     printf("Sum: %lu\n", value.unsigned_integer);
 
     tachyon_statement_close(stmt);
