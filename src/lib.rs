@@ -2,9 +2,9 @@
 
 pub mod common;
 
-use api::{Connection, Stmt, TachyonResult, TachyonResultType, TachyonResultUnion, VectorResult};
-use common::{Timestamp, Value};
-use std::path::PathBuf;
+use api::{Connection, Stmt, TachyonResultType};
+use common::{TachyonValue, TachyonValueType, TachyonVector, Timestamp, Value};
+use std::{path::PathBuf, ptr};
 
 mod executor;
 mod query;
@@ -16,8 +16,8 @@ pub mod api;
 
 /// # Safety
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_open(root_dir: *const core::ffi::c_char) -> *mut Connection {
-    let ffi_str = core::ffi::CStr::from_ptr(root_dir);
+pub unsafe extern "C" fn tachyon_open(db_dir: *const core::ffi::c_char) -> *mut Connection {
+    let ffi_str = core::ffi::CStr::from_ptr(db_dir);
     let root_dir = PathBuf::from(ffi_str.to_str().unwrap());
 
     let connection = Connection::new(root_dir);
@@ -33,11 +33,30 @@ pub unsafe extern "C" fn tachyon_close(connection: *mut Connection) {
 
 /// # Safety
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_prepare(
+pub unsafe extern "C" fn tachyon_insert(
+    connection: *mut Connection,
+    str_ptr: *const core::ffi::c_char,
+    timestamp: Timestamp,
+    value: TachyonValue,
+) {
+    let ffi_str = core::ffi::CStr::from_ptr(str_ptr);
+    (*connection).insert(ffi_str.to_str().unwrap(), timestamp, value.unsigned_integer);
+}
+
+/// # Safety
+#[no_mangle]
+pub unsafe extern "C" fn tachyon_insert_flush(connection: *mut Connection) {
+    (*connection).writer.flush_all();
+}
+
+/// # Safety
+#[no_mangle]
+pub unsafe extern "C" fn tachyon_statement_prepare(
     connection: *mut Connection,
     str_ptr: *const core::ffi::c_char,
     start: *const Timestamp,
     end: *const Timestamp,
+    value_type: TachyonValueType,
 ) -> *mut Stmt {
     let ffi_str = core::ffi::CStr::from_ptr(str_ptr);
     let stmt = (*connection).prepare(
@@ -50,30 +69,40 @@ pub unsafe extern "C" fn tachyon_prepare(
 
 /// # Safety
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_next_vector(stmt: *mut Stmt) -> TachyonResult {
-    let result = unsafe { (*stmt).next_vector() };
+pub unsafe extern "C" fn tachyon_statement_close(stmt: *mut Stmt) {
+    let stmt = Box::from_raw(stmt);
+    drop(stmt);
+}
+
+/// # Safety
+#[no_mangle]
+pub unsafe extern "C" fn tachyon_next_scalar(stmt: *mut Stmt, scalar: *mut TachyonValue) -> bool {
+    let result = unsafe { (*stmt).next_scalar() };
     match result {
-        None => TachyonResult {
-            t: TachyonResultType::Done,
-            r: TachyonResultUnion { scalar: 0 },
-        },
-        Some((timestamp, value)) => TachyonResult {
-            t: TachyonResultType::Vector,
-            r: TachyonResultUnion {
-                vector: VectorResult { timestamp, value },
-            },
-        },
+        None => false,
+        Some(value) => {
+            *scalar = TachyonValue {
+                unsigned_integer: value,
+            };
+            true
+        }
     }
 }
 
 /// # Safety
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_insert(
-    connection: *mut Connection,
-    str_ptr: *const core::ffi::c_char,
-    timestamp: Timestamp,
-    value: Value,
-) {
-    let ffi_str = core::ffi::CStr::from_ptr(str_ptr);
-    (*connection).insert(ffi_str.to_str().unwrap(), timestamp, value);
+pub unsafe extern "C" fn tachyon_next_vector(stmt: *mut Stmt, vector: *mut TachyonVector) -> bool {
+    let result = unsafe { (*stmt).next_vector() };
+    match result {
+        None => false,
+        Some((timestamp, value)) => {
+            *vector = TachyonVector {
+                timestamp,
+                value: TachyonValue {
+                    unsigned_integer: value,
+                },
+            };
+            true
+        }
+    }
 }

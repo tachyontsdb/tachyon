@@ -1,6 +1,5 @@
-name: Rust
-
 on: push
+name: Rust
 
 env:
   CARGO_TERM_COLOR: always
@@ -8,12 +7,16 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
+      - name: Check Format
+        run: cargo fmt --check
       - name: Build
-        run: cargo build --verbose
+        run: cargo build --release --verbose
+      - name: Run Clippy
+        # Make sure CI fails on all warnings, including Clippy lints
+        run: cargo clippy --release --all-targets --all-features -- -D warnings
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --release --verbose

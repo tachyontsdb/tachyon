@@ -106,6 +106,13 @@ impl BatchWriter {
     }
 }
 
+#[derive(PartialEq, Eq, Debug)]
+pub enum TachyonResultType {
+    Done,
+    Scalar,
+    Vector,
+}
+
 #[repr(C)]
 pub struct Stmt {
     root: TNode,
@@ -129,32 +136,6 @@ impl Stmt {
             TNode::Average(_) => TachyonResultType::Scalar,
         }
     }
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct VectorResult {
-    pub timestamp: Timestamp,
-    pub value: Value,
-}
-
-#[repr(C)]
-pub union TachyonResultUnion {
-    pub scalar: Value,
-    pub vector: VectorResult,
-}
-
-#[repr(u8)]
-pub enum TachyonResultType {
-    Done,
-    Scalar,
-    Vector,
-}
-
-#[repr(C)]
-pub struct TachyonResult {
-    pub t: TachyonResultType,
-    pub r: TachyonResultUnion,
 }
 
 #[cfg(test)]
