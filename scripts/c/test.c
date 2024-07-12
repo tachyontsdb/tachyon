@@ -15,7 +15,8 @@ int main(void) {
 
         union TachyonValue value;
         value.unsigned_integer = i;
-        tachyon_insert(connection, "test_stream{test=\"asdf\"}", i, value);
+        tachyon_insert(connection, "test_stream{test=\"asdf\"}", i,
+                       TachyonValueUnsignedInteger, value);
     }
 
     tachyon_insert_flush(connection);
@@ -23,33 +24,30 @@ int main(void) {
     uint64_t start = 0;
     uint64_t end = NUM_ITEMS;
 
-    struct Stmt *stmt =
+    struct Statement *statement =
         tachyon_statement_prepare(connection, "test_stream{test=\"asdf\"}",
                                   &start, &end, TachyonValueUnsignedInteger);
 
     uint64_t i = 0;
     struct TachyonVector vector;
-    while (tachyon_next_vector(stmt, &vector)) {
+    while (tachyon_next_vector(statement, &vector)) {
         assert(vector.timestamp == i);
         assert(vector.value.unsigned_integer == i);
-
-        printf("Timestamp: %lu\n", vector.timestamp);
 
         ++i;
     }
 
-    tachyon_statement_close(stmt);
+    tachyon_statement_close(statement);
 
-    stmt =
+    statement =
         tachyon_statement_prepare(connection, "sum(test_stream{test=\"asdf\"})",
                                   &start, &end, TachyonValueUnsignedInteger);
 
     union TachyonValue value;
-    tachyon_next_scalar(stmt, &value);
+    tachyon_next_scalar(statement, &value);
     assert(value.unsigned_integer == total_sum);
-    printf("Sum: %lu\n", value.unsigned_integer);
 
-    tachyon_statement_close(stmt);
+    tachyon_statement_close(statement);
 
     tachyon_close(connection);
 

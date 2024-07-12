@@ -13,7 +13,7 @@ extern "C" {
 #endif  // __cplusplus
 
 struct Connection;
-struct Stmt;
+struct Statement;
 
 enum TachyonValueType {
     TachyonValueUnsignedInteger = (uint8_t)0,
@@ -36,20 +36,24 @@ extern struct Connection *tachyon_open(const char *const db_dir);
 
 extern void tachyon_close(struct Connection *connection);
 
+extern void tachyon_delete_stream(const struct Connection *const connection,
+                                  const char *const stream);
+
 extern void tachyon_insert(const struct Connection *const connection,
-                           const char *const str_ptr, uint64_t timestamp,
-                           union TachyonValue value);
+                           const char *const stream, uint64_t timestamp,
+                           uint8_t value_type, union TachyonValue value);
 
 extern void tachyon_insert_flush(const struct Connection *const connection);
 
-extern struct Stmt *tachyon_statement_prepare(
-    const struct Connection *const connection, const char *const str_ptr,
+extern struct Statement *tachyon_statement_prepare(
+    const struct Connection *const connection, const char *const query,
     const uint64_t *const start, const uint64_t *const end, uint8_t value_type);
 
-extern void tachyon_statement_close(struct Stmt *stmt);
+extern void tachyon_statement_close(struct Statement *statement);
 
-extern bool tachyon_next_scalar(struct Stmt *stmt, union TachyonValue *scalar);
-extern bool tachyon_next_vector(struct Stmt *stmt,
+extern bool tachyon_next_scalar(struct Statement *statement,
+                                union TachyonValue *scalar);
+extern bool tachyon_next_vector(struct Statement *statement,
                                 struct TachyonVector *vector);
 
 #ifdef __cplusplus

@@ -44,9 +44,8 @@ impl Connection {
         }
     }
 
-    pub fn insert(&mut self, s: &str, timestamp: Timestamp, value: Value) {
-        let id = self.get_stream_id_from_matcher(s);
-
+    pub fn insert(&mut self, stream: &str, timestamp: Timestamp, value: Value) {
+        let id = self.get_stream_id_from_matcher(stream);
         self.writer.write(id, timestamp, value);
     }
 

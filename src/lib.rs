@@ -33,13 +33,23 @@ pub unsafe extern "C" fn tachyon_close(connection: *mut Connection) {
 
 /// # Safety
 #[no_mangle]
+pub unsafe extern "C" fn tachyon_delete_stream(
+    connection: *mut Connection,
+    stream: *const core::ffi::c_char,
+) {
+    todo!();
+}
+
+/// # Safety
+#[no_mangle]
 pub unsafe extern "C" fn tachyon_insert(
     connection: *mut Connection,
-    str_ptr: *const core::ffi::c_char,
+    stream: *const core::ffi::c_char,
     timestamp: Timestamp,
+    value_type: TachyonValueType,
     value: TachyonValue,
 ) {
-    let ffi_str = core::ffi::CStr::from_ptr(str_ptr);
+    let ffi_str = core::ffi::CStr::from_ptr(stream);
     (*connection).insert(ffi_str.to_str().unwrap(), timestamp, value.unsigned_integer);
 }
 
@@ -53,12 +63,12 @@ pub unsafe extern "C" fn tachyon_insert_flush(connection: *mut Connection) {
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_statement_prepare(
     connection: *mut Connection,
-    str_ptr: *const core::ffi::c_char,
+    query: *const core::ffi::c_char,
     start: *const Timestamp,
     end: *const Timestamp,
     value_type: TachyonValueType,
 ) -> *mut Stmt {
-    let ffi_str = core::ffi::CStr::from_ptr(str_ptr);
+    let ffi_str = core::ffi::CStr::from_ptr(query);
     let stmt = (*connection).prepare(
         ffi_str.to_str().unwrap(),
         if start.is_null() { None } else { Some(*start) },
@@ -69,15 +79,18 @@ pub unsafe extern "C" fn tachyon_statement_prepare(
 
 /// # Safety
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_statement_close(stmt: *mut Stmt) {
-    let stmt = Box::from_raw(stmt);
+pub unsafe extern "C" fn tachyon_statement_close(statement: *mut Stmt) {
+    let stmt = Box::from_raw(statement);
     drop(stmt);
 }
 
 /// # Safety
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_next_scalar(stmt: *mut Stmt, scalar: *mut TachyonValue) -> bool {
-    let result = unsafe { (*stmt).next_scalar() };
+pub unsafe extern "C" fn tachyon_next_scalar(
+    statement: *mut Stmt,
+    scalar: *mut TachyonValue,
+) -> bool {
+    let result = (*statement).next_scalar();
     match result {
         None => false,
         Some(value) => {
@@ -91,8 +104,11 @@ pub unsafe extern "C" fn tachyon_next_scalar(stmt: *mut Stmt, scalar: *mut Tachy
 
 /// # Safety
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_next_vector(stmt: *mut Stmt, vector: *mut TachyonVector) -> bool {
-    let result = unsafe { (*stmt).next_vector() };
+pub unsafe extern "C" fn tachyon_next_vector(
+    statement: *mut Stmt,
+    vector: *mut TachyonVector,
+) -> bool {
+    let result = (*statement).next_vector();
     match result {
         None => false,
         Some((timestamp, value)) => {
