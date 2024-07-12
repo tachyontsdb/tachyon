@@ -1,11 +1,12 @@
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "TachyonDB.h"
 
 const uint64_t NUM_ITEMS = 1000;
 
-int main() {
+int main(void) {
     struct Connection *connection = tachyon_open("test_db");
 
     uint64_t total_sum = 0;
@@ -51,4 +52,6 @@ int main() {
     tachyon_statement_close(stmt);
 
     tachyon_close(connection);
+
+    return EXIT_SUCCESS;
 }
