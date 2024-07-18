@@ -116,13 +116,8 @@ impl ExecutorNode for SumNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let mut sum = 0;
 
-        loop {
-            let pair = self.child.next_vector(conn);
-
-            if (pair.is_none()) {
-                break;
-            }
-            let (t, v) = pair.unwrap();
+        while let Some(pair) = self.child.next_vector(conn) {
+            let (t, v) = pair;
             sum += v;
         }
 
@@ -144,13 +139,8 @@ impl ExecutorNode for CountNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let mut count = 0;
 
-        loop {
-            let pair = self.child.next_vector(conn);
-
-            if (pair.is_none()) {
-                break;
-            }
-            let (t, v) = pair.unwrap();
+        while let Some(pair) = self.child.next_vector(conn) {
+            let (t, v) = pair;
             count += v;
         }
 
@@ -198,14 +188,8 @@ impl ExecutorNode for MinNode {
         let mut is_first_value = true;
         let mut min_val = 0;
 
-        loop {
-            let pair = self.child.next_vector(conn);
-
-            if (pair.is_none()) {
-                break;
-            }
-
-            let (t, v) = pair.unwrap();
+        while let Some(pair) = self.child.next_vector(conn) {
+            let (t, v) = pair;
 
             if (is_first_value) {
                 min_val = v;
@@ -233,13 +217,8 @@ impl ExecutorNode for MaxNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let mut max_val = 0;
 
-        loop {
-            let pair = self.child.next_vector(conn);
-
-            if (pair.is_none()) {
-                break;
-            }
-            let (t, v) = pair.unwrap();
+        while let Some(pair) = self.child.next_vector(conn) {
+            let (t, v) = pair;
             max_val = max(max_val, v);
         }
 
