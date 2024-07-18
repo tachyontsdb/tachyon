@@ -161,7 +161,7 @@ pub struct TachyonResult {
 
 #[cfg(test)]
 mod tests {
-    use std::{iter::zip, ops::Index, path::PathBuf, str::FromStr};
+    use std::{iter::zip, path::PathBuf};
 
     use crate::{api::Connection, common::Value, utils::test_utils::set_up_dirs};
 
@@ -186,7 +186,7 @@ mod tests {
 
         // Prepare test query
         let query = r#"http_requests_total{service = "web"}"#;
-        let mut stmt = conn.prepare(&query, Some(start), Some(end));
+        let mut stmt = conn.prepare(query, Some(start), Some(end));
 
         // Process results
         let mut i = first_i;
