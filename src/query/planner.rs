@@ -6,7 +6,9 @@ use promql_parser::parser::{
 
 use crate::api::Connection;
 use crate::common::{Timestamp, Value};
-use crate::executor::node::{AverageNode, CountNode, SumNode, TNode, VectorSelectNode};
+use crate::executor::node::{
+    AverageNode, CountNode, MaxNode, MinNode, SumNode, TNode, VectorSelectNode,
+};
 use crate::executor::{self, execute, Context, OperationCode::*};
 use crate::storage::file::ScanHint;
 
@@ -52,6 +54,12 @@ impl<'a> QueryPlanner<'a> {
                     self.handle_expr(&expr.expr, conn, ScanHint::Count).unwrap(),
                 ))),
             ))),
+            parser::token::T_MIN => Ok(TNode::Min(MinNode::new(Box::new(
+                self.handle_expr(&expr.expr, conn, ScanHint::Min).unwrap(),
+            )))),
+            parser::token::T_MAX => Ok(TNode::Max(MaxNode::new(Box::new(
+                self.handle_expr(&expr.expr, conn, ScanHint::Max).unwrap(),
+            )))),
             _ => panic!("Unknown aggregation token."),
         }
     }
@@ -238,6 +246,30 @@ mod tests {
     #[test]
     fn test_avg_query() {
         let query_string = r#"avg(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_min_query() {
+        let query_string = r#"min(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_max_query() {
+        let query_string = r#"max(http_requests_total{service = "web" or service = "nice"})"#;
         let res = parser::parse(query_string).unwrap();
         match res {
             Expr::Aggregate(selector) => println!("{:#?}", selector),

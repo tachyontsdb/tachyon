@@ -1,3 +1,5 @@
+use std::cmp::{max, min};
+
 use promql_parser::label::{Matcher, Matchers};
 use uuid::Uuid;
 
@@ -23,6 +25,8 @@ pub enum TNode {
     Sum(SumNode),
     Count(CountNode),
     Average(AverageNode),
+    Min(MinNode),
+    Max(MaxNode),
 }
 
 impl ExecutorNode for TNode {
@@ -38,6 +42,8 @@ impl ExecutorNode for TNode {
             TNode::Sum(sel) => sel.next_scalar(conn),
             TNode::Count(sel) => sel.next_scalar(conn),
             TNode::Average(sel) => sel.next_scalar(conn),
+            TNode::Min(sel) => sel.next_scalar(conn),
+            TNode::Max(sel) => sel.next_scalar(conn),
             _ => panic!("next_scalar not implemented for this node"),
         }
     }
@@ -174,6 +180,70 @@ impl ExecutorNode for AverageNode {
         } else {
             Some(sum / count) // TODO: Allow for floats
         }
+    }
+}
+
+pub struct MinNode {
+    child: Box<TNode>,
+}
+
+impl MinNode {
+    pub fn new(child: Box<TNode>) -> Self {
+        Self { child }
+    }
+}
+
+impl ExecutorNode for MinNode {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        let mut is_first_value = true;
+        let mut min_val = 0;
+
+        loop {
+            let pair = self.child.next_vector(conn);
+
+            if (pair.is_none()) {
+                break;
+            }
+
+            let (t, v) = pair.unwrap();
+
+            if (is_first_value) {
+                min_val = v;
+                is_first_value = false;
+            }
+
+            min_val = min(min_val, v);
+        }
+
+        Some(min_val)
+    }
+}
+
+pub struct MaxNode {
+    child: Box<TNode>,
+}
+
+impl MaxNode {
+    pub fn new(child: Box<TNode>) -> Self {
+        Self { child }
+    }
+}
+
+impl ExecutorNode for MaxNode {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        let mut max_val = 0;
+
+        loop {
+            let pair = self.child.next_vector(conn);
+
+            if (pair.is_none()) {
+                break;
+            }
+            let (t, v) = pair.unwrap();
+            max_val = max(max_val, v);
+        }
+
+        Some(max_val)
     }
 }
 
