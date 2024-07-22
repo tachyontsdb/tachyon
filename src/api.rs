@@ -44,9 +44,8 @@ impl Connection {
         }
     }
 
-    pub fn insert(&mut self, s: &str, timestamp: Timestamp, value: Value) {
-        let id = self.get_stream_id_from_matcher(s);
-
+    pub fn insert(&mut self, stream: &str, timestamp: Timestamp, value: Value) {
+        let id = self.get_stream_id_from_matcher(stream);
         self.writer.write(id, timestamp, value);
     }
 
@@ -131,30 +130,12 @@ impl Stmt {
     }
 }
 
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct VectorResult {
-    pub timestamp: Timestamp,
-    pub value: Value,
-}
-
-#[repr(C)]
-pub union TachyonResultUnion {
-    pub scalar: Value,
-    pub vector: VectorResult,
-}
-
+#[derive(PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum TachyonResultType {
     Done,
     Scalar,
     Vector,
-}
-
-#[repr(C)]
-pub struct TachyonResult {
-    pub t: TachyonResultType,
-    pub r: TachyonResultUnion,
 }
 
 #[cfg(test)]

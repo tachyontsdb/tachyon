@@ -1,12 +1,11 @@
 on: push
-name: Clippy check
+name: Linting
 
-# Make sure CI fails on all warnings, including Clippy lints
 env:
-  RUSTFLAGS: "-Dwarnings"
+  CARGO_TERM_COLOR: always
 
 jobs:
-  clippy_check:
+  clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,4 +14,5 @@ jobs:
       - name: Check Format
         run: cargo fmt --check
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features
+        # Make sure CI fails on all warnings, including Clippy lints
+        run: cargo clippy --all-targets --all-features -- -D warnings
