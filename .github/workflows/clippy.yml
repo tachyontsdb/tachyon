@@ -15,4 +15,4 @@ jobs:
         run: cargo fmt --check
       - name: Run Clippy
         # Make sure CI fails on all warnings, including Clippy lints
-        run: cargo clippy --release --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
