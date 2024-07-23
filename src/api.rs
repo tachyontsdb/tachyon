@@ -126,6 +126,8 @@ impl Stmt {
             TNode::Sum(_) => TachyonResultType::Scalar,
             TNode::Count(_) => TachyonResultType::Scalar,
             TNode::Average(_) => TachyonResultType::Scalar,
+            TNode::Min(_) => TachyonResultType::Scalar,
+            TNode::Max(_) => TachyonResultType::Scalar,
         }
     }
 }
@@ -140,46 +142,65 @@ pub enum TachyonResultType {
 
 #[cfg(test)]
 mod tests {
-    use std::iter::zip;
+    use std::{iter::zip, path::PathBuf};
 
-    use crate::{api::Connection, utils::test_utils::set_up_dirs};
+    use crate::{api::Connection, common::Value, utils::test_utils::set_up_dirs};
 
-    #[test]
-    fn test_e2e() {
-        set_up_dirs!(dirs, "db");
-
-        let root_dir = dirs[0].clone();
+    fn e2e_vector_test(
+        root_dir: PathBuf,
+        start: u64,
+        end: u64,
+        first_i: usize,
+        expected_count: usize,
+    ) {
         let mut conn = Connection::new(root_dir);
 
         let timestamps = [23, 29, 40, 51];
         let values = [45, 47, 23, 48];
 
+        // Insert dummy data
         for (t, v) in zip(timestamps, values) {
             conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
         }
 
         conn.writer.flush_all();
 
-        let mut stmt = conn.prepare(
-            r#"http_requests_total{service = "web"}"#,
-            Some(23),
-            Some(51),
-        );
+        // Prepare test query
+        let query = r#"http_requests_total{service = "web"}"#;
+        let mut stmt = conn.prepare(query, Some(start), Some(end));
 
-        let mut i = 0;
-
+        // Process results
+        let mut i = first_i;
+        let mut count = 0;
         loop {
             let res = stmt.next_vector();
             if res.is_none() {
                 break;
             }
+
             let res = res.unwrap();
             assert_eq!(timestamps[i], res.0);
             assert_eq!(values[i], res.1);
             i += 1;
+
+            count += 1;
         }
 
-        assert_eq!(i, 4);
+        assert_eq!(count, expected_count);
+    }
+
+    #[test]
+    fn test_e2e_vector_full_file() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_test(root_dir, 23, 51, 0, 4);
+    }
+
+    #[test]
+    fn test_e2e_vector_partial_file() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_test(root_dir, 29, 40, 1, 2);
     }
 
     #[test]
@@ -247,127 +268,101 @@ mod tests {
         assert_eq!(i, 4);
     }
 
-    #[test]
-    fn test_e2e_sum() {
-        set_up_dirs!(dirs, "db");
-
-        let root_dir = dirs[0].clone();
+    fn e2e_scalar_test(
+        root_dir: PathBuf,
+        operation: &str,
+        start: u64,
+        end: u64,
+        expected_val: Value,
+    ) {
         let mut conn = Connection::new(root_dir);
 
         let timestamps = [23, 29, 40, 51];
         let values = [45, 47, 23, 48];
-        let mut expected_sum = 0;
 
+        // Insert dummy data
         for (t, v) in zip(timestamps, values) {
             conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
-            expected_sum += v;
         }
 
         conn.writer.flush_all();
 
-        let mut stmt = conn.prepare(
-            r#"sum(http_requests_total{service = "web"})"#,
-            Some(23),
-            Some(51),
-        );
+        // Prepare test query
+        let query = format!(r#"{}(http_requests_total{{service = "web"}})"#, operation);
+        let mut stmt = conn.prepare(&query, Some(start), Some(end));
 
-        let actual_sum = stmt.next_scalar().unwrap();
-        assert_eq!(actual_sum, expected_sum);
-    }
-
-    fn test_e2e_count_header() {
-        set_up_dirs!(dirs, "db");
-
-        let root_dir = dirs[0].clone();
-        let mut conn = Connection::new(root_dir);
-
-        let timestamps = [11, 23, 29, 40, 51, 53];
-        let values = [0, 45, 47, 23, 48, 12];
-        let mut expected_count = 0;
-
-        let start = 10;
-        let end = 54;
-
-        for (t, v) in zip(timestamps, values) {
-            conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
-
-            if start <= t && t <= end {
-                expected_count += 1;
-            }
-        }
-
-        conn.writer.flush_all();
-
-        let mut stmt = conn.prepare(
-            r#"count(http_requests_total{service = "web"})"#,
-            Some(start),
-            Some(end),
-        );
-
-        let actual_count = stmt.next_scalar().unwrap();
-        assert_eq!(actual_count, expected_count);
+        // Process results
+        let actual_val = stmt.next_scalar().unwrap();
+        assert_eq!(actual_val, expected_val);
     }
 
     #[test]
-    fn test_e2e_count_value() {
+    fn test_e2e_sum_full_file() {
         set_up_dirs!(dirs, "db");
-
         let root_dir = dirs[0].clone();
-        let mut conn = Connection::new(root_dir);
-
-        let timestamps = [11, 23, 29, 40, 51, 53];
-        let values = [0, 45, 47, 23, 48, 12];
-        let mut expected_count = 0;
-
-        let start = 23;
-        let end = 51;
-
-        for (t, v) in zip(timestamps, values) {
-            conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
-
-            if start <= t && t <= end {
-                expected_count += 1;
-            }
-        }
-
-        conn.writer.flush_all();
-
-        let mut stmt = conn.prepare(
-            r#"count(http_requests_total{service = "web"})"#,
-            Some(start),
-            Some(end),
-        );
-
-        let actual_count = stmt.next_scalar().unwrap();
-        assert_eq!(actual_count, expected_count);
+        e2e_scalar_test(root_dir, "sum", 23, 51, 163)
     }
 
     #[test]
-    fn test_e2e_avg() {
+    fn test_e2e_sum_partial_file() {
         set_up_dirs!(dirs, "db");
-
         let root_dir = dirs[0].clone();
-        let mut conn = Connection::new(root_dir);
+        e2e_scalar_test(root_dir, "sum", 29, 40, 70)
+    }
 
-        let timestamps = [23, 29, 40, 51];
-        let values = [45, 47, 24, 48];
-        let mut expected_avg = 0;
+    #[test]
+    fn test_e2e_count_full_file() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_scalar_test(root_dir, "count", 23, 51, 4)
+    }
 
-        for (t, v) in zip(timestamps, values) {
-            conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
-            expected_avg += v;
-        }
-        expected_avg /= values.len() as u64;
+    #[test]
+    fn test_e2e_count_partial_file() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_scalar_test(root_dir, "count", 29, 40, 2)
+    }
 
-        conn.writer.flush_all();
+    #[test]
+    fn test_e2e_avg_full_file() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_scalar_test(root_dir, "avg", 23, 51, 40)
+    }
 
-        let mut stmt = conn.prepare(
-            r#"avg(http_requests_total{service = "web"})"#,
-            Some(23),
-            Some(51),
-        );
+    #[test]
+    fn test_e2e_avg_partial_file() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_scalar_test(root_dir, "avg", 29, 40, 35)
+    }
 
-        let actual_avg = stmt.next_scalar().unwrap();
-        assert_eq!(actual_avg, expected_avg);
+    #[test]
+    fn test_e2e_min_full_file() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_scalar_test(root_dir, "min", 23, 51, 23)
+    }
+
+    #[test]
+    fn test_e2e_min_partial_file() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_scalar_test(root_dir, "min", 29, 40, 23)
+    }
+
+    #[test]
+    fn test_e2e_max_full_file() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_scalar_test(root_dir, "max", 23, 51, 48)
+    }
+
+    #[test]
+    fn test_e2e_max_partial_file() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_scalar_test(root_dir, "max", 29, 40, 47)
     }
 }
