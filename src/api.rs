@@ -383,8 +383,8 @@ mod tests {
     ) {
         let mut conn = Connection::new(root_dir);
 
-        let timestamps = [23, 29, 40, 51];
-        let values = [45, 47, 23, 48];
+        let timestamps = [23, 25, 29, 40, 44, 51];
+        let values = [27, 31, 47, 23, 31, 48];
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values) {
@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn test_e2e_bottomk_full_file() {
+    fn test_e2e_bottomk() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
         e2e_vector_aggregate_test(
@@ -424,14 +424,84 @@ mod tests {
             2,
             23,
             51,
-            [(23, 45), (40, 23)].to_vec(),
+            [(23, 27), (40, 23)].to_vec(),
         )
     }
 
     #[test]
-    fn test_e2e_topk_full_file() {
+    fn test_e2e_bottomk_zero_k() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(root_dir, "bottomk", 0, 23, 51, [].to_vec())
+    }
+
+    #[test]
+    fn test_e2e_bottomk_large_k() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(
+            root_dir,
+            "bottomk",
+            10000,
+            23,
+            51,
+            [(23, 27), (25, 31), (29, 47), (40, 23), (44, 31), (51, 48)].to_vec(),
+        )
+    }
+
+    #[test]
+    fn test_e2e_bottomk_tied_value() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(
+            root_dir,
+            "bottomk",
+            3,
+            23,
+            51,
+            [(23, 27), (40, 23), (44, 31)].to_vec(),
+        )
+    }
+
+    #[test]
+    fn test_e2e_topk() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
         e2e_vector_aggregate_test(root_dir, "topk", 2, 23, 51, [(29, 47), (51, 48)].to_vec())
+    }
+
+    #[test]
+    fn test_e2e_topk_zero_k() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(root_dir, "topk", 0, 23, 51, [].to_vec())
+    }
+
+    #[test]
+    fn test_e2e_topk_large_k() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(
+            root_dir,
+            "topk",
+            10000,
+            23,
+            51,
+            [(23, 27), (25, 31), (29, 47), (40, 23), (44, 31), (51, 48)].to_vec(),
+        )
+    }
+
+    #[test]
+    fn test_e2e_topk_tied_value() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(
+            root_dir,
+            "topk",
+            3,
+            23,
+            51,
+            [(29, 47), (44, 31), (51, 48)].to_vec(),
+        )
     }
 }

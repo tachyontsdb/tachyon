@@ -277,14 +277,16 @@ impl BottomKNode {
         let k = param.next_scalar(conn).unwrap();
         let mut maxheap: BinaryHeap<ValueOrderedVector> = BinaryHeap::new();
 
-        // Find k smallest values
-        while let Some((t, v)) = child.next_vector(conn) {
-            if (maxheap.len() < k.try_into().unwrap()) {
-                maxheap.push(ValueOrderedVector(t, v));
-            } else if (v < maxheap.peek().unwrap().1) {
-                // Older value is kept if tied
-                maxheap.pop();
-                maxheap.push(ValueOrderedVector(t, v));
+        // Find (up to) k smallest values
+        // Newer values overwrite older values in case of ties
+        if (k > 0) {
+            while let Some((t, v)) = child.next_vector(conn) {
+                if (maxheap.len() < k.try_into().unwrap()) {
+                    maxheap.push(ValueOrderedVector(t, v));
+                } else if (v <= maxheap.peek().unwrap().1) {
+                    maxheap.pop();
+                    maxheap.push(ValueOrderedVector(t, v));
+                }
             }
         }
 
@@ -319,14 +321,16 @@ impl TopKNode {
         let k = param.next_scalar(conn).unwrap();
         let mut minheap: BinaryHeap<Reverse<ValueOrderedVector>> = BinaryHeap::new();
 
-        // Find k largest values
-        while let Some((t, v)) = child.next_vector(conn) {
-            if (minheap.len() < k.try_into().unwrap()) {
-                minheap.push(Reverse(ValueOrderedVector(t, v)));
-            } else if (v > minheap.peek().unwrap().0 .1) {
-                // Older value is kept if tied
-                minheap.pop();
-                minheap.push(Reverse(ValueOrderedVector(t, v)));
+        // Find (up to) k largest values
+        // Newer values overwrite older values in case of ties
+        if (k > 0) {
+            while let Some((t, v)) = child.next_vector(conn) {
+                if (minheap.len() < k.try_into().unwrap()) {
+                    minheap.push(Reverse(ValueOrderedVector(t, v)));
+                } else if (v >= minheap.peek().unwrap().0 .1) {
+                    minheap.pop();
+                    minheap.push(Reverse(ValueOrderedVector(t, v)));
+                }
             }
         }
 
