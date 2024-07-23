@@ -247,7 +247,7 @@ impl ExecutorNode for MaxNode {
 }
 
 #[derive(Eq)]
-struct ValueOrderedVector(Timestamp, Value); // implements Ord to order by Value
+struct ValueOrderedVector(Timestamp, Value); // implements Ord to order by Value (rather than Timestamp)
 
 impl Ord for ValueOrderedVector {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -277,17 +277,18 @@ impl BottomKNode {
         let k = param.next_scalar(conn).unwrap();
         let mut maxheap: BinaryHeap<ValueOrderedVector> = BinaryHeap::new();
 
-        // Find bottom k smallest
+        // Find k smallest values
         while let Some((t, v)) = child.next_vector(conn) {
             if (maxheap.len() < k.try_into().unwrap()) {
                 maxheap.push(ValueOrderedVector(t, v));
             } else if (v < maxheap.peek().unwrap().1) {
+                // Older value is kept if tied
                 maxheap.pop();
                 maxheap.push(ValueOrderedVector(t, v));
             }
         }
 
-        // Re-sort by timestamp
+        // Re-sort values by timestamp
         let mut bottomk: Vec<(Timestamp, Value)> =
             maxheap.into_iter().map(|x| (x.0, x.1)).collect();
         bottomk.sort();
@@ -318,17 +319,18 @@ impl TopKNode {
         let k = param.next_scalar(conn).unwrap();
         let mut minheap: BinaryHeap<Reverse<ValueOrderedVector>> = BinaryHeap::new();
 
-        // Find top k largest
+        // Find k largest values
         while let Some((t, v)) = child.next_vector(conn) {
             if (minheap.len() < k.try_into().unwrap()) {
                 minheap.push(Reverse(ValueOrderedVector(t, v)));
             } else if (v > minheap.peek().unwrap().0 .1) {
+                // Older value is kept if tied
                 minheap.pop();
                 minheap.push(Reverse(ValueOrderedVector(t, v)));
             }
         }
 
-        // Re-sort by timestamp
+        // Re-sort values by timestamp
         let mut topk: Vec<(Timestamp, Value)> =
             minheap.into_iter().map(|x| (x.0 .0, x.0 .1)).collect();
         topk.sort();
