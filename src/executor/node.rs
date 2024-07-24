@@ -190,8 +190,14 @@ impl ExecutorNode for CountNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let mut count = 0;
 
-        while let Some((t, v)) = self.child.next_vector(conn) {
-            count += v;
+        if let TNode::VectorSelect(_) = *self.child {
+            while let Some((t, v)) = self.child.next_vector(conn) {
+                count += v;
+            }
+        } else {
+            while let Some(_) = self.child.next_vector(conn) {
+                count += 1;
+            }
         }
 
         Some(count)
