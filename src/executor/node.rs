@@ -22,6 +22,7 @@ pub trait ExecutorNode {
 
 pub enum TNode {
     VectorSelect(VectorSelectNode),
+    VectorBinaryOp(VectorBinaryOpNode),
     Sum(SumNode),
     Count(CountNode),
     Average(AverageNode),
@@ -33,6 +34,7 @@ impl ExecutorNode for TNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         match self {
             TNode::VectorSelect(sel) => sel.next_vector(conn),
+            TNode::VectorBinaryOp(sel) => sel.next_vector(conn),
             _ => panic!("next_vector not implemented for this node"),
         }
     }
@@ -99,6 +101,56 @@ impl ExecutorNode for VectorSelectNode {
         let res = self.cursor.fetch();
         self.cursor.next();
         Some(res)
+    }
+}
+
+pub enum VectorBinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+}
+
+pub struct VectorBinaryOpNode {
+    op: VectorBinaryOp,
+    lhs: Box<TNode>,
+    rhs: Box<TNode>,
+}
+
+impl VectorBinaryOpNode {
+    pub fn new(op: VectorBinaryOp, lhs: Box<TNode>, rhs: Box<TNode>) -> Self {
+        Self { op, lhs, rhs }
+    }
+}
+
+impl ExecutorNode for VectorBinaryOpNode {
+    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
+        let lhs_vector = self.lhs.next_vector(conn);
+        let rhs_vector = self.rhs.next_vector(conn);
+
+        if lhs_vector.is_none() || rhs_vector.is_none() {
+            return None;
+        }
+
+        let (lhs_timestamp, lhs_value) = lhs_vector.unwrap();
+        let (rhs_timestamp, rhs_value) = rhs_vector.unwrap();
+
+        if lhs_timestamp != rhs_timestamp {
+            // TODO: Handle timestamp matching
+            todo!("Timestamps don't match!");
+        }
+
+        Some((
+            lhs_timestamp,
+            match self.op {
+                VectorBinaryOp::Add => lhs_value + rhs_value,
+                VectorBinaryOp::Subtract => lhs_value - rhs_value,
+                VectorBinaryOp::Multiply => lhs_value * rhs_value,
+                VectorBinaryOp::Divide => lhs_value / rhs_value,
+                VectorBinaryOp::Modulo => lhs_value % rhs_value,
+            },
+        ))
     }
 }
 

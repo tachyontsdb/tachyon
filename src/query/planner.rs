@@ -7,7 +7,8 @@ use promql_parser::parser::{
 use crate::api::Connection;
 use crate::common::{Timestamp, Value};
 use crate::executor::node::{
-    AverageNode, CountNode, MaxNode, MinNode, SumNode, TNode, VectorSelectNode,
+    AverageNode, CountNode, MaxNode, MinNode, SumNode, TNode, VectorBinaryOp, VectorBinaryOpNode,
+    VectorSelectNode,
 };
 use crate::executor::{self, execute, Context, OperationCode::*};
 use crate::storage::file::ScanHint;
@@ -78,7 +79,18 @@ impl<'a> QueryPlanner<'a> {
         expr: &BinaryExpr,
         conn: &mut Connection,
     ) -> Result<TNode, &'static str> {
-        Err("Binary expressions currently not supported.")
+        Ok(TNode::VectorBinaryOp(VectorBinaryOpNode::new(
+            match expr.op.id() {
+                parser::token::T_ADD => VectorBinaryOp::Add,
+                parser::token::T_SUB => VectorBinaryOp::Subtract,
+                parser::token::T_MUL => VectorBinaryOp::Multiply,
+                parser::token::T_DIV => VectorBinaryOp::Divide,
+                parser::token::T_MOD => VectorBinaryOp::Modulo,
+                _ => panic!("Unknown aggregation token."),
+            },
+            Box::new(self.handle_expr(&expr.lhs, conn, ScanHint::None).unwrap()),
+            Box::new(self.handle_expr(&expr.rhs, conn, ScanHint::None).unwrap()),
+        )))
     }
 
     fn handle_paren_expr(

@@ -27,7 +27,6 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Insert
     Insert {
         timestamp: Timestamp,
         value: Value,
