@@ -249,6 +249,12 @@ impl ExecutorNode for MaxNode {
 #[derive(Eq)]
 struct ValueOrderedVector(Timestamp, Value); // implements Ord to order by Value (rather than Timestamp)
 
+impl PartialEq for ValueOrderedVector {
+    fn eq(&self, other: &Self) -> bool {
+        self.1 == other.1
+    }
+}
+
 impl Ord for ValueOrderedVector {
     fn cmp(&self, other: &Self) -> Ordering {
         self.1.cmp(&other.1)
@@ -258,12 +264,6 @@ impl Ord for ValueOrderedVector {
 impl PartialOrd for ValueOrderedVector {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for ValueOrderedVector {
-    fn eq(&self, other: &Self) -> bool {
-        self.1 == other.1
     }
 }
 
