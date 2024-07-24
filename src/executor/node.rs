@@ -195,7 +195,7 @@ impl ExecutorNode for CountNode {
                 count += v;
             }
         } else {
-            while let Some(_) = self.child.next_vector(conn) {
+            while self.child.next_vector(conn).is_some() {
                 count += 1;
             }
         }
