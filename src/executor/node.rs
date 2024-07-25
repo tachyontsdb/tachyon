@@ -340,9 +340,7 @@ impl ExecutorNode for SumNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let first_vector = self.child.next_vector(conn);
 
-        if first_vector.is_none() {
-            return None;
-        }
+        first_vector?;
 
         let mut sum = first_vector.unwrap().1;
 

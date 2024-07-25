@@ -433,7 +433,7 @@ mod tests {
         // Process results
         let mut i = 0;
         let mut count = 0;
-        let sum_values_b = values_b.iter().fold(0, |curr, x| curr + x);
+        let sum_values_b = values_b.iter().sum::<Value>();
         loop {
             let res = stmt.next_vector();
             if res.is_none() {
@@ -477,8 +477,8 @@ mod tests {
         // Process results
         let mut i = 0;
         let mut count = 0;
-        let sum_values_a = values_a.iter().fold(0, |curr, x| curr + x);
-        let sum_values_b = values_b.iter().fold(0, |curr, x| curr + x);
+        let sum_values_a = values_a.iter().sum::<Value>();
+        let sum_values_b = values_b.iter().sum::<Value>();
 
         loop {
             let res = stmt.next_scalar();
