@@ -26,6 +26,7 @@ pub trait ExecutorNode {
 pub enum TNode {
     NumberLiteral(NumberLiteralNode),
     VectorSelect(VectorSelectNode),
+    BinaryOp(BinaryOpNode),
     Sum(SumNode),
     Count(CountNode),
     Average(AverageNode),
@@ -39,6 +40,7 @@ impl ExecutorNode for TNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         match self {
             TNode::VectorSelect(sel) => sel.next_vector(conn),
+            TNode::BinaryOp(sel) => sel.next_vector(conn),
             TNode::BottomK(sel) => sel.next_vector(conn),
             TNode::TopK(sel) => sel.next_vector(conn),
             _ => panic!("next_vector not implemented for this node"),
@@ -127,6 +129,56 @@ impl ExecutorNode for VectorSelectNode {
     }
 }
 
+pub enum BinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+}
+
+pub struct BinaryOpNode {
+    op: BinaryOp,
+    lhs: Box<TNode>,
+    rhs: Box<TNode>,
+}
+
+impl BinaryOpNode {
+    pub fn new(op: BinaryOp, lhs: Box<TNode>, rhs: Box<TNode>) -> Self {
+        Self { op, lhs, rhs }
+    }
+}
+
+impl ExecutorNode for BinaryOpNode {
+    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
+        let lhs_vector = self.lhs.next_vector(conn);
+        let rhs_vector = self.rhs.next_vector(conn);
+
+        if lhs_vector.is_none() || rhs_vector.is_none() {
+            return None;
+        }
+
+        let (lhs_timestamp, lhs_value) = lhs_vector.unwrap();
+        let (rhs_timestamp, rhs_value) = rhs_vector.unwrap();
+
+        if lhs_timestamp != rhs_timestamp {
+            // TODO: Handle timestamp matching
+            todo!("Timestamps don't match!");
+        }
+
+        Some((
+            lhs_timestamp,
+            match self.op {
+                BinaryOp::Add => lhs_value + rhs_value,
+                BinaryOp::Subtract => lhs_value - rhs_value,
+                BinaryOp::Multiply => lhs_value * rhs_value,
+                BinaryOp::Divide => lhs_value / rhs_value,
+                BinaryOp::Modulo => lhs_value % rhs_value,
+            },
+        ))
+    }
+}
+
 pub struct SumNode {
     child: Box<TNode>,
 }
@@ -163,8 +215,14 @@ impl ExecutorNode for CountNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let mut count = 0;
 
-        while let Some((t, v)) = self.child.next_vector(conn) {
-            count += v;
+        if let TNode::VectorSelect(_) = *self.child {
+            while let Some((t, v)) = self.child.next_vector(conn) {
+                count += v;
+            }
+        } else {
+            while self.child.next_vector(conn).is_some() {
+                count += 1;
+            }
         }
 
         Some(count)

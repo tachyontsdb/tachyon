@@ -124,6 +124,7 @@ impl Stmt {
         match self.root {
             TNode::NumberLiteral(_) => TachyonResultType::Scalar,
             TNode::VectorSelect(_) => TachyonResultType::Vector,
+            TNode::BinaryOp(_) => TachyonResultType::Vector,
             TNode::Sum(_) => TachyonResultType::Scalar,
             TNode::Count(_) => TachyonResultType::Scalar,
             TNode::Average(_) => TachyonResultType::Scalar,
