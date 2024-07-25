@@ -368,13 +368,19 @@ impl CountNode {
 
 impl ExecutorNode for CountNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        let first_vector = self.child.next_vector(conn);
+
+        first_vector?;
+
         let mut count = 0;
 
         if let TNode::VectorSelect(_) = *self.child {
+            count += first_vector.unwrap().1;
             while let Some((t, v)) = self.child.next_vector(conn) {
                 count += v;
             }
         } else {
+            count += 1;
             while self.child.next_vector(conn).is_some() {
                 count += 1;
             }
@@ -402,13 +408,12 @@ impl AverageNode {
 impl ExecutorNode for AverageNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let mut total = 0;
-        let sum = self.sum.next_scalar(conn).unwrap();
-        let count = self.count.next_scalar(conn).unwrap();
+        let sum_opt = self.sum.next_scalar(conn);
+        let count_opt = self.count.next_scalar(conn);
 
-        if (count == 0) {
-            None
-        } else {
-            Some(sum / count) // TODO: Allow for floats
+        match (sum_opt, count_opt) {
+            (Some(sum), Some(count)) if count != 0 => Some(sum / count), // TODO: Allow for floats
+            _ => None,
         }
     }
 
