@@ -4,7 +4,7 @@ use promql_parser::label::{Matcher, Matchers};
 use uuid::Uuid;
 
 use crate::{
-    api::Connection,
+    api::{Connection, TachyonResultType},
     common::{Timestamp, Value},
     storage::file::{Cursor, ScanHint},
     utils::common::static_assert,
@@ -18,11 +18,18 @@ pub trait ExecutorNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         panic!("Next vector not implemented")
     }
+
+    fn return_type(&self) -> TachyonResultType {
+        panic!("Return type not implemented")
+    }
 }
 
 pub enum TNode {
     VectorSelect(VectorSelectNode),
     BinaryOp(BinaryOpNode),
+    VectorToVector(VectorToVectorNode),
+    VectorToScalar(VectorToScalarNode),
+    ScalarToScalar(ScalarToScalarNode),
     Sum(SumNode),
     Count(CountNode),
     Average(AverageNode),
@@ -34,6 +41,8 @@ impl ExecutorNode for TNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         match self {
             TNode::VectorSelect(sel) => sel.next_vector(conn),
+            TNode::VectorToVector(sel) => sel.next_vector(conn),
+            TNode::VectorToScalar(sel) => sel.next_vector(conn),
             TNode::BinaryOp(sel) => sel.next_vector(conn),
             _ => panic!("next_vector not implemented for this node"),
         }
@@ -41,11 +50,29 @@ impl ExecutorNode for TNode {
 
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         match self {
+            TNode::BinaryOp(sel) => sel.next_scalar(conn),
+            TNode::ScalarToScalar(sel) => sel.next_scalar(conn),
             TNode::Sum(sel) => sel.next_scalar(conn),
             TNode::Count(sel) => sel.next_scalar(conn),
             TNode::Average(sel) => sel.next_scalar(conn),
             TNode::Min(sel) => sel.next_scalar(conn),
             TNode::Max(sel) => sel.next_scalar(conn),
+            _ => panic!("next_scalar not implemented for this node"),
+        }
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        match self {
+            TNode::VectorSelect(sel) => sel.return_type(),
+            TNode::BinaryOp(sel) => sel.return_type(),
+            TNode::VectorToVector(sel) => sel.return_type(),
+            TNode::VectorToScalar(sel) => sel.return_type(),
+            TNode::ScalarToScalar(sel) => sel.return_type(),
+            TNode::Sum(sel) => sel.return_type(),
+            TNode::Count(sel) => sel.return_type(),
+            TNode::Average(sel) => sel.return_type(),
+            TNode::Min(sel) => sel.return_type(),
+            TNode::Max(sel) => sel.return_type(),
             _ => panic!("next_scalar not implemented for this node"),
         }
     }
@@ -102,8 +129,13 @@ impl ExecutorNode for VectorSelectNode {
         self.cursor.next();
         Some(res)
     }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Vector
+    }
 }
 
+#[derive(Debug)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -112,19 +144,164 @@ pub enum BinaryOp {
     Modulo,
 }
 
+impl BinaryOp {
+    pub fn apply(&self, lhs: Value, rhs: Value) -> Value {
+        match self {
+            BinaryOp::Add => lhs + rhs,
+            BinaryOp::Subtract => lhs - rhs,
+            BinaryOp::Multiply => lhs * rhs,
+            BinaryOp::Divide => lhs / rhs,
+            BinaryOp::Modulo => lhs % rhs,
+        }
+    }
+}
+
 pub struct BinaryOpNode {
+    child: Box<TNode>,
+    return_type_: TachyonResultType,
+}
+
+impl BinaryOpNode {
+    pub fn new(op: BinaryOp, lhs: Box<TNode>, rhs: Box<TNode>) -> Self {
+        match (lhs.return_type(), rhs.return_type()) {
+            (TachyonResultType::Scalar, TachyonResultType::Scalar) => {
+                let child: Box<TNode> =
+                    Box::new(TNode::ScalarToScalar(ScalarToScalarNode::new(op, lhs, rhs)));
+                Self {
+                    child,
+                    return_type_: TachyonResultType::Scalar,
+                }
+            }
+
+            (TachyonResultType::Vector, TachyonResultType::Scalar) => {
+                let child: Box<TNode> =
+                    Box::new(TNode::VectorToScalar(VectorToScalarNode::new(op, lhs, rhs)));
+                Self {
+                    child,
+                    return_type_: TachyonResultType::Vector,
+                }
+            }
+
+            (TachyonResultType::Scalar, TachyonResultType::Vector) => {
+                let child: Box<TNode> =
+                    Box::new(TNode::VectorToScalar(VectorToScalarNode::new(op, rhs, lhs)));
+                Self {
+                    child,
+                    return_type_: TachyonResultType::Vector,
+                }
+            }
+
+            (TachyonResultType::Vector, TachyonResultType::Vector) => {
+                let child: Box<TNode> =
+                    Box::new(TNode::VectorToVector(VectorToVectorNode::new(op, rhs, lhs)));
+                Self {
+                    child,
+                    return_type_: TachyonResultType::Vector,
+                }
+            }
+
+            _ => panic!("VectorBinaryOpNode is not implemented for this return type."),
+        }
+    }
+}
+
+impl ExecutorNode for BinaryOpNode {
+    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
+        self.child.next_vector(conn)
+    }
+
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        self.child.next_scalar(conn)
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        self.return_type_
+    }
+}
+
+pub struct ScalarToScalarNode {
     op: BinaryOp,
     lhs: Box<TNode>,
     rhs: Box<TNode>,
 }
 
-impl BinaryOpNode {
+impl ScalarToScalarNode {
     pub fn new(op: BinaryOp, lhs: Box<TNode>, rhs: Box<TNode>) -> Self {
         Self { op, lhs, rhs }
     }
 }
 
-impl ExecutorNode for BinaryOpNode {
+impl ExecutorNode for ScalarToScalarNode {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        let lhs_opt = self.lhs.next_scalar(conn);
+        let rhs_opt = self.rhs.next_scalar(conn);
+
+        match (lhs_opt, rhs_opt) {
+            (Some(lhs_value), Some(rhs_value)) => Some(self.op.apply(lhs_value, rhs_value)),
+            _ => None,
+        }
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
+    }
+}
+
+pub struct VectorToScalarNode {
+    op: BinaryOp,
+    vector_node: Box<TNode>,
+    scalar_node: Box<TNode>,
+    scalar: Option<Value>,
+}
+
+impl VectorToScalarNode {
+    pub fn new(op: BinaryOp, vector_node: Box<TNode>, scalar_node: Box<TNode>) -> Self {
+        Self {
+            op,
+            vector_node,
+            scalar_node,
+            scalar: None,
+        }
+    }
+}
+
+impl ExecutorNode for VectorToScalarNode {
+    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
+        let vector_opt = self.vector_node.next_vector(conn);
+
+        let scalar = match self.scalar {
+            Some(s) => s,
+            None => {
+                self.scalar = self.scalar_node.next_scalar(conn);
+                self.scalar.unwrap()
+            }
+        };
+
+        if let Some((timestamp, value)) = vector_opt {
+            Some((timestamp, self.op.apply(value, scalar)))
+        } else {
+            None
+        }
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
+    }
+}
+
+pub struct VectorToVectorNode {
+    op: BinaryOp,
+    lhs: Box<TNode>,
+    rhs: Box<TNode>,
+}
+
+impl VectorToVectorNode {
+    pub fn new(op: BinaryOp, lhs: Box<TNode>, rhs: Box<TNode>) -> Self {
+        Self { op, lhs, rhs }
+    }
+}
+
+impl ExecutorNode for VectorToVectorNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         let lhs_vector = self.lhs.next_vector(conn);
         let rhs_vector = self.rhs.next_vector(conn);
@@ -141,16 +318,11 @@ impl ExecutorNode for BinaryOpNode {
             todo!("Timestamps don't match!");
         }
 
-        Some((
-            lhs_timestamp,
-            match self.op {
-                BinaryOp::Add => lhs_value + rhs_value,
-                BinaryOp::Subtract => lhs_value - rhs_value,
-                BinaryOp::Multiply => lhs_value * rhs_value,
-                BinaryOp::Divide => lhs_value / rhs_value,
-                BinaryOp::Modulo => lhs_value % rhs_value,
-            },
-        ))
+        Some((lhs_timestamp, self.op.apply(lhs_value, rhs_value)))
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
     }
 }
 
@@ -166,13 +338,23 @@ impl SumNode {
 
 impl ExecutorNode for SumNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let mut sum = 0;
+        let first_vector = self.child.next_vector(conn);
+
+        if first_vector.is_none() {
+            return None;
+        }
+
+        let mut sum = first_vector.unwrap().1;
 
         while let Some((t, v)) = self.child.next_vector(conn) {
             sum += v;
         }
 
         Some(sum)
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
     }
 }
 
@@ -202,6 +384,10 @@ impl ExecutorNode for CountNode {
 
         Some(count)
     }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
+    }
 }
 
 pub struct AverageNode {
@@ -226,6 +412,10 @@ impl ExecutorNode for AverageNode {
         } else {
             Some(sum / count) // TODO: Allow for floats
         }
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
     }
 }
 
@@ -255,6 +445,10 @@ impl ExecutorNode for MinNode {
 
         Some(min_val)
     }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
+    }
 }
 
 pub struct MaxNode {
@@ -276,6 +470,10 @@ impl ExecutorNode for MaxNode {
         }
 
         Some(max_val)
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
     }
 }
 
