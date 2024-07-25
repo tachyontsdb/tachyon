@@ -135,7 +135,6 @@ impl ExecutorNode for VectorSelectNode {
     }
 }
 
-#[derive(Debug)]
 pub enum BinaryOp {
     Add,
     Subtract,
