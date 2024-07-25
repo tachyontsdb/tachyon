@@ -7,7 +7,7 @@ use promql_parser::parser::{
 use crate::api::Connection;
 use crate::common::{Timestamp, Value};
 use crate::executor::node::{
-    AverageNode, CountNode, MaxNode, MinNode, SumNode, TNode, VectorBinaryOp, VectorBinaryOpNode,
+    AverageNode, BinaryOp, BinaryOpNode, CountNode, MaxNode, MinNode, SumNode, TNode,
     VectorSelectNode,
 };
 use crate::executor::{self, execute, Context, OperationCode::*};
@@ -79,13 +79,13 @@ impl<'a> QueryPlanner<'a> {
         expr: &BinaryExpr,
         conn: &mut Connection,
     ) -> Result<TNode, &'static str> {
-        Ok(TNode::VectorBinaryOp(VectorBinaryOpNode::new(
+        Ok(TNode::BinaryOp(BinaryOpNode::new(
             match expr.op.id() {
-                parser::token::T_ADD => VectorBinaryOp::Add,
-                parser::token::T_SUB => VectorBinaryOp::Subtract,
-                parser::token::T_MUL => VectorBinaryOp::Multiply,
-                parser::token::T_DIV => VectorBinaryOp::Divide,
-                parser::token::T_MOD => VectorBinaryOp::Modulo,
+                parser::token::T_ADD => BinaryOp::Add,
+                parser::token::T_SUB => BinaryOp::Subtract,
+                parser::token::T_MUL => BinaryOp::Multiply,
+                parser::token::T_DIV => BinaryOp::Divide,
+                parser::token::T_MOD => BinaryOp::Modulo,
                 _ => panic!("Unknown aggregation token."),
             },
             Box::new(self.handle_expr(&expr.lhs, conn, ScanHint::None).unwrap()),

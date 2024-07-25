@@ -22,7 +22,7 @@ pub trait ExecutorNode {
 
 pub enum TNode {
     VectorSelect(VectorSelectNode),
-    VectorBinaryOp(VectorBinaryOpNode),
+    BinaryOp(BinaryOpNode),
     Sum(SumNode),
     Count(CountNode),
     Average(AverageNode),
@@ -34,7 +34,7 @@ impl ExecutorNode for TNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         match self {
             TNode::VectorSelect(sel) => sel.next_vector(conn),
-            TNode::VectorBinaryOp(sel) => sel.next_vector(conn),
+            TNode::BinaryOp(sel) => sel.next_vector(conn),
             _ => panic!("next_vector not implemented for this node"),
         }
     }
@@ -104,7 +104,7 @@ impl ExecutorNode for VectorSelectNode {
     }
 }
 
-pub enum VectorBinaryOp {
+pub enum BinaryOp {
     Add,
     Subtract,
     Multiply,
@@ -112,19 +112,19 @@ pub enum VectorBinaryOp {
     Modulo,
 }
 
-pub struct VectorBinaryOpNode {
-    op: VectorBinaryOp,
+pub struct BinaryOpNode {
+    op: BinaryOp,
     lhs: Box<TNode>,
     rhs: Box<TNode>,
 }
 
-impl VectorBinaryOpNode {
-    pub fn new(op: VectorBinaryOp, lhs: Box<TNode>, rhs: Box<TNode>) -> Self {
+impl BinaryOpNode {
+    pub fn new(op: BinaryOp, lhs: Box<TNode>, rhs: Box<TNode>) -> Self {
         Self { op, lhs, rhs }
     }
 }
 
-impl ExecutorNode for VectorBinaryOpNode {
+impl ExecutorNode for BinaryOpNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         let lhs_vector = self.lhs.next_vector(conn);
         let rhs_vector = self.rhs.next_vector(conn);
@@ -144,11 +144,11 @@ impl ExecutorNode for VectorBinaryOpNode {
         Some((
             lhs_timestamp,
             match self.op {
-                VectorBinaryOp::Add => lhs_value + rhs_value,
-                VectorBinaryOp::Subtract => lhs_value - rhs_value,
-                VectorBinaryOp::Multiply => lhs_value * rhs_value,
-                VectorBinaryOp::Divide => lhs_value / rhs_value,
-                VectorBinaryOp::Modulo => lhs_value % rhs_value,
+                BinaryOp::Add => lhs_value + rhs_value,
+                BinaryOp::Subtract => lhs_value - rhs_value,
+                BinaryOp::Multiply => lhs_value * rhs_value,
+                BinaryOp::Divide => lhs_value / rhs_value,
+                BinaryOp::Modulo => lhs_value % rhs_value,
             },
         ))
     }
