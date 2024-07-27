@@ -656,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vector_to_vector_complex_interpolation_1() {
+    fn test_vector_to_vector_complex_interpolation() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
 

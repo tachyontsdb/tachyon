@@ -386,22 +386,6 @@ impl VectorToVectorNode {
     }
 }
 
-/*
-    We recieve timestamp value pairs
-
-    Possible arrangements
-
-    1.  -  -  - - - - - --- - --- -
-            - -- - -- - - - - -- -
-
-    2.  --  -- - -- - - - - --  -
-           - - - - -- -- -- --- --  -
-
-    3.      - - -- -- - - - - - -- - - -
-       - --- - - --- - -- - --- --
-
-*/
-
 impl ExecutorNode for VectorToVectorNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
         if self.lhs_range.is_empty() && self.rhs_range.is_empty() && self.value_opt.is_none() {
