@@ -369,6 +369,12 @@ const V2_NUM_CHUNKS_PER_LENGTH: usize = 8;
 static_assert!(V2_NUM_CHUNKS_PER_LENGTH <= 8);
 
 const V2_CODE_TO_BITS: [u8; 8] = [1, 2, 4, 8, 16, 24, 32, 64];
+const V2_LENGTH_LOOKUP: [u8; 65] = [
+    0, 0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6,
+    6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7,
+];
+
 const V2_INT_READERS: [fn(&[u8]) -> u64; 5] = [
     FileReaderUtil::read_u64_1,
     FileReaderUtil::read_u64_2,
@@ -466,8 +472,10 @@ impl<T: Write> CompressionEngineV2<T> {
             for x in arr {
                 max_bits_needed = max(max_bits_needed, Self::bits_needed_u64(*x));
             }
-            self.cur_length |= (Self::length_encoding(max_bits_needed) as u32)
-                << (21 - 3 * (self.chunk_idx as u32));
+
+            let length_code = V2_LENGTH_LOOKUP[max_bits_needed as usize];
+            self.cur_length |= (length_code as u32) << (21 - 3 * (self.chunk_idx as u32));
+            max_bits_needed = V2_CODE_TO_BITS[length_code as usize];
 
             if max_bits_needed < 8 {
                 // bitpack each value
@@ -513,22 +521,9 @@ impl<T: Write> CompressionEngineV2<T> {
         self.cur_length = 0;
     }
 
-    fn length_encoding(n: u8) -> u8 {
-        for i in 0u8..8u8 {
-            if n == V2_CODE_TO_BITS[i as usize] {
-                return i;
-            }
-        }
-        panic!("Unknown bit length: {}.", n);
-    }
-
+    #[inline]
     fn bits_needed_u64(n: u64) -> u8 {
-        for bits in &V2_CODE_TO_BITS[..7] {
-            if n < (1 << bits) {
-                return *bits;
-            }
-        }
-        64
+        64 - n.leading_zeros() as u8
     }
 }
 
