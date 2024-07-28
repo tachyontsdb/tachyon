@@ -44,7 +44,7 @@ int main(void) {
                                   &start, &end, TachyonValueUnsignedInteger);
 
     union TachyonValue value;
-    tachyon_next_scalar(statement, &value);
+    tachyon_get_scalar(statement, &value);
     assert(value.unsigned_integer == total_sum);
 
     tachyon_statement_close(statement);
