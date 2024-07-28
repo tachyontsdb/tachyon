@@ -112,16 +112,8 @@ pub struct Stmt {
 }
 
 impl Stmt {
-    pub fn get_scalar(&mut self) -> Option<Value> {
-        unsafe { self.root.get_scalar(&mut *self.connection) }
-    }
-
     pub fn next_scalar(&mut self) -> Option<Value> {
         unsafe { self.root.next_scalar(&mut *self.connection) }
-    }
-
-    pub fn get_vector(&mut self) -> Option<(Timestamp, Value)> {
-        unsafe { self.root.get_vector(&mut *self.connection) }
     }
 
     pub fn next_vector(&mut self) -> Option<(Timestamp, Value)> {
@@ -299,7 +291,7 @@ mod tests {
         let mut stmt = conn.prepare(&query, Some(start), Some(end));
 
         // Process results
-        let actual_val = stmt.get_scalar().unwrap();
+        let actual_val = stmt.next_scalar().unwrap();
         assert_eq!(actual_val, expected_val);
     }
 
@@ -591,7 +583,7 @@ mod tests {
         let sum_values_b = values_b.iter().sum::<Value>();
 
         loop {
-            let res = stmt.get_scalar();
+            let res = stmt.next_scalar();
             if res.is_none() {
                 break;
             }

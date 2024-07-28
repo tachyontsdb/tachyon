@@ -14,16 +14,8 @@ use crate::{
 };
 
 pub trait ExecutorNode {
-    fn get_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        panic!("Get scalar not implemented")
-    }
-
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         panic!("Next scalar not implemented")
-    }
-
-    fn get_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
-        panic!("Get vector not implemented")
     }
 
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
@@ -52,33 +44,20 @@ pub enum TNode {
 }
 
 impl ExecutorNode for TNode {
-    fn get_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        match self {
-            TNode::NumberLiteral(sel) => sel.get_scalar(conn),
-            TNode::BinaryOp(sel) => sel.get_scalar(conn),
-            TNode::ScalarToScalar(sel) => sel.get_scalar(conn),
-            TNode::Sum(sel) => sel.get_scalar(conn),
-            TNode::Count(sel) => sel.get_scalar(conn),
-            TNode::Average(sel) => sel.get_scalar(conn),
-            TNode::Min(sel) => sel.get_scalar(conn),
-            TNode::Max(sel) => sel.get_scalar(conn),
-            _ => panic!("get_scalar not implemented for this node"),
-        }
-    }
-
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         match self {
+            TNode::NumberLiteral(sel) => sel.next_scalar(conn),
+            TNode::BinaryOp(sel) => sel.next_scalar(conn),
+            TNode::ScalarToScalar(sel) => sel.next_scalar(conn),
+            TNode::Sum(sel) => sel.next_scalar(conn),
+            TNode::Count(sel) => sel.next_scalar(conn),
+            TNode::Average(sel) => sel.next_scalar(conn),
+            TNode::Min(sel) => sel.next_scalar(conn),
+            TNode::Max(sel) => sel.next_scalar(conn),
             TNode::BottomK(sel) => sel.next_scalar(conn),
             TNode::TopK(sel) => sel.next_scalar(conn),
             _ => panic!("next_scalar not implemented for this node"),
         }
-    }
-
-    fn get_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
-        panic!("get_vector not implemented for this node");
-        // match self {
-        //     _ => panic!("get_vector not implemented for this node"),
-        // }
     }
 
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
@@ -122,7 +101,7 @@ impl NumberLiteralNode {
 }
 
 impl ExecutorNode for NumberLiteralNode {
-    fn get_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         Some(self.val)
     }
 
@@ -258,8 +237,8 @@ impl BinaryOpNode {
 }
 
 impl ExecutorNode for BinaryOpNode {
-    fn get_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        self.child.get_scalar(conn)
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        self.child.next_scalar(conn)
     }
 
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
@@ -284,9 +263,9 @@ impl ScalarToScalarNode {
 }
 
 impl ExecutorNode for ScalarToScalarNode {
-    fn get_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let lhs_opt = self.lhs.get_scalar(conn);
-        let rhs_opt = self.rhs.get_scalar(conn);
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        let lhs_opt = self.lhs.next_scalar(conn);
+        let rhs_opt = self.rhs.next_scalar(conn);
 
         match (lhs_opt, rhs_opt) {
             (Some(lhs_value), Some(rhs_value)) => Some(self.op.apply(lhs_value, rhs_value)),
@@ -324,7 +303,7 @@ impl ExecutorNode for VectorToScalarNode {
         let scalar = match self.scalar {
             Some(s) => s,
             None => {
-                self.scalar = self.scalar_node.get_scalar(conn);
+                self.scalar = self.scalar_node.next_scalar(conn);
                 self.scalar.unwrap()
             }
         };
@@ -389,7 +368,7 @@ impl SumNode {
 }
 
 impl ExecutorNode for SumNode {
-    fn get_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let first_vector = self.child.next_vector(conn);
 
         first_vector?;
@@ -419,7 +398,7 @@ impl CountNode {
 }
 
 impl ExecutorNode for CountNode {
-    fn get_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let first_vector = self.child.next_vector(conn);
 
         first_vector?;
@@ -458,10 +437,10 @@ impl AverageNode {
 }
 
 impl ExecutorNode for AverageNode {
-    fn get_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let mut total = 0;
-        let sum_opt = self.sum.get_scalar(conn);
-        let count_opt = self.count.get_scalar(conn);
+        let sum_opt = self.sum.next_scalar(conn);
+        let count_opt = self.count.next_scalar(conn);
 
         match (sum_opt, count_opt) {
             (Some(sum), Some(count)) if count != 0 => Some(sum / count), // TODO: Allow for floats
@@ -485,7 +464,7 @@ impl MinNode {
 }
 
 impl ExecutorNode for MinNode {
-    fn get_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let mut is_first_value = true;
         let mut min_val = 0;
 
@@ -517,7 +496,7 @@ impl MaxNode {
 }
 
 impl ExecutorNode for MaxNode {
-    fn get_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         let mut max_val = 0;
 
         while let Some((t, v)) = self.child.next_vector(conn) {
@@ -539,7 +518,7 @@ pub struct BottomKNode {
 
 impl BottomKNode {
     pub fn new(conn: &mut Connection, mut child: Box<TNode>, mut param: Box<TNode>) -> Self {
-        let k = param.get_scalar(conn).unwrap();
+        let k = param.next_scalar(conn).unwrap();
         let mut maxheap: BinaryHeap<Value> = BinaryHeap::new();
 
         // Find (up to) k smallest values
@@ -586,7 +565,7 @@ pub struct TopKNode {
 
 impl TopKNode {
     pub fn new(conn: &mut Connection, mut child: Box<TNode>, mut param: Box<TNode>) -> Self {
-        let k = param.get_scalar(conn).unwrap();
+        let k = param.next_scalar(conn).unwrap();
         let mut minheap: BinaryHeap<Reverse<Value>> = BinaryHeap::new();
 
         // Find (up to) k largest values

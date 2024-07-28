@@ -29,7 +29,7 @@ fn bench_query(query: &str, start: Option<u64>, end: Option<u64>, conn: &mut Con
 
     match stmt.return_type() {
         TachyonResultType::Scalar => {
-            stmt.get_scalar().unwrap();
+            stmt.next_scalar().unwrap();
         }
         TachyonResultType::Scalars => loop {
             let res = stmt.next_scalar();
@@ -38,7 +38,7 @@ fn bench_query(query: &str, start: Option<u64>, end: Option<u64>, conn: &mut Con
             }
         },
         TachyonResultType::Vector => {
-            stmt.get_vector().unwrap();
+            stmt.next_vector().unwrap();
         }
         TachyonResultType::Vectors => loop {
             let res = stmt.next_vector();

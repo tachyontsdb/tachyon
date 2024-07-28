@@ -90,51 +90,12 @@ pub unsafe extern "C" fn tachyon_get_scalar(
     statement: *mut Stmt,
     scalar: *mut TachyonValue,
 ) -> bool {
-    let result = (*statement).get_scalar();
-    match result {
-        None => false,
-        Some(value) => {
-            *scalar = TachyonValue {
-                unsigned_integer: value,
-            };
-            true
-        }
-    }
-}
-
-/// # Safety
-#[no_mangle]
-pub unsafe extern "C" fn tachyon_next_scalar(
-    statement: *mut Stmt,
-    scalar: *mut TachyonValue,
-) -> bool {
     let result = (*statement).next_scalar();
     match result {
         None => false,
         Some(value) => {
             *scalar = TachyonValue {
                 unsigned_integer: value,
-            };
-            true
-        }
-    }
-}
-
-/// # Safety
-#[no_mangle]
-pub unsafe extern "C" fn tachyon_get_vector(
-    statement: *mut Stmt,
-    vector: *mut TachyonVector,
-) -> bool {
-    let result = (*statement).get_vector();
-    match result {
-        None => false,
-        Some((timestamp, value)) => {
-            *vector = TachyonVector {
-                timestamp,
-                value: TachyonValue {
-                    unsigned_integer: value,
-                },
             };
             true
         }
