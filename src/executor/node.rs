@@ -1,6 +1,6 @@
 use std::{
     cmp::{max, min, Ordering, Reverse},
-    collections::{BinaryHeap, VecDeque}
+    collections::{BinaryHeap, VecDeque},
 };
 
 use promql_parser::label::{Matcher, Matchers};
@@ -323,6 +323,7 @@ pub struct VectorToVectorNode {
 }
 
 #[derive(Clone, Copy)]
+#[repr(u8)]
 enum VectorToVectorStream {
     Lhs = 0,
     Rhs = 1,
@@ -387,8 +388,8 @@ impl VectorToVectorNode {
 }
 
 impl ExecutorNode for VectorToVectorNode {
-    // Initial case
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
+        // Initial case
         if self.lhs_range.is_empty() && self.rhs_range.is_empty() && self.value_opt.is_none() {
             let lhs_vector_opt = self.next_child_vector(conn, VectorToVectorStream::Lhs);
             let rhs_vector_opt = self.next_child_vector(conn, VectorToVectorStream::Rhs);
