@@ -112,8 +112,16 @@ pub struct Stmt {
 }
 
 impl Stmt {
+    pub fn get_scalar(&mut self) -> Option<Value> {
+        unsafe { self.root.get_scalar(&mut *self.connection) }
+    }
+
     pub fn next_scalar(&mut self) -> Option<Value> {
         unsafe { self.root.next_scalar(&mut *self.connection) }
+    }
+
+    pub fn get_vector(&mut self) -> Option<(Timestamp, Value)> {
+        unsafe { self.root.get_vector(&mut *self.connection) }
     }
 
     pub fn next_vector(&mut self) -> Option<(Timestamp, Value)> {
@@ -130,7 +138,9 @@ impl Stmt {
 pub enum TachyonResultType {
     Done,
     Scalar,
+    Scalars,
     Vector,
+    Vectors,
 }
 
 #[cfg(test)]
@@ -289,7 +299,7 @@ mod tests {
         let mut stmt = conn.prepare(&query, Some(start), Some(end));
 
         // Process results
-        let actual_val = stmt.next_scalar().unwrap();
+        let actual_val = stmt.get_scalar().unwrap();
         assert_eq!(actual_val, expected_val);
     }
 
@@ -363,13 +373,13 @@ mod tests {
         e2e_scalar_aggregate_test(root_dir, "max", 29, 40, 47)
     }
 
-    fn e2e_vector_aggregate_test(
+    fn e2e_scalars_aggregate_test(
         root_dir: PathBuf,
         operation: &str,
         param: u64,
         start: u64,
         end: u64,
-        expected_val: Vec<(Timestamp, Value)>,
+        expected_val: Vec<Value>,
     ) {
         let mut conn = Connection::new(root_dir);
 
@@ -391,14 +401,13 @@ mod tests {
         let mut stmt = conn.prepare(&query, Some(start), Some(end));
 
         // Process results
-        let mut actual_val: Vec<(Timestamp, Value)> = Vec::new();
+        let mut actual_val: Vec<Value> = Vec::new();
         loop {
-            let res = stmt.next_vector();
+            let res = stmt.next_scalar();
             if res.is_none() {
                 break;
             }
-            let res = res.unwrap();
-            actual_val.push(res);
+            actual_val.push(res.unwrap());
         }
 
         assert_eq!(actual_val, expected_val);
@@ -408,48 +417,27 @@ mod tests {
     fn test_e2e_bottomk() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_vector_aggregate_test(
-            root_dir,
-            "bottomk",
-            2,
-            23,
-            51,
-            [(23, 27), (40, 23)].to_vec(),
-        )
+        e2e_scalars_aggregate_test(root_dir, "bottomk", 2, 23, 51, [23, 27].to_vec())
     }
 
     #[test]
     fn test_e2e_bottomk_zero_k() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_vector_aggregate_test(root_dir, "bottomk", 0, 23, 51, [].to_vec())
+        e2e_scalars_aggregate_test(root_dir, "bottomk", 0, 23, 51, [].to_vec())
     }
 
     #[test]
     fn test_e2e_bottomk_large_k() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_vector_aggregate_test(
+        e2e_scalars_aggregate_test(
             root_dir,
             "bottomk",
             10000,
             23,
             51,
-            [(23, 27), (25, 31), (29, 47), (40, 23), (44, 31), (51, 48)].to_vec(),
-        )
-    }
-
-    #[test]
-    fn test_e2e_bottomk_tied_value() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        e2e_vector_aggregate_test(
-            root_dir,
-            "bottomk",
-            3,
-            23,
-            51,
-            [(23, 27), (40, 23), (44, 31)].to_vec(),
+            [23, 27, 31, 31, 47, 48].to_vec(),
         )
     }
 
@@ -457,41 +445,27 @@ mod tests {
     fn test_e2e_topk() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_vector_aggregate_test(root_dir, "topk", 2, 23, 51, [(29, 47), (51, 48)].to_vec())
+        e2e_scalars_aggregate_test(root_dir, "topk", 2, 23, 51, [48, 47].to_vec())
     }
 
     #[test]
     fn test_e2e_topk_zero_k() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_vector_aggregate_test(root_dir, "topk", 0, 23, 51, [].to_vec())
+        e2e_scalars_aggregate_test(root_dir, "topk", 0, 23, 51, [].to_vec())
     }
 
     #[test]
     fn test_e2e_topk_large_k() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_vector_aggregate_test(
+        e2e_scalars_aggregate_test(
             root_dir,
             "topk",
             10000,
             23,
             51,
-            [(23, 27), (25, 31), (29, 47), (40, 23), (44, 31), (51, 48)].to_vec(),
-        )
-    }
-
-    #[test]
-    fn test_e2e_topk_tied_value() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        e2e_vector_aggregate_test(
-            root_dir,
-            "topk",
-            3,
-            23,
-            51,
-            [(29, 47), (44, 31), (51, 48)].to_vec(),
+            [48, 47, 31, 31, 27, 23].to_vec(),
         )
     }
 
@@ -617,7 +591,7 @@ mod tests {
         let sum_values_b = values_b.iter().sum::<Value>();
 
         loop {
-            let res = stmt.next_scalar();
+            let res = stmt.get_scalar();
             if res.is_none() {
                 break;
             }

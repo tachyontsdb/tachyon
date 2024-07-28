@@ -46,9 +46,22 @@ fn tachyon_query(root_dir: &PathBuf) -> u128 {
     let mut result = 0u128;
     match stmt.return_type() {
         TachyonResultType::Scalar => {
-            result += stmt.next_scalar().unwrap() as u128;
+            result += stmt.get_scalar().unwrap() as u128;
         }
-        TachyonResultType::Vector => loop {
+        TachyonResultType::Scalars => loop {
+            let res = stmt.next_scalar();
+            match res {
+                None => break,
+                Some => {
+                    result += stmt.next_scalar().unwrap() as u128;
+                }
+            }
+        },
+        TachyonResultType::Vector => {
+            let (timestamp, value) = stmt.get_vector().unwrap();
+            result += (timestamp as u128) + (value as u128);
+        }
+        TachyonResultType::Vectors => loop {
             let res = stmt.next_vector();
             match res {
                 None => break,
