@@ -632,7 +632,7 @@ impl TopKNode {
             while let Some((t, v)) = child.next_vector(conn) {
                 if (minheap.len() < k.try_into().unwrap()) {
                     minheap.push(Reverse(v));
-                } else if (v >= minheap.peek().unwrap().0) {
+                } else if (v > minheap.peek().unwrap().0) {
                     minheap.pop();
                     minheap.push(Reverse(v));
                 }
