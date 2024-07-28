@@ -86,7 +86,7 @@ pub unsafe extern "C" fn tachyon_statement_close(statement: *mut Stmt) {
 
 /// # Safety
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_get_scalar(
+pub unsafe extern "C" fn tachyon_next_scalar(
     statement: *mut Stmt,
     scalar: *mut TachyonValue,
 ) -> bool {
