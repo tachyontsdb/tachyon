@@ -97,8 +97,7 @@ fn handle_query_command(conn: &mut Connection, query: String, path_opt: Option<S
     let mut stmt = conn.prepare(&query, Some(0), Some(1719776339748));
 
     match stmt.return_type() {
-        TachyonResultType::Scalar => println!("{}", stmt.next_scalar().unwrap()),
-        TachyonResultType::Scalars => {
+        TachyonResultType::Scalar => {
             let mut series = Vec::<f32>::new();
 
             loop {
@@ -110,13 +109,17 @@ fn handle_query_command(conn: &mut Connection, query: String, path_opt: Option<S
                 series.push(val.unwrap() as f32);
             }
 
-            println!("{:?}", series);
+            // Print vector without '[' and ']' characters
+            println!(
+                "{}",
+                series
+                    .iter()
+                    .map(|x| format!("{}", x))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
         }
         TachyonResultType::Vector => {
-            let (timestamp, value) = stmt.next_vector().unwrap();
-            println!("({}, {})", timestamp, value);
-        }
-        TachyonResultType::Vectors => {
             let mut timeseries = Vec::<(f32, f32)>::new();
 
             let mut max_value = Value::MIN;

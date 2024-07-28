@@ -130,9 +130,7 @@ impl Stmt {
 pub enum TachyonResultType {
     Done,
     Scalar,
-    Scalars,
     Vector,
-    Vectors,
 }
 
 #[cfg(test)]
@@ -293,6 +291,7 @@ mod tests {
         // Process results
         let actual_val = stmt.next_scalar().unwrap();
         assert_eq!(actual_val, expected_val);
+        assert!(stmt.next_scalar().is_none());
     }
 
     #[test]

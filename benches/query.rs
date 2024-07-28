@@ -28,19 +28,13 @@ fn bench_query(query: &str, start: Option<u64>, end: Option<u64>, conn: &mut Con
     let mut stmt = conn.prepare(query, start, end);
 
     match stmt.return_type() {
-        TachyonResultType::Scalar => {
-            stmt.next_scalar().unwrap();
-        }
-        TachyonResultType::Scalars => loop {
+        TachyonResultType::Scalar => loop {
             let res = stmt.next_scalar();
             if res.is_none() {
                 break;
             }
         },
-        TachyonResultType::Vector => {
-            stmt.next_vector().unwrap();
-        }
-        TachyonResultType::Vectors => loop {
+        TachyonResultType::Vector => loop {
             let res = stmt.next_vector();
             if res.is_none() {
                 break;

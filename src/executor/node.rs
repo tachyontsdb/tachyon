@@ -92,17 +92,26 @@ impl ExecutorNode for TNode {
 
 pub struct NumberLiteralNode {
     val: Value,
+    has_returned: bool,
 }
 
 impl NumberLiteralNode {
     pub fn new(val: f64) -> Self {
-        Self { val: val as Value } // TODO: Allow for floats
+        Self {
+            val: val as Value, // TODO: Allow for floats
+            has_returned: false,
+        }
     }
 }
 
 impl ExecutorNode for NumberLiteralNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        Some(self.val)
+        if (self.has_returned) {
+            None
+        } else {
+            self.has_returned = true;
+            Some(self.val)
+        }
     }
 
     fn return_type(&self) -> TachyonResultType {
@@ -163,7 +172,7 @@ impl ExecutorNode for VectorSelectNode {
     }
 
     fn return_type(&self) -> TachyonResultType {
-        TachyonResultType::Vectors
+        TachyonResultType::Vector
     }
 }
 
@@ -204,30 +213,30 @@ impl BinaryOpNode {
                 }
             }
 
-            (TachyonResultType::Vectors, TachyonResultType::Scalar) => {
+            (TachyonResultType::Vector, TachyonResultType::Scalar) => {
                 let child: Box<TNode> =
                     Box::new(TNode::VectorToScalar(VectorToScalarNode::new(op, lhs, rhs)));
                 Self {
                     child,
-                    return_type_: TachyonResultType::Vectors,
+                    return_type_: TachyonResultType::Vector,
                 }
             }
 
-            (TachyonResultType::Scalar, TachyonResultType::Vectors) => {
+            (TachyonResultType::Scalar, TachyonResultType::Vector) => {
                 let child: Box<TNode> =
                     Box::new(TNode::VectorToScalar(VectorToScalarNode::new(op, rhs, lhs)));
                 Self {
                     child,
-                    return_type_: TachyonResultType::Vectors,
+                    return_type_: TachyonResultType::Vector,
                 }
             }
 
-            (TachyonResultType::Vectors, TachyonResultType::Vectors) => {
+            (TachyonResultType::Vector, TachyonResultType::Vector) => {
                 let child: Box<TNode> =
                     Box::new(TNode::VectorToVector(VectorToVectorNode::new(op, rhs, lhs)));
                 Self {
                     child,
-                    return_type_: TachyonResultType::Vectors,
+                    return_type_: TachyonResultType::Vector,
                 }
             }
 
@@ -304,6 +313,9 @@ impl ExecutorNode for VectorToScalarNode {
             Some(s) => s,
             None => {
                 self.scalar = self.scalar_node.next_scalar(conn);
+                if (self.scalar_node.next_scalar(conn).is_some()) {
+                    panic!("VectorToScalarNode expects a single scalar.");
+                }
                 self.scalar.unwrap()
             }
         };
@@ -316,7 +328,7 @@ impl ExecutorNode for VectorToScalarNode {
     }
 
     fn return_type(&self) -> TachyonResultType {
-        TachyonResultType::Vectors
+        TachyonResultType::Vector
     }
 }
 
@@ -353,33 +365,42 @@ impl ExecutorNode for VectorToVectorNode {
     }
 
     fn return_type(&self) -> TachyonResultType {
-        TachyonResultType::Vectors
+        TachyonResultType::Vector
     }
 }
 
 pub struct SumNode {
     child: Box<TNode>,
+    has_returned: bool,
 }
 
 impl SumNode {
     pub fn new(child: Box<TNode>) -> Self {
-        Self { child }
+        Self {
+            child,
+            has_returned: false,
+        }
     }
 }
 
 impl ExecutorNode for SumNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let first_vector = self.child.next_vector(conn);
+        if (self.has_returned) {
+            None
+        } else {
+            let first_vector = self.child.next_vector(conn);
 
-        first_vector?;
+            first_vector?;
 
-        let mut sum = first_vector.unwrap().1;
+            let mut sum = first_vector.unwrap().1;
 
-        while let Some((t, v)) = self.child.next_vector(conn) {
-            sum += v;
+            while let Some((t, v)) = self.child.next_vector(conn) {
+                sum += v;
+            }
+
+            self.has_returned = true;
+            Some(sum)
         }
-
-        Some(sum)
     }
 
     fn return_type(&self) -> TachyonResultType {
@@ -389,35 +410,44 @@ impl ExecutorNode for SumNode {
 
 pub struct CountNode {
     child: Box<TNode>,
+    has_returned: bool,
 }
 
 impl CountNode {
     pub fn new(child: Box<TNode>) -> Self {
-        Self { child }
+        Self {
+            child,
+            has_returned: false,
+        }
     }
 }
 
 impl ExecutorNode for CountNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let first_vector = self.child.next_vector(conn);
-
-        first_vector?;
-
-        let mut count = 0;
-
-        if let TNode::VectorSelect(_) = *self.child {
-            count += first_vector.unwrap().1;
-            while let Some((t, v)) = self.child.next_vector(conn) {
-                count += v;
-            }
+        if (self.has_returned) {
+            None
         } else {
-            count += 1;
-            while self.child.next_vector(conn).is_some() {
-                count += 1;
-            }
-        }
+            let first_vector = self.child.next_vector(conn);
 
-        Some(count)
+            first_vector?;
+
+            let mut count = 0;
+
+            if let TNode::VectorSelect(_) = *self.child {
+                count += first_vector.unwrap().1;
+                while let Some((t, v)) = self.child.next_vector(conn) {
+                    count += v;
+                }
+            } else {
+                count += 1;
+                while self.child.next_vector(conn).is_some() {
+                    count += 1;
+                }
+            }
+
+            self.has_returned = true;
+            Some(count)
+        }
     }
 
     fn return_type(&self) -> TachyonResultType {
@@ -428,23 +458,33 @@ impl ExecutorNode for CountNode {
 pub struct AverageNode {
     sum: Box<SumNode>,
     count: Box<CountNode>,
+    has_returned: bool,
 }
 
 impl AverageNode {
     pub fn new(sum: Box<SumNode>, count: Box<CountNode>) -> Self {
-        Self { sum, count }
+        Self {
+            sum,
+            count,
+            has_returned: false,
+        }
     }
 }
 
 impl ExecutorNode for AverageNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let mut total = 0;
-        let sum_opt = self.sum.next_scalar(conn);
-        let count_opt = self.count.next_scalar(conn);
+        if (self.has_returned) {
+            None
+        } else {
+            let mut total = 0;
+            let sum_opt = self.sum.next_scalar(conn);
+            let count_opt = self.count.next_scalar(conn);
 
-        match (sum_opt, count_opt) {
-            (Some(sum), Some(count)) if count != 0 => Some(sum / count), // TODO: Allow for floats
-            _ => None,
+            self.has_returned = true;
+            match (sum_opt, count_opt) {
+                (Some(sum), Some(count)) if count != 0 => Some(sum / count), // TODO: Allow for floats
+                _ => None,
+            }
         }
     }
 
@@ -455,29 +495,38 @@ impl ExecutorNode for AverageNode {
 
 pub struct MinNode {
     child: Box<TNode>,
+    has_returned: bool,
 }
 
 impl MinNode {
     pub fn new(child: Box<TNode>) -> Self {
-        Self { child }
+        Self {
+            child,
+            has_returned: false,
+        }
     }
 }
 
 impl ExecutorNode for MinNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let mut is_first_value = true;
-        let mut min_val = 0;
+        if (self.has_returned) {
+            None
+        } else {
+            let mut is_first_value = true;
+            let mut min_val = 0;
 
-        while let Some((t, v)) = self.child.next_vector(conn) {
-            if (is_first_value) {
-                min_val = v;
-                is_first_value = false;
+            while let Some((t, v)) = self.child.next_vector(conn) {
+                if (is_first_value) {
+                    min_val = v;
+                    is_first_value = false;
+                }
+
+                min_val = min(min_val, v);
             }
 
-            min_val = min(min_val, v);
+            self.has_returned = true;
+            Some(min_val)
         }
-
-        Some(min_val)
     }
 
     fn return_type(&self) -> TachyonResultType {
@@ -487,23 +536,32 @@ impl ExecutorNode for MinNode {
 
 pub struct MaxNode {
     child: Box<TNode>,
+    has_returned: bool,
 }
 
 impl MaxNode {
     pub fn new(child: Box<TNode>) -> Self {
-        Self { child }
+        Self {
+            child,
+            has_returned: false,
+        }
     }
 }
 
 impl ExecutorNode for MaxNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let mut max_val = 0;
+        if (self.has_returned) {
+            None
+        } else {
+            let mut max_val = 0;
 
-        while let Some((t, v)) = self.child.next_vector(conn) {
-            max_val = max(max_val, v);
+            while let Some((t, v)) = self.child.next_vector(conn) {
+                max_val = max(max_val, v);
+            }
+
+            self.has_returned = true;
+            Some(max_val)
         }
-
-        Some(max_val)
     }
 
     fn return_type(&self) -> TachyonResultType {
@@ -554,7 +612,7 @@ impl ExecutorNode for BottomKNode {
     }
 
     fn return_type(&self) -> TachyonResultType {
-        TachyonResultType::Scalars
+        TachyonResultType::Scalar
     }
 }
 
@@ -602,7 +660,7 @@ impl ExecutorNode for TopKNode {
     }
 
     fn return_type(&self) -> TachyonResultType {
-        TachyonResultType::Scalars
+        TachyonResultType::Scalar
     }
 }
 
