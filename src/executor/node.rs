@@ -103,22 +103,6 @@ impl ExecutorNode for NumberLiteralNode {
     }
 }
 
-pub struct NumberLiteralNode {
-    val: Value,
-}
-
-impl NumberLiteralNode {
-    pub fn new(val: f64) -> Self {
-        Self { val: val as Value } // TODO: Allow for floats
-    }
-}
-
-impl ExecutorNode for NumberLiteralNode {
-    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        Some(self.val)
-    }
-}
-
 pub struct VectorSelectNode {
     stream_ids: Vec<Uuid>,
     stream_idx: usize,
@@ -517,115 +501,6 @@ impl ExecutorNode for MaxNode {
 
     fn return_type(&self) -> TachyonResultType {
         TachyonResultType::Scalar
-    }
-}
-
-#[derive(Eq)]
-struct ValueOrderedVector(Timestamp, Value); // implements Ord to order by Value (rather than Timestamp)
-
-impl PartialEq for ValueOrderedVector {
-    fn eq(&self, other: &Self) -> bool {
-        self.1 == other.1
-    }
-}
-
-impl Ord for ValueOrderedVector {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.1.cmp(&other.1)
-    }
-}
-
-impl PartialOrd for ValueOrderedVector {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-pub struct BottomKNode {
-    ix: usize,
-    bottomk: Vec<(Timestamp, Value)>,
-}
-
-impl BottomKNode {
-    pub fn new(conn: &mut Connection, mut child: Box<TNode>, mut param: Box<TNode>) -> Self {
-        let k = param.next_scalar(conn).unwrap();
-        let mut maxheap: BinaryHeap<ValueOrderedVector> = BinaryHeap::new();
-
-        // Find (up to) k smallest values
-        // Newer values overwrite older values in case of ties
-        if (k > 0) {
-            while let Some((t, v)) = child.next_vector(conn) {
-                if (maxheap.len() < k.try_into().unwrap()) {
-                    maxheap.push(ValueOrderedVector(t, v));
-                } else if (v <= maxheap.peek().unwrap().1) {
-                    maxheap.pop();
-                    maxheap.push(ValueOrderedVector(t, v));
-                }
-            }
-        }
-
-        // Re-sort values by timestamp
-        let mut bottomk: Vec<(Timestamp, Value)> =
-            maxheap.into_iter().map(|x| (x.0, x.1)).collect();
-        bottomk.sort();
-
-        Self { ix: 0, bottomk }
-    }
-}
-
-impl ExecutorNode for BottomKNode {
-    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
-        if (self.ix >= self.bottomk.len()) {
-            None
-        } else {
-            let next = self.bottomk[self.ix];
-            self.ix += 1;
-            Some(next)
-        }
-    }
-}
-
-pub struct TopKNode {
-    ix: usize,
-    topk: Vec<(Timestamp, Value)>,
-}
-
-impl TopKNode {
-    pub fn new(conn: &mut Connection, mut child: Box<TNode>, mut param: Box<TNode>) -> Self {
-        let k = param.next_scalar(conn).unwrap();
-        let mut minheap: BinaryHeap<Reverse<ValueOrderedVector>> = BinaryHeap::new();
-
-        // Find (up to) k largest values
-        // Newer values overwrite older values in case of ties
-        if (k > 0) {
-            while let Some((t, v)) = child.next_vector(conn) {
-                if (minheap.len() < k.try_into().unwrap()) {
-                    minheap.push(Reverse(ValueOrderedVector(t, v)));
-                } else if (v >= minheap.peek().unwrap().0 .1) {
-                    minheap.pop();
-                    minheap.push(Reverse(ValueOrderedVector(t, v)));
-                }
-            }
-        }
-
-        // Re-sort values by timestamp
-        let mut topk: Vec<(Timestamp, Value)> =
-            minheap.into_iter().map(|x| (x.0 .0, x.0 .1)).collect();
-        topk.sort();
-
-        Self { ix: 0, topk }
-    }
-}
-
-impl ExecutorNode for TopKNode {
-    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
-        if (self.ix >= self.topk.len()) {
-            None
-        } else {
-            let next = self.topk[self.ix];
-            self.ix += 1;
-            Some(next)
-        }
     }
 }
 
