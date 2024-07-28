@@ -7,8 +7,8 @@ use promql_parser::parser::{
 use crate::api::Connection;
 use crate::common::{Timestamp, Value};
 use crate::executor::node::{
-    AverageNode, BinaryOp, BinaryOpNode, CountNode, MaxNode, MinNode, SumNode, TNode,
-    VectorSelectNode,
+    AverageNode, BinaryOp, BinaryOpNode, BottomKNode, CountNode, MaxNode, MinNode,
+    NumberLiteralNode, SumNode, TNode, TopKNode, VectorSelectNode,
 };
 use crate::executor::{self, execute, Context, OperationCode::*};
 use crate::storage::file::ScanHint;
@@ -61,6 +61,22 @@ impl<'a> QueryPlanner<'a> {
             parser::token::T_MAX => Ok(TNode::Max(MaxNode::new(Box::new(
                 self.handle_expr(&expr.expr, conn, ScanHint::Max).unwrap(),
             )))),
+            parser::token::T_BOTTOMK => {
+                let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None).unwrap());
+                let param = Box::new(
+                    self.handle_expr(expr.param.as_ref().unwrap(), conn, ScanHint::None)
+                        .unwrap(),
+                );
+                Ok(TNode::BottomK(BottomKNode::new(conn, child, param)))
+            }
+            parser::token::T_TOPK => {
+                let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None).unwrap());
+                let param = Box::new(
+                    self.handle_expr(expr.param.as_ref().unwrap(), conn, ScanHint::None)
+                        .unwrap(),
+                );
+                Ok(TNode::TopK(TopKNode::new(conn, child, param)))
+            }
             _ => panic!("Unknown aggregation token."),
         }
     }
@@ -114,7 +130,7 @@ impl<'a> QueryPlanner<'a> {
         expr: &NumberLiteral,
         conn: &mut Connection,
     ) -> Result<TNode, &'static str> {
-        todo!()
+        Ok(TNode::NumberLiteral(NumberLiteralNode::new(expr.val)))
     }
 
     fn handle_string_literal_expr(
@@ -282,6 +298,31 @@ mod tests {
     #[test]
     fn test_max_query() {
         let query_string = r#"max(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_bottomk_query() {
+        let query_string =
+            r#"bottomk(5, http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_topk_query() {
+        let query_string = r#"topk(5, http_requests_total{service = "web" or service = "nice"})"#;
         let res = parser::parse(query_string).unwrap();
         match res {
             Expr::Aggregate(selector) => println!("{:#?}", selector),

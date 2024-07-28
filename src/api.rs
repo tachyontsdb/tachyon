@@ -137,7 +137,11 @@ pub enum TachyonResultType {
 mod tests {
     use std::{iter::zip, path::PathBuf};
 
-    use crate::{api::Connection, common::Value, utils::test_utils::set_up_dirs};
+    use crate::{
+        api::Connection,
+        common::{Timestamp, Value},
+        utils::test_utils::set_up_dirs,
+    };
 
     fn e2e_vector_test(
         root_dir: PathBuf,
@@ -261,7 +265,7 @@ mod tests {
         assert_eq!(i, 4);
     }
 
-    fn e2e_scalar_test(
+    fn e2e_scalar_aggregate_test(
         root_dir: PathBuf,
         operation: &str,
         start: u64,
@@ -293,70 +297,202 @@ mod tests {
     fn test_e2e_sum_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_test(root_dir, "sum", 23, 51, 163)
+        e2e_scalar_aggregate_test(root_dir, "sum", 23, 51, 163)
     }
 
     #[test]
     fn test_e2e_sum_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_test(root_dir, "sum", 29, 40, 70)
+        e2e_scalar_aggregate_test(root_dir, "sum", 29, 40, 70)
     }
 
     #[test]
     fn test_e2e_count_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_test(root_dir, "count", 23, 51, 4)
+        e2e_scalar_aggregate_test(root_dir, "count", 23, 51, 4)
     }
 
     #[test]
     fn test_e2e_count_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_test(root_dir, "count", 29, 40, 2)
+        e2e_scalar_aggregate_test(root_dir, "count", 29, 40, 2)
     }
 
     #[test]
     fn test_e2e_avg_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_test(root_dir, "avg", 23, 51, 40)
+        e2e_scalar_aggregate_test(root_dir, "avg", 23, 51, 40)
     }
 
     #[test]
     fn test_e2e_avg_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_test(root_dir, "avg", 29, 40, 35)
+        e2e_scalar_aggregate_test(root_dir, "avg", 29, 40, 35)
     }
 
     #[test]
     fn test_e2e_min_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_test(root_dir, "min", 23, 51, 23)
+        e2e_scalar_aggregate_test(root_dir, "min", 23, 51, 23)
     }
 
     #[test]
     fn test_e2e_min_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_test(root_dir, "min", 29, 40, 23)
+        e2e_scalar_aggregate_test(root_dir, "min", 29, 40, 23)
     }
 
     #[test]
     fn test_e2e_max_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_test(root_dir, "max", 23, 51, 48)
+        e2e_scalar_aggregate_test(root_dir, "max", 23, 51, 48)
     }
 
     #[test]
     fn test_e2e_max_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_test(root_dir, "max", 29, 40, 47)
+        e2e_scalar_aggregate_test(root_dir, "max", 29, 40, 47)
+    }
+
+    fn e2e_vector_aggregate_test(
+        root_dir: PathBuf,
+        operation: &str,
+        param: u64,
+        start: u64,
+        end: u64,
+        expected_val: Vec<(Timestamp, Value)>,
+    ) {
+        let mut conn = Connection::new(root_dir);
+
+        let timestamps = [23, 25, 29, 40, 44, 51];
+        let values = [27, 31, 47, 23, 31, 48];
+
+        // Insert dummy data
+        for (t, v) in zip(timestamps, values) {
+            conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
+        }
+
+        conn.writer.flush_all();
+
+        // Prepare test query
+        let query = format!(
+            r#"{}({}, http_requests_total{{service = "web"}})"#,
+            operation, param
+        );
+        let mut stmt = conn.prepare(&query, Some(start), Some(end));
+
+        // Process results
+        let mut actual_val: Vec<(Timestamp, Value)> = Vec::new();
+        loop {
+            let res = stmt.next_vector();
+            if res.is_none() {
+                break;
+            }
+            let res = res.unwrap();
+            actual_val.push(res);
+        }
+
+        assert_eq!(actual_val, expected_val);
+    }
+
+    #[test]
+    fn test_e2e_bottomk() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(
+            root_dir,
+            "bottomk",
+            2,
+            23,
+            51,
+            [(23, 27), (40, 23)].to_vec(),
+        )
+    }
+
+    #[test]
+    fn test_e2e_bottomk_zero_k() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(root_dir, "bottomk", 0, 23, 51, [].to_vec())
+    }
+
+    #[test]
+    fn test_e2e_bottomk_large_k() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(
+            root_dir,
+            "bottomk",
+            10000,
+            23,
+            51,
+            [(23, 27), (25, 31), (29, 47), (40, 23), (44, 31), (51, 48)].to_vec(),
+        )
+    }
+
+    #[test]
+    fn test_e2e_bottomk_tied_value() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(
+            root_dir,
+            "bottomk",
+            3,
+            23,
+            51,
+            [(23, 27), (40, 23), (44, 31)].to_vec(),
+        )
+    }
+
+    #[test]
+    fn test_e2e_topk() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(root_dir, "topk", 2, 23, 51, [(29, 47), (51, 48)].to_vec())
+    }
+
+    #[test]
+    fn test_e2e_topk_zero_k() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(root_dir, "topk", 0, 23, 51, [].to_vec())
+    }
+
+    #[test]
+    fn test_e2e_topk_large_k() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(
+            root_dir,
+            "topk",
+            10000,
+            23,
+            51,
+            [(23, 27), (25, 31), (29, 47), (40, 23), (44, 31), (51, 48)].to_vec(),
+        )
+    }
+
+    #[test]
+    fn test_e2e_topk_tied_value() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        e2e_vector_aggregate_test(
+            root_dir,
+            "topk",
+            3,
+            23,
+            51,
+            [(29, 47), (44, 31), (51, 48)].to_vec(),
+        )
     }
 
     #[test]

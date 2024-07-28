@@ -50,6 +50,10 @@ fn vector_selector_benchmark(c: &mut Criterion) {
         r#"sum(http_requests_total{service = "web"})"#,
         r#"count(http_requests_total{service = "web"})"#,
         r#"avg(http_requests_total{service = "web"})"#,
+        r#"min(http_requests_total{service = "web"})"#,
+        r#"max(http_requests_total{service = "web"})"#,
+        r#"bottomk(1000, http_requests_total{service = "web"})"#,
+        r#"topk(1000, http_requests_total{service = "web"})"#,
     ];
 
     let mut conn = Connection::new(root_dir.clone());
