@@ -1,6 +1,6 @@
 use std::{
     cmp::{max, min, Ordering, Reverse},
-    collections::BinaryHeap,
+    collections::{BinaryHeap, VecDeque},
 };
 
 use promql_parser::label::{Matcher, Matchers};
@@ -317,32 +317,238 @@ pub struct VectorToVectorNode {
     op: BinaryOp,
     lhs: Box<TNode>,
     rhs: Box<TNode>,
+    lhs_range: VecDeque<(Timestamp, Value)>,
+    rhs_range: VecDeque<(Timestamp, Value)>,
+    value_opt: Option<(Timestamp, Value, VectorToVectorStream)>,
+}
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum VectorToVectorStream {
+    Lhs = 0,
+    Rhs = 1,
 }
 
 impl VectorToVectorNode {
     pub fn new(op: BinaryOp, lhs: Box<TNode>, rhs: Box<TNode>) -> Self {
-        Self { op, lhs, rhs }
+        Self {
+            op,
+            lhs,
+            rhs,
+            lhs_range: VecDeque::new(),
+            rhs_range: VecDeque::new(),
+            value_opt: None,
+        }
+    }
+
+    fn calculate_value_with_linear_interpolation(
+        &self,
+        ts: Timestamp,
+        stream: VectorToVectorStream,
+    ) -> Value {
+        let range = match stream {
+            VectorToVectorStream::Lhs => &self.lhs_range,
+            VectorToVectorStream::Rhs => &self.rhs_range,
+        };
+
+        if range.len() == 1 {
+            range[0].1
+        } else if range.len() == 2 {
+            let (v1, v2) = (range[1].1, range[0].1);
+            let (t1, t2) = (range[1].0, range[0].0);
+
+            let slope = (v2 as f64 - v1 as f64) / (t2 as f64 - t1 as f64);
+            ((ts as f64 - t1 as f64) * slope + v1 as f64).round() as Value
+        } else {
+            panic!("No values in range for interpolation.")
+        }
+    }
+
+    fn next_child_vector(
+        &mut self,
+        conn: &mut Connection,
+        stream: VectorToVectorStream,
+    ) -> Option<(Timestamp, Value)> {
+        let (node, range) = match stream {
+            VectorToVectorStream::Lhs => (&mut self.lhs, &mut self.lhs_range),
+            VectorToVectorStream::Rhs => (&mut self.rhs, &mut self.rhs_range),
+        };
+
+        let vec_opt = node.next_vector(conn);
+        if let Some(vec) = vec_opt {
+            range.push_front(vec);
+
+            if range.len() > 2 {
+                range.pop_back();
+            }
+        }
+
+        vec_opt
     }
 }
 
 impl ExecutorNode for VectorToVectorNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
-        let lhs_vector = self.lhs.next_vector(conn);
-        let rhs_vector = self.rhs.next_vector(conn);
+        // Initial case
+        if self.lhs_range.is_empty() && self.rhs_range.is_empty() && self.value_opt.is_none() {
+            let lhs_vector_opt = self.next_child_vector(conn, VectorToVectorStream::Lhs);
+            let rhs_vector_opt = self.next_child_vector(conn, VectorToVectorStream::Rhs);
 
-        if lhs_vector.is_none() || rhs_vector.is_none() {
-            return None;
+            match (lhs_vector_opt, rhs_vector_opt) {
+                (Some((lhs_ts, lhs_val)), Some((rhs_ts, rhs_val))) => {
+                    match lhs_ts.cmp(&rhs_ts) {
+                        std::cmp::Ordering::Less => {
+                            // Store this value
+                            self.value_opt = Some((rhs_ts, rhs_val, VectorToVectorStream::Rhs));
+                        }
+                        std::cmp::Ordering::Greater => {
+                            // Store this value
+                            self.value_opt = Some((lhs_ts, lhs_val, VectorToVectorStream::Lhs));
+                        }
+                        std::cmp::Ordering::Equal => {}
+                    }
+
+                    return Some((
+                        Timestamp::min(lhs_ts, rhs_ts),
+                        self.op.apply(lhs_val, rhs_val), // These are the first values of the stream thus no interpolation is necessary
+                    ));
+                }
+                _ => return None, // One of the streams is empty. Then do nothing.
+            };
+        } else if self.value_opt.is_some() {
+            // There is a residual value from one stream
+            let (value_ts, value_val, last_stream) = self.value_opt.unwrap();
+            match last_stream {
+                VectorToVectorStream::Lhs => {
+                    let rhs_vec_opt = self.next_child_vector(conn, VectorToVectorStream::Rhs); // Fetch value from opposing stream
+                    match rhs_vec_opt {
+                        Some((rhs_ts, rhs_val)) => {
+                            match rhs_ts.cmp(&value_ts) {
+                                // If the new vector is less than the residual we must interpolate the residual value relative to the new vector
+                                std::cmp::Ordering::Less => {
+                                    let lhs_interpolated = self
+                                        .calculate_value_with_linear_interpolation(
+                                            rhs_ts,
+                                            VectorToVectorStream::Lhs,
+                                        );
+                                    return Some((
+                                        rhs_ts,
+                                        self.op.apply(lhs_interpolated, rhs_val),
+                                    ));
+                                }
+                                // If the new vector is greater than the residual we must store it, and then interpolate it relative to the residual
+                                std::cmp::Ordering::Greater => {
+                                    self.value_opt =
+                                        Some((rhs_ts, rhs_val, VectorToVectorStream::Rhs));
+                                    let rhs_interpolated = self
+                                        .calculate_value_with_linear_interpolation(
+                                            value_ts,
+                                            VectorToVectorStream::Rhs,
+                                        );
+                                    return Some((
+                                        value_ts,
+                                        self.op.apply(value_val, rhs_interpolated),
+                                    ));
+                                }
+                                // If they are equal then no interpolation needed, we can discard residual value
+                                std::cmp::Ordering::Equal => {
+                                    self.value_opt = None;
+                                    return Some((value_ts, self.op.apply(value_val, rhs_val)));
+                                }
+                            }
+                        }
+                        _ => {
+                            let rhs_interpolated = self.rhs_range[0].1; // If there is no value from the RHS stream, then we must interpolate based on the last value
+                            self.value_opt = None;
+                            return Some((value_ts, self.op.apply(value_val, rhs_interpolated)));
+                        }
+                    }
+                }
+                VectorToVectorStream::Rhs => {
+                    let lhs_vec_opt = self.next_child_vector(conn, VectorToVectorStream::Lhs); // Fetch value from opposing stream
+                    match lhs_vec_opt {
+                        Some((lhs_ts, lhs_val)) => match lhs_ts.cmp(&value_ts) {
+                            // If the new vector is less than the residual we must interpolate the residual value relative to the new vector
+                            std::cmp::Ordering::Less => {
+                                let rhs_interpolated = self
+                                    .calculate_value_with_linear_interpolation(
+                                        lhs_ts,
+                                        VectorToVectorStream::Rhs,
+                                    );
+                                return Some((lhs_ts, self.op.apply(lhs_val, rhs_interpolated)));
+                            }
+                            // If the new vector is greater than the residual we must store it, and then interpolate it relative to the residual
+                            std::cmp::Ordering::Greater => {
+                                self.value_opt = Some((lhs_ts, lhs_val, VectorToVectorStream::Lhs));
+                                let lhs_interpolated = self
+                                    .calculate_value_with_linear_interpolation(
+                                        value_ts,
+                                        VectorToVectorStream::Lhs,
+                                    );
+                                return Some((
+                                    value_ts,
+                                    self.op.apply(lhs_interpolated, value_val),
+                                ));
+                            }
+                            // If they are equal then no interpolation needed, we can discard residual value
+                            std::cmp::Ordering::Equal => {
+                                self.value_opt = None;
+                                return Some((value_ts, self.op.apply(lhs_val, value_val)));
+                            }
+                        },
+                        _ => {
+                            let lhs_interpolated = self.lhs_range[0].1; // If there is no value from the LHS stream, then we must interpolate based on the last value
+                            self.value_opt = None;
+                            return Some((value_ts, self.op.apply(lhs_interpolated, value_val)));
+                        }
+                    }
+                }
+            }
+        } else {
+            // There is no residual value present
+            let lhs_vector_opt = self.next_child_vector(conn, VectorToVectorStream::Lhs);
+            let rhs_vector_opt = self.next_child_vector(conn, VectorToVectorStream::Rhs);
+
+            match (lhs_vector_opt, rhs_vector_opt) {
+                (Some((lhs_ts, lhs_val)), Some((rhs_ts, rhs_val))) => match lhs_ts.cmp(&rhs_ts) {
+                    // If the LHS is less than the RHS we must store the RHS and interpolate it relative to the LHS
+                    std::cmp::Ordering::Less => {
+                        self.value_opt = Some((rhs_ts, rhs_val, VectorToVectorStream::Rhs));
+                        let rhs_interpolated = self.calculate_value_with_linear_interpolation(
+                            lhs_ts,
+                            VectorToVectorStream::Rhs,
+                        );
+                        return Some((lhs_ts, self.op.apply(lhs_val, rhs_interpolated)));
+                    }
+                    // If the LHS is greater than the RHS we must store the LHS and interpolate it relative to the RHS
+                    std::cmp::Ordering::Greater => {
+                        self.value_opt = Some((lhs_ts, lhs_val, VectorToVectorStream::Lhs));
+                        let lhs_interpolated = self.calculate_value_with_linear_interpolation(
+                            rhs_ts,
+                            VectorToVectorStream::Lhs,
+                        );
+                        return Some((rhs_ts, self.op.apply(lhs_interpolated, rhs_val)));
+                    }
+                    // If equal then no interpolation necessary
+                    std::cmp::Ordering::Equal => {
+                        return Some((lhs_ts, self.op.apply(lhs_val, rhs_val)));
+                    }
+                },
+                // If no RHS value then we interpolate it based on the last one
+                (Some((lhs_ts, lhs_val)), None) => {
+                    let rhs_interpolated = self.rhs_range[0].1;
+                    return Some((lhs_ts, self.op.apply(lhs_val, rhs_interpolated)));
+                }
+                // If no LHS value then we interpolate it based on the last one
+                (None, Some((rhs_ts, rhs_val))) => {
+                    let lhs_interpolated = self.lhs_range[0].1;
+                    return Some((rhs_ts, self.op.apply(lhs_interpolated, rhs_val)));
+                }
+                _ => return None, // Both of the streams are empty.
+            };
         }
 
-        let (lhs_timestamp, lhs_value) = lhs_vector.unwrap();
-        let (rhs_timestamp, rhs_value) = rhs_vector.unwrap();
-
-        if lhs_timestamp != rhs_timestamp {
-            // TODO: Handle timestamp matching
-            todo!("Timestamps don't match!");
-        }
-
-        Some((lhs_timestamp, self.op.apply(lhs_value, rhs_value)))
+        panic!("VectorToVector interpolation hit impossible case!")
     }
 
     fn return_type(&self) -> TachyonResultType {

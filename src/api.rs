@@ -135,7 +135,8 @@ pub enum TachyonResultType {
 
 #[cfg(test)]
 mod tests {
-    use std::{iter::zip, path::PathBuf};
+    use super::*;
+    use std::{borrow::Borrow, collections::HashSet, iter::zip, path::PathBuf};
 
     use crate::{
         api::Connection,
@@ -537,6 +538,148 @@ mod tests {
             assert_eq!(values_a[i] * values_b[i], res.1);
             i += 1;
         }
+    }
+
+    fn vec_union<T: Ord + Eq + std::hash::Hash + Clone>(v1: &Vec<T>, v2: &Vec<T>) -> Vec<T> {
+        let mut set = HashSet::<T>::new();
+
+        for e in v1 {
+            set.insert(e.clone());
+        }
+
+        for e in v2 {
+            set.insert(e.clone());
+        }
+
+        let mut vec: Vec<T> = set.into_iter().collect();
+        vec.sort();
+
+        vec
+    }
+
+    fn e2e_vector_to_vector_test(
+        root_dir: PathBuf,
+        timestamps_a: Vec<Timestamp>,
+        values_a: Vec<Value>,
+        timestamps_b: Vec<Timestamp>,
+        values_b: Vec<Value>,
+        expected_timestamps: Vec<Timestamp>,
+        expected_values: Vec<Value>,
+    ) {
+        let mut conn = Connection::new(root_dir);
+
+        // Insert dummy data
+        for (t, v) in zip(timestamps_a, values_a) {
+            conn.insert(r#"http_requests_total{service = "web"}"#, t, v);
+        }
+
+        for (t, v) in zip(timestamps_b, values_b) {
+            conn.insert(r#"http_requests_total{service = "mobile"}"#, t, v);
+        }
+
+        conn.writer.flush_all();
+
+        // Prepare test query
+        let query =
+            r#"http_requests_total{service = "web"} + http_requests_total{service = "mobile"}"#;
+        let mut stmt = conn.prepare(query, Some(0), Some(100));
+
+        // Process results
+        let mut i = 0;
+        let mut count = 0;
+        loop {
+            let res = stmt.next_vector();
+            if res.is_none() {
+                break;
+            }
+
+            let res = res.unwrap();
+            assert_eq!(
+                expected_values[i], res.1,
+                "Comparison failed at time {} with expected {} and actual {}",
+                expected_timestamps[i], expected_values[i], res.1
+            );
+            assert_eq!(expected_timestamps[i], res.0);
+            i += 1;
+            count += 1
+        }
+    }
+
+    #[test]
+    fn test_vector_to_vector_basic_interpolation_1() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+
+        let timestamps_a = vec![10, 20, 30, 40];
+        let values_a = vec![0, 20, 0, 20];
+
+        let timestamps_b = vec![5, 15, 25, 35, 45];
+        let values_b = vec![10, 10, 10, 10, 10];
+
+        let expected_values = vec![10, 10, 20, 30, 20, 10, 20, 30, 30];
+        let expected_timestamps = vec_union(timestamps_a.borrow(), timestamps_b.borrow());
+
+        e2e_vector_to_vector_test(
+            root_dir,
+            timestamps_a,
+            values_a,
+            timestamps_b,
+            values_b,
+            expected_timestamps,
+            expected_values,
+        )
+    }
+
+    #[test]
+    fn test_vector_to_vector_basic_interpolation_2() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+
+        let timestamps_a = vec![5, 15, 25, 35, 45];
+        let values_a = vec![10, 10, 10, 10, 10];
+
+        let timestamps_b = vec![10, 20, 30, 40];
+        let values_b = vec![0, 20, 0, 20];
+
+        let expected_values = vec![10, 10, 20, 30, 20, 10, 20, 30, 30];
+        let expected_timestamps = vec_union(timestamps_a.borrow(), timestamps_b.borrow());
+
+        e2e_vector_to_vector_test(
+            root_dir,
+            timestamps_a,
+            values_a,
+            timestamps_b,
+            values_b,
+            expected_timestamps,
+            expected_values,
+        )
+    }
+
+    #[test]
+    fn test_vector_to_vector_complex_interpolation() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+
+        let timestamps_a = vec![1, 2, 4, 6, 10, 12, 13, 14, 15, 16];
+        let values_a = vec![10, 20, 30, 20, 20, 10, 15, 20, 80, 100];
+
+        let timestamps_b = vec![3, 5, 7, 8, 9, 11, 16];
+        let values_b = vec![30, 30, 10, 20, 20, 10, 10];
+
+        let expected_values = vec![
+            40, 50, 55, 60, 55, 40, 30, 40, 40, 35, 25, 20, 25, 30, 90, 110,
+        ];
+        let expected_timestamps = vec_union(timestamps_a.borrow(), timestamps_b.borrow());
+
+        e2e_vector_to_vector_test(
+            root_dir,
+            timestamps_a,
+            values_a,
+            timestamps_b,
+            values_b,
+            expected_timestamps,
+            expected_values,
+        )
     }
 
     #[test]
