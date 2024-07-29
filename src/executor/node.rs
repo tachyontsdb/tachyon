@@ -598,7 +598,7 @@ impl ExecutorNode for BottomKNode {
             // Find (up to) k smallest values
             if (k > 0) {
                 while let Some((t, v)) = self.child.next_vector(conn) {
-                    if (maxheap.len() < k.try_into().unwrap()) {
+                    if (maxheap.len() < k as usize) {
                         maxheap.push(v);
                     } else if (v < *maxheap.peek().unwrap()) {
                         maxheap.pop();
@@ -657,7 +657,7 @@ impl ExecutorNode for TopKNode {
             // Find (up to) k largest values
             if (k > 0) {
                 while let Some((t, v)) = self.child.next_vector(conn) {
-                    if (minheap.len() < k.try_into().unwrap()) {
+                    if (minheap.len() < k as usize) {
                         minheap.push(Reverse(v));
                     } else if (v > minheap.peek().unwrap().0) {
                         minheap.pop();
