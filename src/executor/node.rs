@@ -596,7 +596,6 @@ impl ExecutorNode for BottomKNode {
             let mut maxheap: BinaryHeap<Value> = BinaryHeap::new();
 
             // Find (up to) k smallest values
-            // Newer values overwrite older values in case of ties
             if (k > 0) {
                 while let Some((t, v)) = self.child.next_vector(conn) {
                     if (maxheap.len() < k.try_into().unwrap()) {
@@ -656,7 +655,6 @@ impl ExecutorNode for TopKNode {
             let mut minheap: BinaryHeap<Reverse<Value>> = BinaryHeap::new();
 
             // Find (up to) k largest values
-            // Newer values overwrite older values in case of ties
             if (k > 0) {
                 while let Some((t, v)) = self.child.next_vector(conn) {
                     if (minheap.len() < k.try_into().unwrap()) {
