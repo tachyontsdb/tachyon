@@ -44,18 +44,6 @@ pub enum TNode {
 }
 
 impl ExecutorNode for TNode {
-    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
-        match self {
-            TNode::VectorSelect(sel) => sel.next_vector(conn),
-            TNode::VectorToVector(sel) => sel.next_vector(conn),
-            TNode::VectorToScalar(sel) => sel.next_vector(conn),
-            TNode::BinaryOp(sel) => sel.next_vector(conn),
-            TNode::BottomK(sel) => sel.next_vector(conn),
-            TNode::TopK(sel) => sel.next_vector(conn),
-            _ => panic!("next_vector not implemented for this node"),
-        }
-    }
-
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         match self {
             TNode::NumberLiteral(sel) => sel.next_scalar(conn),
@@ -66,12 +54,25 @@ impl ExecutorNode for TNode {
             TNode::Average(sel) => sel.next_scalar(conn),
             TNode::Min(sel) => sel.next_scalar(conn),
             TNode::Max(sel) => sel.next_scalar(conn),
+            TNode::BottomK(sel) => sel.next_scalar(conn),
+            TNode::TopK(sel) => sel.next_scalar(conn),
             _ => panic!("next_scalar not implemented for this node"),
+        }
+    }
+
+    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
+        match self {
+            TNode::VectorSelect(sel) => sel.next_vector(conn),
+            TNode::BinaryOp(sel) => sel.next_vector(conn),
+            TNode::VectorToVector(sel) => sel.next_vector(conn),
+            TNode::VectorToScalar(sel) => sel.next_vector(conn),
+            _ => panic!("next_vector not implemented for this node"),
         }
     }
 
     fn return_type(&self) -> TachyonResultType {
         match self {
+            TNode::NumberLiteral(sel) => sel.return_type(),
             TNode::VectorSelect(sel) => sel.return_type(),
             TNode::BinaryOp(sel) => sel.return_type(),
             TNode::VectorToVector(sel) => sel.return_type(),
@@ -82,24 +83,39 @@ impl ExecutorNode for TNode {
             TNode::Average(sel) => sel.return_type(),
             TNode::Min(sel) => sel.return_type(),
             TNode::Max(sel) => sel.return_type(),
-            _ => panic!("next_scalar not implemented for this node"),
+            TNode::BottomK(sel) => sel.return_type(),
+            TNode::TopK(sel) => sel.return_type(),
+            _ => panic!("return_type not implemented for this node"),
         }
     }
 }
 
 pub struct NumberLiteralNode {
     val: Value,
+    first_run: bool,
 }
 
 impl NumberLiteralNode {
     pub fn new(val: f64) -> Self {
-        Self { val: val as Value } // TODO: Allow for floats
+        Self {
+            val: val as Value, // TODO: Allow for floats
+            first_run: true,
+        }
     }
 }
 
 impl ExecutorNode for NumberLiteralNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        Some(self.val)
+        if (self.first_run) {
+            self.first_run = false;
+            Some(self.val)
+        } else {
+            None
+        }
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
     }
 }
 
@@ -230,12 +246,12 @@ impl BinaryOpNode {
 }
 
 impl ExecutorNode for BinaryOpNode {
-    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
-        self.child.next_vector(conn)
-    }
-
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         self.child.next_scalar(conn)
+    }
+
+    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
+        self.child.next_vector(conn)
     }
 
     fn return_type(&self) -> TachyonResultType {
@@ -297,6 +313,9 @@ impl ExecutorNode for VectorToScalarNode {
             Some(s) => s,
             None => {
                 self.scalar = self.scalar_node.next_scalar(conn);
+                if (self.scalar_node.next_scalar(conn).is_some()) {
+                    panic!("VectorToScalarNode expects a single scalar.");
+                }
                 self.scalar.unwrap()
             }
         };
@@ -309,7 +328,7 @@ impl ExecutorNode for VectorToScalarNode {
     }
 
     fn return_type(&self) -> TachyonResultType {
-        TachyonResultType::Scalar
+        TachyonResultType::Vector
     }
 }
 
@@ -552,33 +571,42 @@ impl ExecutorNode for VectorToVectorNode {
     }
 
     fn return_type(&self) -> TachyonResultType {
-        TachyonResultType::Scalar
+        TachyonResultType::Vector
     }
 }
 
 pub struct SumNode {
     child: Box<TNode>,
+    first_run: bool,
 }
 
 impl SumNode {
     pub fn new(child: Box<TNode>) -> Self {
-        Self { child }
+        Self {
+            child,
+            first_run: true,
+        }
     }
 }
 
 impl ExecutorNode for SumNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let first_vector = self.child.next_vector(conn);
+        if (self.first_run) {
+            let first_vector = self.child.next_vector(conn);
 
-        first_vector?;
+            first_vector?;
 
-        let mut sum = first_vector.unwrap().1;
+            let mut sum = first_vector.unwrap().1;
 
-        while let Some((t, v)) = self.child.next_vector(conn) {
-            sum += v;
+            while let Some((t, v)) = self.child.next_vector(conn) {
+                sum += v;
+            }
+
+            self.first_run = false;
+            Some(sum)
+        } else {
+            None
         }
-
-        Some(sum)
     }
 
     fn return_type(&self) -> TachyonResultType {
@@ -588,35 +616,44 @@ impl ExecutorNode for SumNode {
 
 pub struct CountNode {
     child: Box<TNode>,
+    first_run: bool,
 }
 
 impl CountNode {
     pub fn new(child: Box<TNode>) -> Self {
-        Self { child }
+        Self {
+            child,
+            first_run: true,
+        }
     }
 }
 
 impl ExecutorNode for CountNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let first_vector = self.child.next_vector(conn);
+        if (self.first_run) {
+            let first_vector = self.child.next_vector(conn);
 
-        first_vector?;
+            first_vector?;
 
-        let mut count = 0;
+            let mut count = 0;
 
-        if let TNode::VectorSelect(_) = *self.child {
-            count += first_vector.unwrap().1;
-            while let Some((t, v)) = self.child.next_vector(conn) {
-                count += v;
-            }
-        } else {
-            count += 1;
-            while self.child.next_vector(conn).is_some() {
+            if let TNode::VectorSelect(_) = *self.child {
+                count += first_vector.unwrap().1;
+                while let Some((t, v)) = self.child.next_vector(conn) {
+                    count += v;
+                }
+            } else {
                 count += 1;
+                while self.child.next_vector(conn).is_some() {
+                    count += 1;
+                }
             }
-        }
 
-        Some(count)
+            self.first_run = false;
+            Some(count)
+        } else {
+            None
+        }
     }
 
     fn return_type(&self) -> TachyonResultType {
@@ -627,23 +664,33 @@ impl ExecutorNode for CountNode {
 pub struct AverageNode {
     sum: Box<SumNode>,
     count: Box<CountNode>,
+    first_run: bool,
 }
 
 impl AverageNode {
     pub fn new(sum: Box<SumNode>, count: Box<CountNode>) -> Self {
-        Self { sum, count }
+        Self {
+            sum,
+            count,
+            first_run: true,
+        }
     }
 }
 
 impl ExecutorNode for AverageNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let mut total = 0;
-        let sum_opt = self.sum.next_scalar(conn);
-        let count_opt = self.count.next_scalar(conn);
+        if (self.first_run) {
+            let mut total = 0;
+            let sum_opt = self.sum.next_scalar(conn);
+            let count_opt = self.count.next_scalar(conn);
 
-        match (sum_opt, count_opt) {
-            (Some(sum), Some(count)) if count != 0 => Some(sum / count), // TODO: Allow for floats
-            _ => None,
+            self.first_run = false;
+            match (sum_opt, count_opt) {
+                (Some(sum), Some(count)) if count != 0 => Some(sum / count), // TODO: Allow for floats
+                _ => None,
+            }
+        } else {
+            None
         }
     }
 
@@ -654,29 +701,38 @@ impl ExecutorNode for AverageNode {
 
 pub struct MinNode {
     child: Box<TNode>,
+    first_run: bool,
 }
 
 impl MinNode {
     pub fn new(child: Box<TNode>) -> Self {
-        Self { child }
+        Self {
+            child,
+            first_run: true,
+        }
     }
 }
 
 impl ExecutorNode for MinNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let mut is_first_value = true;
-        let mut min_val = 0;
+        if (self.first_run) {
+            let mut is_first_value = true;
+            let mut min_val = 0;
 
-        while let Some((t, v)) = self.child.next_vector(conn) {
-            if (is_first_value) {
-                min_val = v;
-                is_first_value = false;
+            while let Some((t, v)) = self.child.next_vector(conn) {
+                if (is_first_value) {
+                    min_val = v;
+                    is_first_value = false;
+                }
+
+                min_val = min(min_val, v);
             }
 
-            min_val = min(min_val, v);
+            self.first_run = false;
+            Some(min_val)
+        } else {
+            None
         }
-
-        Some(min_val)
     }
 
     fn return_type(&self) -> TachyonResultType {
@@ -686,23 +742,32 @@ impl ExecutorNode for MinNode {
 
 pub struct MaxNode {
     child: Box<TNode>,
+    first_run: bool,
 }
 
 impl MaxNode {
     pub fn new(child: Box<TNode>) -> Self {
-        Self { child }
+        Self {
+            child,
+            first_run: true,
+        }
     }
 }
 
 impl ExecutorNode for MaxNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let mut max_val = 0;
+        if (self.first_run) {
+            let mut max_val = 0;
 
-        while let Some((t, v)) = self.child.next_vector(conn) {
-            max_val = max(max_val, v);
+            while let Some((t, v)) = self.child.next_vector(conn) {
+                max_val = max(max_val, v);
+            }
+
+            self.first_run = false;
+            Some(max_val)
+        } else {
+            None
         }
-
-        Some(max_val)
     }
 
     fn return_type(&self) -> TachyonResultType {
@@ -710,112 +775,122 @@ impl ExecutorNode for MaxNode {
     }
 }
 
-#[derive(Eq)]
-struct ValueOrderedVector(Timestamp, Value); // implements Ord to order by Value (rather than Timestamp)
-
-impl PartialEq for ValueOrderedVector {
-    fn eq(&self, other: &Self) -> bool {
-        self.1 == other.1
-    }
-}
-
-impl Ord for ValueOrderedVector {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.1.cmp(&other.1)
-    }
-}
-
-impl PartialOrd for ValueOrderedVector {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 pub struct BottomKNode {
+    child: Box<TNode>,
+    param: Box<TNode>,
+    bottomk: Vec<Value>,
     ix: usize,
-    bottomk: Vec<(Timestamp, Value)>,
+    first_run: bool,
 }
 
 impl BottomKNode {
-    pub fn new(conn: &mut Connection, mut child: Box<TNode>, mut param: Box<TNode>) -> Self {
-        let k = param.next_scalar(conn).unwrap();
-        let mut maxheap: BinaryHeap<ValueOrderedVector> = BinaryHeap::new();
-
-        // Find (up to) k smallest values
-        // Newer values overwrite older values in case of ties
-        if (k > 0) {
-            while let Some((t, v)) = child.next_vector(conn) {
-                if (maxheap.len() < k.try_into().unwrap()) {
-                    maxheap.push(ValueOrderedVector(t, v));
-                } else if (v <= maxheap.peek().unwrap().1) {
-                    maxheap.pop();
-                    maxheap.push(ValueOrderedVector(t, v));
-                }
-            }
+    pub fn new(child: Box<TNode>, param: Box<TNode>) -> Self {
+        Self {
+            child,
+            param,
+            bottomk: Vec::new(),
+            ix: 0,
+            first_run: true,
         }
-
-        // Re-sort values by timestamp
-        let mut bottomk: Vec<(Timestamp, Value)> =
-            maxheap.into_iter().map(|x| (x.0, x.1)).collect();
-        bottomk.sort();
-
-        Self { ix: 0, bottomk }
     }
 }
 
 impl ExecutorNode for BottomKNode {
-    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
-        if (self.ix >= self.bottomk.len()) {
-            None
-        } else {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        if (self.first_run) {
+            let k = self.param.next_scalar(conn).unwrap();
+            let mut maxheap: BinaryHeap<Value> = BinaryHeap::new();
+
+            // Find (up to) k smallest values
+            if (k > 0) {
+                while let Some((t, v)) = self.child.next_vector(conn) {
+                    if (maxheap.len() < k as usize) {
+                        maxheap.push(v);
+                    } else if (v < *maxheap.peek().unwrap()) {
+                        maxheap.pop();
+                        maxheap.push(v);
+                    }
+                }
+            }
+
+            // Re-sort values by timestamp
+            self.bottomk = maxheap.into_iter().collect();
+            self.bottomk.sort();
+
+            self.first_run = false;
+        }
+
+        if (self.ix < self.bottomk.len()) {
             let next = self.bottomk[self.ix];
             self.ix += 1;
             Some(next)
+        } else {
+            None
         }
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
     }
 }
 
 pub struct TopKNode {
+    child: Box<TNode>,
+    param: Box<TNode>,
+    topk: Vec<Value>,
     ix: usize,
-    topk: Vec<(Timestamp, Value)>,
+    first_run: bool,
 }
 
 impl TopKNode {
-    pub fn new(conn: &mut Connection, mut child: Box<TNode>, mut param: Box<TNode>) -> Self {
-        let k = param.next_scalar(conn).unwrap();
-        let mut minheap: BinaryHeap<Reverse<ValueOrderedVector>> = BinaryHeap::new();
-
-        // Find (up to) k largest values
-        // Newer values overwrite older values in case of ties
-        if (k > 0) {
-            while let Some((t, v)) = child.next_vector(conn) {
-                if (minheap.len() < k.try_into().unwrap()) {
-                    minheap.push(Reverse(ValueOrderedVector(t, v)));
-                } else if (v >= minheap.peek().unwrap().0 .1) {
-                    minheap.pop();
-                    minheap.push(Reverse(ValueOrderedVector(t, v)));
-                }
-            }
+    pub fn new(child: Box<TNode>, param: Box<TNode>) -> Self {
+        Self {
+            child,
+            param,
+            topk: Vec::new(),
+            ix: 0,
+            first_run: true,
         }
-
-        // Re-sort values by timestamp
-        let mut topk: Vec<(Timestamp, Value)> =
-            minheap.into_iter().map(|x| (x.0 .0, x.0 .1)).collect();
-        topk.sort();
-
-        Self { ix: 0, topk }
     }
 }
 
 impl ExecutorNode for TopKNode {
-    fn next_vector(&mut self, conn: &mut Connection) -> Option<(Timestamp, Value)> {
-        if (self.ix >= self.topk.len()) {
-            None
-        } else {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        if (self.first_run) {
+            let k = self.param.next_scalar(conn).unwrap();
+            let mut minheap: BinaryHeap<Reverse<Value>> = BinaryHeap::new();
+
+            // Find (up to) k largest values
+            if (k > 0) {
+                while let Some((t, v)) = self.child.next_vector(conn) {
+                    if (minheap.len() < k as usize) {
+                        minheap.push(Reverse(v));
+                    } else if (v > minheap.peek().unwrap().0) {
+                        minheap.pop();
+                        minheap.push(Reverse(v));
+                    }
+                }
+            }
+
+            // Re-sort values by timestamp
+            self.topk = minheap.into_iter().map(|x| x.0).collect();
+            self.topk.sort();
+            self.topk.reverse();
+
+            self.first_run = false;
+        }
+
+        if (self.ix < self.topk.len()) {
             let next = self.topk[self.ix];
             self.ix += 1;
             Some(next)
+        } else {
+            None
         }
+    }
+
+    fn return_type(&self) -> TachyonResultType {
+        TachyonResultType::Scalar
     }
 }
 

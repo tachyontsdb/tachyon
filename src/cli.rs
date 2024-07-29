@@ -97,7 +97,13 @@ fn handle_query_command(conn: &mut Connection, query: String, path_opt: Option<S
     let mut stmt = conn.prepare(&query, Some(0), Some(1719776339748));
 
     match stmt.return_type() {
-        TachyonResultType::Scalar => println!("{}", stmt.next_scalar().unwrap()),
+        TachyonResultType::Scalar => loop {
+            let val = stmt.next_scalar();
+            if val.is_none() {
+                break;
+            }
+            println!("{}", val.unwrap());
+        },
         TachyonResultType::Vector => {
             let mut timeseries = Vec::<(f32, f32)>::new();
 
