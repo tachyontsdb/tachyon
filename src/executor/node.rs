@@ -92,25 +92,25 @@ impl ExecutorNode for TNode {
 
 pub struct NumberLiteralNode {
     val: Value,
-    has_returned: bool,
+    first_run: bool,
 }
 
 impl NumberLiteralNode {
     pub fn new(val: f64) -> Self {
         Self {
             val: val as Value, // TODO: Allow for floats
-            has_returned: false,
+            first_run: true,
         }
     }
 }
 
 impl ExecutorNode for NumberLiteralNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        if (self.has_returned) {
-            None
-        } else {
-            self.has_returned = true;
+        if (self.first_run) {
+            self.first_run = false;
             Some(self.val)
+        } else {
+            None
         }
     }
 
@@ -371,23 +371,21 @@ impl ExecutorNode for VectorToVectorNode {
 
 pub struct SumNode {
     child: Box<TNode>,
-    has_returned: bool,
+    first_run: bool,
 }
 
 impl SumNode {
     pub fn new(child: Box<TNode>) -> Self {
         Self {
             child,
-            has_returned: false,
+            first_run: true,
         }
     }
 }
 
 impl ExecutorNode for SumNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        if (self.has_returned) {
-            None
-        } else {
+        if (self.first_run) {
             let first_vector = self.child.next_vector(conn);
 
             first_vector?;
@@ -398,8 +396,10 @@ impl ExecutorNode for SumNode {
                 sum += v;
             }
 
-            self.has_returned = true;
+            self.first_run = false;
             Some(sum)
+        } else {
+            None
         }
     }
 
@@ -410,23 +410,21 @@ impl ExecutorNode for SumNode {
 
 pub struct CountNode {
     child: Box<TNode>,
-    has_returned: bool,
+    first_run: bool,
 }
 
 impl CountNode {
     pub fn new(child: Box<TNode>) -> Self {
         Self {
             child,
-            has_returned: false,
+            first_run: true,
         }
     }
 }
 
 impl ExecutorNode for CountNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        if (self.has_returned) {
-            None
-        } else {
+        if (self.first_run) {
             let first_vector = self.child.next_vector(conn);
 
             first_vector?;
@@ -445,8 +443,10 @@ impl ExecutorNode for CountNode {
                 }
             }
 
-            self.has_returned = true;
+            self.first_run = false;
             Some(count)
+        } else {
+            None
         }
     }
 
@@ -458,7 +458,7 @@ impl ExecutorNode for CountNode {
 pub struct AverageNode {
     sum: Box<SumNode>,
     count: Box<CountNode>,
-    has_returned: bool,
+    first_run: bool,
 }
 
 impl AverageNode {
@@ -466,25 +466,25 @@ impl AverageNode {
         Self {
             sum,
             count,
-            has_returned: false,
+            first_run: true,
         }
     }
 }
 
 impl ExecutorNode for AverageNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        if (self.has_returned) {
-            None
-        } else {
+        if (self.first_run) {
             let mut total = 0;
             let sum_opt = self.sum.next_scalar(conn);
             let count_opt = self.count.next_scalar(conn);
 
-            self.has_returned = true;
+            self.first_run = false;
             match (sum_opt, count_opt) {
                 (Some(sum), Some(count)) if count != 0 => Some(sum / count), // TODO: Allow for floats
                 _ => None,
             }
+        } else {
+            None
         }
     }
 
@@ -495,23 +495,21 @@ impl ExecutorNode for AverageNode {
 
 pub struct MinNode {
     child: Box<TNode>,
-    has_returned: bool,
+    first_run: bool,
 }
 
 impl MinNode {
     pub fn new(child: Box<TNode>) -> Self {
         Self {
             child,
-            has_returned: false,
+            first_run: true,
         }
     }
 }
 
 impl ExecutorNode for MinNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        if (self.has_returned) {
-            None
-        } else {
+        if (self.first_run) {
             let mut is_first_value = true;
             let mut min_val = 0;
 
@@ -524,8 +522,10 @@ impl ExecutorNode for MinNode {
                 min_val = min(min_val, v);
             }
 
-            self.has_returned = true;
+            self.first_run = false;
             Some(min_val)
+        } else {
+            None
         }
     }
 
@@ -536,31 +536,31 @@ impl ExecutorNode for MinNode {
 
 pub struct MaxNode {
     child: Box<TNode>,
-    has_returned: bool,
+    first_run: bool,
 }
 
 impl MaxNode {
     pub fn new(child: Box<TNode>) -> Self {
         Self {
             child,
-            has_returned: false,
+            first_run: true,
         }
     }
 }
 
 impl ExecutorNode for MaxNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        if (self.has_returned) {
-            None
-        } else {
+        if (self.first_run) {
             let mut max_val = 0;
 
             while let Some((t, v)) = self.child.next_vector(conn) {
                 max_val = max(max_val, v);
             }
 
-            self.has_returned = true;
+            self.first_run = false;
             Some(max_val)
+        } else {
+            None
         }
     }
 
@@ -570,44 +570,57 @@ impl ExecutorNode for MaxNode {
 }
 
 pub struct BottomKNode {
-    ix: usize,
+    child: Box<TNode>,
+    param: Box<TNode>,
     bottomk: Vec<Value>,
+    ix: usize,
+    first_run: bool,
 }
 
 impl BottomKNode {
-    pub fn new(conn: &mut Connection, mut child: Box<TNode>, mut param: Box<TNode>) -> Self {
-        let k = param.next_scalar(conn).unwrap();
-        let mut maxheap: BinaryHeap<Value> = BinaryHeap::new();
-
-        // Find (up to) k smallest values
-        // Newer values overwrite older values in case of ties
-        if (k > 0) {
-            while let Some((t, v)) = child.next_vector(conn) {
-                if (maxheap.len() < k.try_into().unwrap()) {
-                    maxheap.push(v);
-                } else if (v < *maxheap.peek().unwrap()) {
-                    maxheap.pop();
-                    maxheap.push(v);
-                }
-            }
+    pub fn new(child: Box<TNode>, param: Box<TNode>) -> Self {
+        Self {
+            child,
+            param,
+            bottomk: Vec::new(),
+            ix: 0,
+            first_run: true,
         }
-
-        // Re-sort values by timestamp
-        let mut bottomk: Vec<Value> = maxheap.into_iter().collect();
-        bottomk.sort();
-
-        Self { ix: 0, bottomk }
     }
 }
 
 impl ExecutorNode for BottomKNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        if (self.ix >= self.bottomk.len()) {
-            None
-        } else {
+        if (self.first_run) {
+            let k = self.param.next_scalar(conn).unwrap();
+            let mut maxheap: BinaryHeap<Value> = BinaryHeap::new();
+
+            // Find (up to) k smallest values
+            // Newer values overwrite older values in case of ties
+            if (k > 0) {
+                while let Some((t, v)) = self.child.next_vector(conn) {
+                    if (maxheap.len() < k.try_into().unwrap()) {
+                        maxheap.push(v);
+                    } else if (v < *maxheap.peek().unwrap()) {
+                        maxheap.pop();
+                        maxheap.push(v);
+                    }
+                }
+            }
+
+            // Re-sort values by timestamp
+            self.bottomk = maxheap.into_iter().collect();
+            self.bottomk.sort();
+
+            self.first_run = false;
+        }
+
+        if (self.ix < self.bottomk.len()) {
             let next = self.bottomk[self.ix];
             self.ix += 1;
             Some(next)
+        } else {
+            None
         }
     }
 
@@ -617,45 +630,58 @@ impl ExecutorNode for BottomKNode {
 }
 
 pub struct TopKNode {
-    ix: usize,
+    child: Box<TNode>,
+    param: Box<TNode>,
     topk: Vec<Value>,
+    ix: usize,
+    first_run: bool,
 }
 
 impl TopKNode {
-    pub fn new(conn: &mut Connection, mut child: Box<TNode>, mut param: Box<TNode>) -> Self {
-        let k = param.next_scalar(conn).unwrap();
-        let mut minheap: BinaryHeap<Reverse<Value>> = BinaryHeap::new();
-
-        // Find (up to) k largest values
-        // Newer values overwrite older values in case of ties
-        if (k > 0) {
-            while let Some((t, v)) = child.next_vector(conn) {
-                if (minheap.len() < k.try_into().unwrap()) {
-                    minheap.push(Reverse(v));
-                } else if (v > minheap.peek().unwrap().0) {
-                    minheap.pop();
-                    minheap.push(Reverse(v));
-                }
-            }
+    pub fn new(child: Box<TNode>, param: Box<TNode>) -> Self {
+        Self {
+            child,
+            param,
+            topk: Vec::new(),
+            ix: 0,
+            first_run: true,
         }
-
-        // Re-sort values by timestamp
-        let mut topk: Vec<Value> = minheap.into_iter().map(|x| x.0).collect();
-        topk.sort();
-        topk.reverse();
-
-        Self { ix: 0, topk }
     }
 }
 
 impl ExecutorNode for TopKNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        if (self.ix >= self.topk.len()) {
-            None
-        } else {
+        if (self.first_run) {
+            let k = self.param.next_scalar(conn).unwrap();
+            let mut minheap: BinaryHeap<Reverse<Value>> = BinaryHeap::new();
+
+            // Find (up to) k largest values
+            // Newer values overwrite older values in case of ties
+            if (k > 0) {
+                while let Some((t, v)) = self.child.next_vector(conn) {
+                    if (minheap.len() < k.try_into().unwrap()) {
+                        minheap.push(Reverse(v));
+                    } else if (v > minheap.peek().unwrap().0) {
+                        minheap.pop();
+                        minheap.push(Reverse(v));
+                    }
+                }
+            }
+
+            // Re-sort values by timestamp
+            self.topk = minheap.into_iter().map(|x| x.0).collect();
+            self.topk.sort();
+            self.topk.reverse();
+
+            self.first_run = false;
+        }
+
+        if (self.ix < self.topk.len()) {
             let next = self.topk[self.ix];
             self.ix += 1;
             Some(next)
+        } else {
+            None
         }
     }
 

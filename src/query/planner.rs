@@ -61,22 +61,20 @@ impl<'a> QueryPlanner<'a> {
             parser::token::T_MAX => Ok(TNode::Max(MaxNode::new(Box::new(
                 self.handle_expr(&expr.expr, conn, ScanHint::Max).unwrap(),
             )))),
-            parser::token::T_BOTTOMK => {
-                let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None).unwrap());
-                let param = Box::new(
+            parser::token::T_BOTTOMK => Ok(TNode::BottomK(BottomKNode::new(
+                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None).unwrap()),
+                Box::new(
                     self.handle_expr(expr.param.as_ref().unwrap(), conn, ScanHint::None)
                         .unwrap(),
-                );
-                Ok(TNode::BottomK(BottomKNode::new(conn, child, param)))
-            }
-            parser::token::T_TOPK => {
-                let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None).unwrap());
-                let param = Box::new(
+                ),
+            ))),
+            parser::token::T_TOPK => Ok(TNode::TopK(TopKNode::new(
+                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None).unwrap()),
+                Box::new(
                     self.handle_expr(expr.param.as_ref().unwrap(), conn, ScanHint::None)
                         .unwrap(),
-                );
-                Ok(TNode::TopK(TopKNode::new(conn, child, param)))
-            }
+                ),
+            ))),
             _ => panic!("Unknown aggregation token."),
         }
     }
