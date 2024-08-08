@@ -1,0 +1,6 @@
+language = "C++"
+include_guard = "TACHYON_H"
+pragma_once = true
+namespace = "tachyon"
+
+usize_is_size_t = true
