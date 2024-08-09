@@ -1,6 +1,9 @@
+use crate::storage::page_cache::PageCache;
+use std::cell::RefCell;
 use std::fmt::Debug;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use uuid::Uuid;
 
 pub type Timestamp = u64;
@@ -13,6 +16,18 @@ pub enum ValueType {
     Float64,
 }
 
+impl TryFrom<u64> for ValueType {
+    type Error = ();
+    fn try_from(value: u64) -> Result<Self, ()> {
+        match value {
+            0 => Ok(ValueType::Integer64),
+            1 => Ok(ValueType::UInteger64),
+            2 => Ok(ValueType::Float64),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum ReturnType {
@@ -20,11 +35,18 @@ pub enum ReturnType {
     Vector,
 }
 
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub union Value {
     pub integer64: i64,
     pub uinteger64: u64,
     pub float64: f64,
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        unsafe { self.uinteger64 == other.uinteger64 }
+    }
 }
 
 impl Debug for Value {
@@ -33,7 +55,7 @@ impl Debug for Value {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 #[repr(C)]
 pub struct Vector {
     pub timestamp: Timestamp,
@@ -42,9 +64,9 @@ pub struct Vector {
 
 pub struct Connection {
     db_dir: PathBuf,
-    page_cache: PageCache,
-    indexer: Indexer,
-    writer: Writer,
+    page_cache: Rc<RefCell<PageCache>>,
+    indexer: Rc<RefCell<Indexer>>,
+    writer: Rc<RefCell<Writer>>,
 }
 
 impl Connection {
@@ -53,9 +75,9 @@ impl Connection {
 
         Self {
             db_dir: db_dir.as_ref().to_path_buf(),
-            page_cache: PageCache,
-            indexer: Indexer,
-            writer: Writer,
+            page_cache: Rc::new(RefCell::new(PageCache::new(10))),
+            indexer: todo!(),
+            writer: todo!(),
         }
     }
 
@@ -146,3 +168,6 @@ impl Query {
 }
 
 mod ffi;
+
+mod storage;
+mod utils;
