@@ -1,8 +1,9 @@
 mod compression;
-mod file;
 mod hash_map;
 
+pub mod file;
 pub mod page_cache;
+pub mod writer;
 
 /// Varint decoding
 pub struct FileReaderUtils;

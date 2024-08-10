@@ -1,4 +1,5 @@
 use crate::storage::page_cache::PageCache;
+use crate::storage::writer::Writer;
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::fs;
@@ -52,7 +53,7 @@ impl Default for Value {
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
-        unsafe { self.uinteger64 == other.uinteger64 }
+        self.get_uinteger64() == other.get_uinteger64()
     }
 }
 
@@ -76,21 +77,51 @@ impl From<f64> for Value {
 
 impl Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        unsafe { f.write_fmt(format_args!("u64r {}", self.uinteger64)) }
+        f.write_fmt(format_args!("u64r {}", self.get_uinteger64()))
     }
 }
 
 impl Value {
+    #[inline]
     pub fn get_integer64(&self) -> i64 {
         unsafe { self.integer64 }
     }
 
+    #[inline]
     pub fn get_uinteger64(&self) -> u64 {
         unsafe { self.uinteger64 }
     }
 
+    #[inline]
     pub fn get_float64(&self) -> f64 {
         unsafe { self.float64 }
+    }
+
+    pub fn add(
+        &self,
+        value_type_self: ValueType,
+        other: &Value,
+        value_type_other: ValueType,
+    ) -> Self {
+        todo!();
+    }
+
+    pub fn min(
+        &self,
+        value_type_self: ValueType,
+        other: &Value,
+        value_type_other: ValueType,
+    ) -> Self {
+        todo!();
+    }
+
+    pub fn max(
+        &self,
+        value_type_self: ValueType,
+        other: &Value,
+        value_type_other: ValueType,
+    ) -> Self {
+        todo!();
     }
 }
 

@@ -241,7 +241,7 @@ mod tests {
     use super::{page_cache_sequential_read, PageCache};
     use crate::storage::file::TimeDataFile;
     use crate::utils::test::*;
-    use crate::{Timestamp, Value};
+    use crate::{Timestamp, ValueType};
     use std::cell::RefCell;
     use std::fs::File;
     use std::io::{Read, Write};
@@ -252,9 +252,9 @@ mod tests {
         set_up_files!(file_paths, "test.ty", "expected.ty");
 
         let mut page_cache = PageCache::new(10);
-        let mut model = TimeDataFile::new();
+        let mut model = TimeDataFile::new(0, ValueType::UInteger64);
         for i in 0..100000u64 {
-            model.write_data_to_file_in_mem(i, i + 10);
+            model.write_data_to_file_in_mem(i, (i + 10).into());
         }
         let file_size = model.write(file_paths[0].clone());
         // Start the test
@@ -272,8 +272,7 @@ mod tests {
         assert_eq!(data_file.timestamps.len(), 100000);
         for i in 0..data_file.timestamps.len() {
             assert_eq!(data_file.timestamps[i], i as Timestamp);
-            let value = Value { uinteger64: i + 10 };
-            assert_eq!(data_file.values[i], value);
+            assert_eq!(data_file.values[i], ((i + 10) as u64).into());
         }
     }
 
@@ -282,9 +281,9 @@ mod tests {
         set_up_files!(file_paths, "test.ty", "expected.ty");
 
         let mut page_cache = PageCache::new(10);
-        let mut model = TimeDataFile::new();
+        let mut model = TimeDataFile::new(0, ValueType::UInteger64);
         for i in 0..100000u64 {
-            model.write_data_to_file_in_mem(i, i + 10);
+            model.write_data_to_file_in_mem(i, (i + 10).into());
         }
         let file_size = model.write(file_paths[0].clone());
         // Start the test
@@ -298,7 +297,7 @@ mod tests {
         let mut bytes_read = 0;
 
         while bytes_read < file_size {
-            // read 8 bytes at a time
+            // Read 8 bytes at a time
             bytes_read += seq_read
                 .read(&mut buffer[bytes_read..(bytes_read + 8).min(file_size)])
                 .unwrap();
@@ -312,8 +311,7 @@ mod tests {
         assert_eq!(data_file.timestamps.len(), 100000);
         for i in 0..data_file.timestamps.len() {
             assert_eq!(data_file.timestamps[i], i as Timestamp);
-            let value = Value { uinteger64: i + 10 };
-            assert_eq!(data_file.values[i], value);
+            assert_eq!(data_file.values[i], ((i + 10) as u64).into());
         }
     }
 }
