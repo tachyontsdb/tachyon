@@ -103,7 +103,15 @@ impl Value {
         other: &Value,
         value_type_other: ValueType,
     ) -> Self {
+        if value_type_self == value_type_other {
+            todo!();
+        }
+
         todo!();
+    }
+
+    pub fn add_same(&self, value_type: ValueType, other: &Value) -> Self {
+        self.add(value_type, other, value_type)
     }
 
     pub fn min(
@@ -112,7 +120,15 @@ impl Value {
         other: &Value,
         value_type_other: ValueType,
     ) -> Self {
+        if value_type_self == value_type_other {
+            todo!();
+        }
+
         todo!();
+    }
+
+    pub fn min_same(&self, value_type: ValueType, other: &Value) -> Self {
+        self.min(value_type, other, value_type)
     }
 
     pub fn max(
@@ -121,7 +137,15 @@ impl Value {
         other: &Value,
         value_type_other: ValueType,
     ) -> Self {
+        if value_type_self == value_type_other {
+            todo!();
+        }
+
         todo!();
+    }
+
+    pub fn max_same(&self, value_type: ValueType, other: &Value) -> Self {
+        self.max(value_type, other, value_type)
     }
 }
 

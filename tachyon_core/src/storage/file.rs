@@ -410,6 +410,7 @@ impl TimeDataFile {
         header_bytes + comp_engine.bytes_compressed()
     }
 
+    /// Precondition: The ValueType of value must be the same as self.header.value_type
     pub fn write_data_to_file_in_mem(&mut self, timestamp: Timestamp, value: Value) {
         if self.header.count == 0 {
             self.header.first_value = value;
@@ -424,62 +425,25 @@ impl TimeDataFile {
         self.header.max_timestamp = Timestamp::max(self.header.max_timestamp, timestamp);
         self.header.min_timestamp = Timestamp::min(self.header.min_timestamp, timestamp);
 
-        match self.header.value_type {
-            ValueType::UInteger64 => {
-                self.header.value_sum =
-                    (self.header.value_sum.get_uinteger64() + value.get_uinteger64()).into();
-                self.header.max_value = self
-                    .header
-                    .max_value
-                    .get_uinteger64()
-                    .max(value.get_uinteger64())
-                    .into();
-                self.header.min_value = self
-                    .header
-                    .min_value
-                    .get_uinteger64()
-                    .min(value.get_uinteger64())
-                    .into();
-            }
-            ValueType::Integer64 => {
-                self.header.value_sum =
-                    (self.header.value_sum.get_integer64() + value.get_integer64()).into();
-                self.header.max_value = self
-                    .header
-                    .max_value
-                    .get_integer64()
-                    .max(value.get_integer64())
-                    .into();
-                self.header.min_value = self
-                    .header
-                    .min_value
-                    .get_integer64()
-                    .min(value.get_integer64())
-                    .into();
-            }
-            ValueType::Float64 => {
-                self.header.value_sum =
-                    (self.header.value_sum.get_float64() + value.get_float64()).into();
-                self.header.max_value = self
-                    .header
-                    .max_value
-                    .get_float64()
-                    .max(value.get_float64())
-                    .into();
-                self.header.min_value = self
-                    .header
-                    .min_value
-                    .get_float64()
-                    .min(value.get_float64())
-                    .into();
-            }
-        }
+        self.header.value_sum = self
+            .header
+            .value_sum
+            .add_same(self.header.value_type, &value);
+        self.header.max_value = self
+            .header
+            .max_value
+            .max_same(self.header.value_type, &value);
+        self.header.min_value = self
+            .header
+            .min_value
+            .min_same(self.header.value_type, &value);
 
         self.timestamps.push(timestamp);
         self.values.push(value);
     }
 
-    // Returns the number of entries written in memory
+    /// Precondition: The ValueType of all the vectors in the batch must be the same as self.header.value_type
+    /// Returns the number of entries written in memory
     pub fn write_batch_data_to_file_in_mem(&mut self, batch: &[Vector]) -> usize {
         let space = MAX_NUM_ENTRIES - self.num_entries();
         let n = usize::min(space, batch.len());
