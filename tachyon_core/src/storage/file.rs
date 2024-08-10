@@ -352,9 +352,9 @@ pub struct TimeDataFile {
 }
 
 impl TimeDataFile {
-    pub fn new(version: u16, value_type: ValueType) -> Self {
+    pub fn new(version: u16, stream_id: u64, value_type: ValueType) -> Self {
         Self {
-            header: Header::new(version, 0u64, value_type),
+            header: Header::new(version, stream_id, value_type),
             timestamps: Vec::new(),
             values: Vec::new(),
         }
@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn test_write() {
         set_up_files!(paths, "cool.ty");
-        let mut model = TimeDataFile::new(0, ValueType::UInteger64);
+        let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
         for i in 0..10u64 {
             model.write_data_to_file_in_mem(i, (i + 10).into());
         }
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn test_cursor() {
         set_up_files!(paths, "1.ty");
-        let mut model = TimeDataFile::new(0, ValueType::UInteger64);
+        let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
         for i in 0..10u64 {
             model.write_data_to_file_in_mem(i, (i + 10).into());
         }

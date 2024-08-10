@@ -252,7 +252,7 @@ mod tests {
         set_up_files!(file_paths, "test.ty", "expected.ty");
 
         let mut page_cache = PageCache::new(10);
-        let mut model = TimeDataFile::new(0, ValueType::UInteger64);
+        let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
         for i in 0..100000u64 {
             model.write_data_to_file_in_mem(i, (i + 10).into());
         }
@@ -281,7 +281,7 @@ mod tests {
         set_up_files!(file_paths, "test.ty", "expected.ty");
 
         let mut page_cache = PageCache::new(10);
-        let mut model = TimeDataFile::new(0, ValueType::UInteger64);
+        let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
         for i in 0..100000u64 {
             model.write_data_to_file_in_mem(i, (i + 10).into());
         }

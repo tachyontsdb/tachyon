@@ -1,4 +1,4 @@
-use crate::Timestamp;
+use crate::{Timestamp, ValueType};
 use promql_parser::label::Matchers;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -7,9 +7,10 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 // SQLite Store Constants
-const SQLITE_DB_NAME: &str = "indexer.sqlite";
-const SQLITE_STREAM_TO_IDS_TABLE: &str = "stream_to_ids";
-const SQLITE_ID_TO_FILENAME_TABLE: &str = "id_to_file";
+const SQLITE_DB_NAME: &'static str = "indexer.sqlite";
+const SQLITE_STREAM_TO_IDS_TABLE: &'static str = "stream_to_ids";
+const SQLITE_ID_TO_FILENAME_TABLE: &'static str = "id_to_file";
+const SQLITE_ID_TO_VALUE_TYPE_TABLE: &'static str = "id_to_value_type";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct IdsEntry {
@@ -19,7 +20,7 @@ pub struct IdsEntry {
 trait IndexerStore {
     fn create_store(&mut self);
     fn drop_store(&mut self);
-    fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid;
+    fn insert_new_id(&mut self, stream: &str, matchers: &Matchers, value_type: ValueType) -> Uuid;
     fn insert_new_file(&self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp);
     fn get_ids(&self, name: &str, value: &str) -> IdsEntry;
     fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<Uuid>>;
@@ -29,6 +30,7 @@ trait IndexerStore {
         start: Timestamp,
         end: Timestamp,
     ) -> Vec<PathBuf>;
+    fn get_value_type_for_stream_id(&self, stream_id: Uuid) -> Option<ValueType>;
 }
 
 struct SQLiteIndexerStore {
@@ -55,13 +57,13 @@ impl IndexerStore for SQLiteIndexerStore {
             .execute(
                 &format!(
                     "
-                CREATE TABLE {} (
-                    name TEXT,
-                    value TEXT,
-                    ids TEXT,
-                    PRIMARY KEY (name, value)
-                )
-                ",
+                        CREATE TABLE IF NOT EXISTS {} (
+                            name TEXT,
+                            value TEXT,
+                            ids TEXT,
+                            PRIMARY KEY (name, value)
+                        )
+                    ",
                     SQLITE_STREAM_TO_IDS_TABLE
                 ),
                 (),
@@ -72,15 +74,31 @@ impl IndexerStore for SQLiteIndexerStore {
             .execute(
                 &format!(
                     "
-                CREATE TABLE {} (
-                    id INTEGER,
-                    filename TEXT,
-                    start INTEGER,
-                    end INTEGER,
-                    PRIMARY KEY (id, filename)
-                )
-                ",
+                        CREATE TABLE IF NOT EXISTS {} (
+                            id INTEGER,
+                            filename TEXT,
+                            start INTEGER,
+                            end INTEGER,
+                            PRIMARY KEY (id, filename)
+                        )
+                    ",
                     SQLITE_ID_TO_FILENAME_TABLE
+                ),
+                (),
+            )
+            .unwrap();
+
+        transaction
+            .execute(
+                &format!(
+                    "
+                        CREATE TABLE IF NOT EXISTS {} (
+                            id TEXT,
+                            value_type INTEGER,
+                            PRIMARY KEY (id)
+                        )
+                    ",
+                    SQLITE_ID_TO_VALUE_TYPE_TABLE
                 ),
                 (),
             )
@@ -94,14 +112,14 @@ impl IndexerStore for SQLiteIndexerStore {
 
         transaction
             .execute(
-                &format!("DROP TABLE if exists {}", SQLITE_STREAM_TO_IDS_TABLE),
+                &format!("DROP TABLE IF EXISTS {}", SQLITE_STREAM_TO_IDS_TABLE),
                 (),
             )
             .unwrap();
 
         transaction
             .execute(
-                &format!("DROP TABLE if exists {}", SQLITE_ID_TO_FILENAME_TABLE),
+                &format!("DROP TABLE IF EXISTS {}", SQLITE_ID_TO_FILENAME_TABLE),
                 (),
             )
             .unwrap();
@@ -109,7 +127,7 @@ impl IndexerStore for SQLiteIndexerStore {
         transaction.commit().unwrap();
     }
 
-    fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid {
+    fn insert_new_id(&mut self, stream: &str, matchers: &Matchers, value_type: ValueType) -> Uuid {
         let new_id = Uuid::new_v4();
 
         // Get old ids and add new one
@@ -126,6 +144,7 @@ impl IndexerStore for SQLiteIndexerStore {
 
         // Commit changes to db
         let transaction = self.conn.transaction().unwrap();
+
         let mut stmt = transaction
             .prepare(&format!(
                 "INSERT OR REPLACE INTO {} (name, value, ids) VALUES (?, ?, ?)",
@@ -143,6 +162,16 @@ impl IndexerStore for SQLiteIndexerStore {
                 .unwrap();
         }
 
+        transaction
+            .execute(
+                &format!(
+                    "INSERT INTO {} (id, value_type) VALUES (?, ?)",
+                    SQLITE_ID_TO_VALUE_TYPE_TABLE
+                ),
+                (serde_json::to_string(&new_id).unwrap(), value_type as u8),
+            )
+            .unwrap();
+
         drop(stmt);
         transaction.commit().unwrap();
 
@@ -153,7 +182,7 @@ impl IndexerStore for SQLiteIndexerStore {
         self.conn
             .execute(
                 &format!(
-                    "INSERT INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
+                    "INSERT OR REPLACE INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
                     SQLITE_ID_TO_FILENAME_TABLE
                 ),
                 (id, file.to_str(), start, end),
@@ -180,7 +209,7 @@ impl IndexerStore for SQLiteIndexerStore {
     }
 
     fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<Uuid>> {
-        let mut ids: Vec<HashSet<Uuid>> = vec![];
+        let mut ids = Vec::<HashSet<Uuid>>::new();
 
         ids.push(self.get_ids("__name", stream).ids);
         for matcher in &matchers.matchers {
@@ -217,6 +246,22 @@ impl IndexerStore for SQLiteIndexerStore {
 
         paths
     }
+
+    fn get_value_type_for_stream_id(&self, stream_id: Uuid) -> Option<ValueType> {
+        self.conn
+            .query_row(
+                &format!(
+                    "SELECT value_type FROM {} WHERE id = ?",
+                    SQLITE_ID_TO_VALUE_TYPE_TABLE
+                ),
+                [serde_json::to_string(&stream_id).unwrap()],
+                |row| row.get(0),
+            )
+            .map_or_else(
+                |_| None,
+                |value_type: u8| Some(value_type.try_into().unwrap()),
+            )
+    }
 }
 
 pub struct Indexer {
@@ -225,10 +270,10 @@ pub struct Indexer {
 }
 
 impl Indexer {
-    pub fn new(root_dir: PathBuf) -> Self {
+    pub fn new(root_dir: impl AsRef<Path>) -> Self {
         Self {
             store: Box::new(SQLiteIndexerStore::new(&root_dir)),
-            root_dir,
+            root_dir: root_dir.as_ref().to_path_buf(),
         }
     }
 
@@ -240,8 +285,17 @@ impl Indexer {
         self.store.drop_store();
     }
 
-    pub fn insert_new_id(&mut self, stream: &str, matchers: &Matchers) -> Uuid {
-        self.store.insert_new_id(stream, matchers)
+    pub fn insert_new_id(
+        &mut self,
+        stream: &str,
+        matchers: &Matchers,
+        value_type: ValueType,
+    ) -> Uuid {
+        self.store.insert_new_id(stream, matchers, value_type)
+    }
+
+    pub fn get_stream_value_type(&self, id: Uuid) -> Option<ValueType> {
+        self.store.get_value_type_for_stream_id(id)
     }
 
     pub fn insert_new_file(&self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
@@ -287,6 +341,7 @@ impl Indexer {
 mod tests {
     use super::Indexer;
     use crate::utils::test::set_up_dirs;
+    use crate::ValueType;
     use promql_parser::label::{MatchOp, Matcher, Matchers};
     use std::collections::HashSet;
     use std::path::PathBuf;
@@ -325,7 +380,7 @@ mod tests {
             Matcher::new(MatchOp::Equal, "app", "dummy"),
             Matcher::new(MatchOp::Equal, "service", "backend"),
         ]);
-        let id = indexer.insert_new_id(stream, &matchers);
+        let id = indexer.insert_new_id(stream, &matchers, ValueType::UInteger64);
 
         let file1 = PathBuf::from(format!("{}/{}/file1.ty", dirs[0].to_str().unwrap(), id));
         indexer.insert_new_file(id, &file1, 1, 3);
@@ -365,12 +420,12 @@ mod tests {
             Matcher::new(MatchOp::Equal, "app", "dummy"),
             Matcher::new(MatchOp::Equal, "service", "backend"),
         ]);
-        let id1 = indexer.insert_new_id(stream, &matchers1);
+        let id1 = indexer.insert_new_id(stream, &matchers1, ValueType::UInteger64);
         let matchers2 = Matchers::new(vec![
             Matcher::new(MatchOp::Equal, "app", "dummy"),
             Matcher::new(MatchOp::Equal, "service", "frontend"),
         ]);
-        let id2 = indexer.insert_new_id(stream, &matchers2);
+        let id2 = indexer.insert_new_id(stream, &matchers2, ValueType::UInteger64);
 
         let file1 = PathBuf::from(format!("{}/{}/file1.ty", dirs[0].to_str().unwrap(), id1));
         indexer.insert_new_file(id1, &file1, 1, 4);

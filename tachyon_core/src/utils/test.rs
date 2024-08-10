@@ -3,7 +3,7 @@ use crate::{Timestamp, Value, ValueType};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const TEST_DIR: &str = "tmp";
+pub const TEST_DIR: &str = "../tmp";
 
 macro_rules! set_up_dirs {
     ($dir_var:ident, $($x:expr),+ $(,)? ) => {
@@ -148,7 +148,7 @@ impl Drop for TestFile {
 
 pub fn generate_ty_file(path: PathBuf, timestamps: &[Timestamp], values: &[Value]) {
     assert!(timestamps.len() == values.len());
-    let mut model = TimeDataFile::new(0, ValueType::UInteger64);
+    let mut model = TimeDataFile::new(0, 0u64, ValueType::UInteger64);
 
     for i in 0..timestamps.len() {
         model.write_data_to_file_in_mem(timestamps[i], values[i])

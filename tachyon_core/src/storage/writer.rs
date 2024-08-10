@@ -12,33 +12,24 @@ pub struct Writer {
     open_data_files: HashMap<Uuid, TimeDataFile>, // Stream ID to in-mem file
     root: PathBuf,
     indexer: Rc<RefCell<Indexer>>,
-
     version: u16,
-    value_type: ValueType,
 }
 
 impl Writer {
-    pub fn new(
-        root: PathBuf,
-        indexer: Rc<RefCell<Indexer>>,
-        version: u16,
-        value_type: ValueType,
-    ) -> Self {
+    pub fn new(root: impl AsRef<Path>, indexer: Rc<RefCell<Indexer>>, version: u16) -> Self {
         Writer {
             open_data_files: HashMap::new(),
-            root,
+            root: root.as_ref().to_path_buf(),
             indexer,
-
             version,
-            value_type,
         }
     }
 
-    pub fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value) {
+    pub fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value, value_type: ValueType) {
         let file = self
             .open_data_files
             .entry(stream_id)
-            .or_insert(TimeDataFile::new(self.version, self.value_type));
+            .or_insert(TimeDataFile::new(self.version, 0u64, value_type)); // TODO: Add stream id
 
         file.write_data_to_file_in_mem(ts, v);
         if file.num_entries() >= MAX_NUM_ENTRIES {
@@ -54,7 +45,7 @@ impl Writer {
         }
     }
 
-    pub fn batch_write(&mut self, stream_id: Uuid, batch: &[Vector]) {
+    pub fn batch_write(&mut self, stream_id: Uuid, batch: &[Vector], value_type: ValueType) {
         let mut entries_written: usize = 0;
         let num_entries = batch.len();
 
@@ -62,7 +53,7 @@ impl Writer {
             let file = self
                 .open_data_files
                 .entry(stream_id)
-                .or_insert(TimeDataFile::new(self.version, self.value_type));
+                .or_insert(TimeDataFile::new(self.version, 0u64, value_type)); // TODO: Add stream id
 
             entries_written += file.write_batch_data_to_file_in_mem(&batch[entries_written..]);
 
@@ -158,7 +149,9 @@ mod tests {
         let stream_id = Uuid::new_v4();
 
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        let mut writer = Writer::new(dirs[0].clone(), indexer, 0, ValueType::UInteger64);
+        indexer.borrow_mut().create_store();
+
+        let mut writer = Writer::new(dirs[0].clone(), indexer, 0);
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
@@ -167,7 +160,7 @@ mod tests {
         for i in 0..MAX_NUM_ENTRIES as u64 {
             let ts = i as Timestamp;
             let v = (i * 1000).into();
-            writer.write(stream_id, ts, v);
+            writer.write(stream_id, ts, v, ValueType::UInteger64);
             timestamps.push(ts);
             values.push(v);
         }
@@ -185,7 +178,8 @@ mod tests {
         let stream_ids = [Uuid::new_v4(), Uuid::new_v4()];
 
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        let mut writer = Writer::new(dirs[0].clone(), indexer, 0, ValueType::UInteger64);
+        indexer.borrow_mut().create_store();
+        let mut writer = Writer::new(dirs[0].clone(), indexer, 0);
 
         let mut timestamps = [Vec::<Timestamp>::new(), Vec::<Timestamp>::new()];
         let mut values = [Vec::<Value>::new(), Vec::<Value>::new()];
@@ -198,7 +192,7 @@ mod tests {
             for (j, stream_id) in stream_ids.iter().enumerate() {
                 let ts = i as Timestamp;
                 let v = (i * 1000).into();
-                writer.write(*stream_id, ts, v);
+                writer.write(*stream_id, ts, v, ValueType::UInteger64);
                 timestamps[j].push(ts);
                 values[j].push(v);
             }
@@ -221,7 +215,7 @@ mod tests {
         let mut base: usize = 0;
 
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        let mut writer = Writer::new(dirs[0].clone(), indexer, 0, ValueType::UInteger64);
+        let mut writer = Writer::new(dirs[0].clone(), indexer, 0);
         let mut timestamps_per_file = [
             Vec::<Timestamp>::new(),
             Vec::<Timestamp>::new(),
@@ -253,7 +247,7 @@ mod tests {
                 values_per_file[*count / MAX_NUM_ENTRIES].push(value);
                 *count += 1;
             }
-            writer.batch_write(stream_id, &entries);
+            writer.batch_write(stream_id, &entries, ValueType::UInteger64);
         }
 
         writer.create_stream(stream_id);
