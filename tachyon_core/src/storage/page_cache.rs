@@ -265,7 +265,7 @@ mod tests {
         page_cache.read(file_id, 0, &mut buffer);
 
         let mut new_file = File::create(&file_paths[1]).unwrap();
-        new_file.write_all(&buffer);
+        new_file.write_all(&buffer).unwrap();
 
         let data_file = TimeDataFile::read_data_file(file_paths[1].clone());
 
@@ -304,7 +304,7 @@ mod tests {
         }
 
         let mut new_file = File::create(&file_paths[1]).unwrap();
-        new_file.write_all(&buffer);
+        new_file.write_all(&buffer).unwrap();
 
         let data_file = TimeDataFile::read_data_file(file_paths[1].clone());
 

@@ -7,8 +7,12 @@ edition = "2021"
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
+promql-parser = "0.4.0"
+rusqlite = { version = "0.32.1", features = ["serde_json", "bundled", "uuid"] }
 rustc-hash = "2.0.0"
-uuid = { version = "1.10.0", features = ["v4", "fast-rng"] }
+serde = "1.0.205"
+serde_json = "1.0.122"
+uuid = { version = "1.10.0", features = ["v4", "fast-rng", "serde"] }
 
 [build-dependencies]
 cbindgen = "0.26.0"

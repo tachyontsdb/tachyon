@@ -119,11 +119,11 @@ impl Header {
         file.write_all(&self.count.to_le_bytes())?;
         file.write_all(&(self.value_type as u8).to_le_bytes())?;
 
-        self.write_value(file, self.value_sum);
-        self.write_value(file, self.min_value);
-        self.write_value(file, self.max_value);
+        self.write_value(file, self.value_sum).unwrap();
+        self.write_value(file, self.min_value).unwrap();
+        self.write_value(file, self.max_value).unwrap();
 
-        self.write_value(file, self.first_value);
+        self.write_value(file, self.first_value).unwrap();
 
         Ok(HEADER_SIZE + MAGIC_SIZE)
     }
@@ -490,7 +490,7 @@ mod tests {
             ..Header::new(0, 0, ValueType::UInteger64)
         };
 
-        t_header.write(&mut temp_file);
+        t_header.write(&mut temp_file).unwrap();
 
         let _temp_file: File = File::open(&paths[0]).unwrap();
         let mut page_cache = PageCache::new(100);

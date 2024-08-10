@@ -41,12 +41,12 @@ pub struct TestDir {
 impl TestDir {
     pub fn new_and_create(dirs: &[impl AsRef<str>]) -> Self {
         if !Path::new(TEST_DIR).exists() {
-            fs::create_dir_all(TEST_DIR);
+            fs::create_dir_all(TEST_DIR).unwrap();
         }
         let mut new_dirs: Vec<PathBuf> = Vec::new();
         for dir in dirs {
             let new_path = Path::new(TEST_DIR).join(dir.as_ref());
-            fs::create_dir_all(&new_path);
+            fs::create_dir_all(&new_path).unwrap();
             new_dirs.push(new_path);
         }
         println!("Test Paths: {:#?}", new_dirs);
@@ -58,7 +58,7 @@ impl TestDir {
 impl Drop for TestDir {
     fn drop(&mut self) {
         for dir in &self.dirs {
-            fs::remove_dir_all(dir);
+            fs::remove_dir_all(dir).unwrap();
         }
     }
 }
@@ -113,7 +113,7 @@ pub struct TestFile {
 impl TestFile {
     pub fn new(paths: &[impl AsRef<str>]) -> Self {
         if !Path::new(TEST_DIR).exists() {
-            fs::create_dir_all(TEST_DIR);
+            fs::create_dir_all(TEST_DIR).unwrap();
         }
         let mut new_paths: Vec<PathBuf> = Vec::new();
         for path in paths {
@@ -127,11 +127,11 @@ impl TestFile {
 
     pub fn new_and_create(paths: &[impl AsRef<str>]) -> Self {
         if !Path::new(TEST_DIR).exists() {
-            fs::create_dir_all(TEST_DIR);
+            fs::create_dir_all(TEST_DIR).unwrap();
         }
         for path in paths {
             let new_path = Path::new(TEST_DIR).join(path.as_ref());
-            fs::File::create(&new_path);
+            fs::File::create(&new_path).unwrap();
         }
 
         Self::new(paths)
@@ -141,7 +141,7 @@ impl TestFile {
 impl Drop for TestFile {
     fn drop(&mut self) {
         for path in &self.paths {
-            fs::remove_file(path);
+            fs::remove_file(path).unwrap();
         }
     }
 }
@@ -159,7 +159,7 @@ pub fn generate_ty_file(path: PathBuf, timestamps: &[Timestamp], values: &[Value
 #[cfg(test)]
 mod tests {
     use crate::utils::test::{TestDir, TestFile, TEST_DIR};
-    use std::fs;
+    use std::fs::File;
     use std::path::Path;
 
     #[test]
@@ -169,7 +169,7 @@ mod tests {
         let expected_path = TEST_DIR.to_string() + "/test_file_no_creation.ty";
         assert!(!Path::new(&expected_path.as_str()).exists());
 
-        fs::File::create(&expected_path);
+        File::create(&expected_path).unwrap();
         drop(file);
         assert!(!Path::new(&expected_path.as_str()).exists());
     }

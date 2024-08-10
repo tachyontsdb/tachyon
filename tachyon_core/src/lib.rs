@@ -1,3 +1,4 @@
+use crate::query::indexer::Indexer;
 use crate::storage::page_cache::PageCache;
 use crate::storage::writer::Writer;
 use std::cell::RefCell;
@@ -263,5 +264,6 @@ impl Query {
 
 mod ffi;
 
+mod query;
 mod storage;
 mod utils;

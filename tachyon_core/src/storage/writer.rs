@@ -1,4 +1,5 @@
 use super::file::{TimeDataFile, MAX_NUM_ENTRIES};
+use crate::query::indexer::Indexer;
 use crate::{Timestamp, Value, ValueType, Vector};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -44,10 +45,10 @@ impl Writer {
             let file_path = Writer::derive_file_path(&self.root, stream_id, file);
             file.write(file_path.clone());
             self.indexer.borrow_mut().insert_new_file(
-                &stream_id,
+                stream_id,
                 &file_path,
-                &file.header.min_timestamp,
-                &file.header.max_timestamp,
+                file.header.min_timestamp,
+                file.header.max_timestamp,
             );
             self.open_data_files.remove_entry(&stream_id);
         }
@@ -75,7 +76,7 @@ impl Writer {
     pub fn create_stream(&self, stream_id: Uuid) {
         let stream = self.root.join(stream_id.to_string());
         if !stream.exists() {
-            fs::create_dir(stream);
+            fs::create_dir(stream).unwrap();
         }
     }
 
@@ -84,10 +85,10 @@ impl Writer {
             let file_path = Writer::derive_file_path(&self.root, *stream_id, file);
             file.write(file_path.clone());
             self.indexer.borrow_mut().insert_new_file(
-                stream_id,
+                *stream_id,
                 &file_path,
-                &file.header.min_timestamp,
-                &file.header.max_timestamp,
+                file.header.min_timestamp,
+                file.header.max_timestamp,
             )
         }
         self.open_data_files.clear();
