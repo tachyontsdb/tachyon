@@ -239,8 +239,9 @@ pub fn page_cache_sequential_read(
 #[cfg(test)]
 mod tests {
     use super::{page_cache_sequential_read, PageCache};
+    use crate::storage::file::TimeDataFile;
     use crate::utils::test::*;
-    use crate::{storage::file::TimeDataFile, Timestamp, Value};
+    use crate::{Timestamp, Value};
     use std::cell::RefCell;
     use std::fs::File;
     use std::io::{Read, Write};

@@ -5,9 +5,9 @@ mod hash_map;
 pub mod page_cache;
 
 /// Varint decoding
-pub struct FileReaderUtil;
+pub struct FileReaderUtils;
 
-impl FileReaderUtil {
+impl FileReaderUtils {
     #[inline]
     pub fn read_u64_1(buf: &[u8]) -> u64 {
         buf[0] as u64

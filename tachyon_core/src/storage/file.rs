@@ -1,5 +1,5 @@
 use super::page_cache::{FileId, PageCache};
-use super::FileReaderUtil;
+use super::FileReaderUtils;
 use crate::{Timestamp, Value, ValueType};
 use std::cell::RefCell;
 use std::fs::File;
@@ -32,16 +32,35 @@ pub struct Header {
 }
 
 impl Header {
+    pub fn new(version: u16, stream_id: u64, value_type: ValueType) -> Self {
+        Self {
+            version,
+            stream_id,
+
+            min_timestamp: Timestamp::default(),
+            max_timestamp: Timestamp::default(),
+
+            count: 0,
+            value_type,
+
+            value_sum: Value::default(),
+            min_value: Value::default(),
+            max_value: Value::default(),
+
+            first_value: Value::default(),
+        }
+    }
+
     fn parse_value(value_type: ValueType, buf: &[u8]) -> Value {
         match value_type {
             ValueType::Integer64 => Value {
-                integer64: FileReaderUtil::read_i64_8(buf),
+                integer64: FileReaderUtils::read_i64_8(buf),
             },
             ValueType::UInteger64 => Value {
-                uinteger64: FileReaderUtil::read_u64_8(buf),
+                uinteger64: FileReaderUtils::read_u64_8(buf),
             },
             ValueType::Float64 => Value {
-                float64: FileReaderUtil::read_f64_8(buf),
+                float64: FileReaderUtils::read_f64_8(buf),
             },
         }
     }
@@ -54,17 +73,17 @@ impl Header {
         }
         let buffer = &mut buffer[MAGIC_SIZE..];
 
-        let value_type = FileReaderUtil::read_u64_1(&buffer[30..31])
+        let value_type = FileReaderUtils::read_u64_1(&buffer[30..31])
             .try_into()
             .unwrap();
         Self {
-            version: FileReaderUtil::read_u64_2(&buffer[0..2])
+            version: FileReaderUtils::read_u64_2(&buffer[0..2])
                 .try_into()
                 .unwrap(),
-            stream_id: FileReaderUtil::read_u64_8(&buffer[2..10]),
-            min_timestamp: FileReaderUtil::read_u64_8(&buffer[10..18]),
-            max_timestamp: FileReaderUtil::read_u64_8(&buffer[18..26]),
-            count: FileReaderUtil::read_u64_4(&buffer[26..30])
+            stream_id: FileReaderUtils::read_u64_8(&buffer[2..10]),
+            min_timestamp: FileReaderUtils::read_u64_8(&buffer[10..18]),
+            max_timestamp: FileReaderUtils::read_u64_8(&buffer[18..26]),
+            count: FileReaderUtils::read_u64_4(&buffer[26..30])
                 .try_into()
                 .unwrap(),
             value_type,
@@ -77,9 +96,9 @@ impl Header {
 
     fn write_value(&self, file: &mut File, value: Value) -> Result<usize, io::Error> {
         match self.value_type {
-            ValueType::Integer64 => file.write_all(&unsafe { value.integer64 }.to_le_bytes())?,
-            ValueType::UInteger64 => file.write_all(&unsafe { value.uinteger64 }.to_le_bytes())?,
-            ValueType::Float64 => file.write_all(&unsafe { value.float64 }.to_le_bytes())?,
+            ValueType::Integer64 => file.write_all(&value.get_integer64().to_le_bytes())?,
+            ValueType::UInteger64 => file.write_all(&value.get_uinteger64().to_le_bytes())?,
+            ValueType::Float64 => file.write_all(&value.get_float64().to_le_bytes())?,
         }
         Ok(8)
     }

@@ -18,6 +18,7 @@ pub enum ValueType {
 
 impl TryFrom<u64> for ValueType {
     type Error = ();
+
     fn try_from(value: u64) -> Result<Self, ()> {
         match value {
             0 => Ok(ValueType::Integer64),
@@ -38,9 +39,15 @@ pub enum ReturnType {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub union Value {
-    pub integer64: i64,
-    pub uinteger64: u64,
-    pub float64: f64,
+    integer64: i64,
+    uinteger64: u64,
+    float64: f64,
+}
+
+impl Default for Value {
+    fn default() -> Self {
+        Self { uinteger64: 0 }
+    }
 }
 
 impl PartialEq for Value {
@@ -49,9 +56,41 @@ impl PartialEq for Value {
     }
 }
 
+impl From<u64> for Value {
+    fn from(value: u64) -> Self {
+        Self { uinteger64: value }
+    }
+}
+
+impl From<i64> for Value {
+    fn from(value: i64) -> Self {
+        Self { integer64: value }
+    }
+}
+
+impl From<f64> for Value {
+    fn from(value: f64) -> Self {
+        Self { float64: value }
+    }
+}
+
 impl Debug for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         unsafe { f.write_fmt(format_args!("u64r {}", self.uinteger64)) }
+    }
+}
+
+impl Value {
+    pub fn get_integer64(&self) -> i64 {
+        unsafe { self.integer64 }
+    }
+
+    pub fn get_uinteger64(&self) -> u64 {
+        unsafe { self.uinteger64 }
+    }
+
+    pub fn get_float64(&self) -> f64 {
+        unsafe { self.float64 }
     }
 }
 
