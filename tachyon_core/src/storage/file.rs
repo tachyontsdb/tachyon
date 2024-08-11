@@ -172,7 +172,7 @@ impl Header {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ScanHint {
     None,
     Sum,

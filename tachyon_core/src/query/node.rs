@@ -1,8 +1,12 @@
+use super::indexer::Indexer;
 use crate::storage::file::{Cursor, ScanHint};
+use crate::storage::page_cache::PageCache;
 use crate::{Connection, ReturnType, Timestamp, Value, ValueType, Vector};
 use promql_parser::label::Matchers;
+use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
+use std::rc::Rc;
 use uuid::Uuid;
 
 pub trait ExecutorNode {
@@ -107,6 +111,11 @@ pub struct VectorSelectNode {
     stream_ids: Vec<Uuid>,
     stream_idx: usize,
     cursor: Cursor,
+    indexer: Rc<RefCell<Indexer>>,
+    page_cache: Rc<RefCell<PageCache>>,
+    start: Timestamp,
+    end: Timestamp,
+    hint: ScanHint,
 }
 
 impl VectorSelectNode {
@@ -139,6 +148,11 @@ impl VectorSelectNode {
             stream_ids,
             stream_idx: 0,
             cursor: Cursor::new(file_paths, start, end, conn.page_cache.clone(), hint).unwrap(),
+            indexer: conn.indexer.clone(),
+            page_cache: conn.page_cache.clone(),
+            start,
+            end,
+            hint,
         }
     }
 }
@@ -155,8 +169,24 @@ impl ExecutorNode for VectorSelectNode {
     fn next_vector(&mut self, _: &mut Connection) -> Option<Vector> {
         if self.cursor.is_done() {
             self.stream_idx += 1;
-            // Support multiple streams here
-            return None;
+            if self.stream_idx == self.stream_ids.len() {
+                return None;
+            }
+
+            let stream_id = self.stream_ids[self.stream_idx];
+            let file_paths = self
+                .indexer
+                .borrow()
+                .get_required_files(stream_id, self.start, self.end);
+
+            self.cursor = Cursor::new(
+                file_paths,
+                self.start,
+                self.end,
+                self.page_cache.clone(),
+                self.hint,
+            )
+            .unwrap();
         }
         let res = self.cursor.fetch();
         self.cursor.next();
