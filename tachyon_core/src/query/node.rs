@@ -562,7 +562,6 @@ pub enum GetKType {
 }
 
 pub struct GetKNode {
-    getk_type: GetKType,
     ix: usize,
     ks: Vec<Value>,
 }
@@ -581,7 +580,6 @@ impl GetKNode {
         let k: usize = k.get_uinteger64().try_into().unwrap();
 
         Self {
-            getk_type,
             ix: 0,
             ks: if getk_type == GetKType::Bottom {
                 let mut maxheap = BinaryHeap::<TypeValuePair>::new();

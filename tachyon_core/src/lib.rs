@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::query::indexer::Indexer;
 use crate::query::node::TNode;
 use crate::query::planner::QueryPlanner;

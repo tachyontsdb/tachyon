@@ -11,7 +11,6 @@ use promql_parser::parser::{
 
 #[derive(Debug)]
 pub struct QueryPlanner<'a> {
-    cursor_idx: u64,
     ast: &'a Expr,
     start: Option<Timestamp>,
     end: Option<Timestamp>,
@@ -19,12 +18,7 @@ pub struct QueryPlanner<'a> {
 
 impl<'a> QueryPlanner<'a> {
     pub fn new(ast: &'a Expr, start: Option<Timestamp>, end: Option<Timestamp>) -> Self {
-        Self {
-            cursor_idx: 0,
-            ast,
-            start,
-            end,
-        }
+        Self { ast, start, end }
     }
 
     pub fn plan(&mut self, conn: &mut Connection) -> TNode {
