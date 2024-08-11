@@ -93,12 +93,12 @@ pub unsafe extern "C" fn tachyon_inserter_flush(inserter: *mut Inserter) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_query_create(
+pub unsafe extern "C" fn tachyon_query_create<'a>(
     connection: *mut Connection,
     query: *const c_char,
     start: *const Timestamp,
     end: *const Timestamp,
-) -> *mut Query {
+) -> *mut Query<'a> {
     let query = CStr::from_ptr(query).to_str().unwrap();
     let query = (*connection).prepare_query(
         query,

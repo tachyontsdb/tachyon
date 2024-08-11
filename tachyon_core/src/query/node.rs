@@ -609,3 +609,15 @@ impl ExecutorNode for GetKNode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use promql_parser::parser;
+
+    #[test]
+    fn example_query() {
+        let stmt = r#"sum(http_requests_total)"#;
+        let ast = parser::parse(stmt);
+        println!("{:#?}", ast);
+    }
+}

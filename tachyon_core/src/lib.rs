@@ -1,12 +1,15 @@
 use crate::query::indexer::Indexer;
+use crate::query::node::TNode;
+use crate::query::planner::QueryPlanner;
 use crate::storage::page_cache::PageCache;
 use crate::storage::writer::Writer;
 use promql_parser::parser;
+use query::node::ExecutorNode;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::fs;
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use uuid::Uuid;
@@ -204,7 +207,24 @@ impl Value {
         other: &Self,
         value_type_other: ValueType,
     ) -> Option<Self> {
-        todo!();
+        let other = match value_type_other {
+            ValueType::Integer64 => other.get_integer64() as f64,
+            ValueType::UInteger64 => other.get_uinteger64() as f64,
+            ValueType::Float64 => other.get_float64(),
+        };
+        if other == 0f64 {
+            None
+        } else {
+            Some(
+                (match value_type_self {
+                    ValueType::Integer64 => self.get_integer64() as f64,
+                    ValueType::UInteger64 => self.get_uinteger64() as f64,
+                    ValueType::Float64 => self.get_float64(),
+                })
+                .div(other)
+                .into(),
+            )
+        }
     }
 
     pub fn try_div_same(&self, value_type: ValueType, other: &Self) -> Option<Self> {
@@ -217,7 +237,24 @@ impl Value {
         other: &Self,
         value_type_other: ValueType,
     ) -> Option<Self> {
-        todo!();
+        let other = match value_type_other {
+            ValueType::Integer64 => other.get_integer64() as f64,
+            ValueType::UInteger64 => other.get_uinteger64() as f64,
+            ValueType::Float64 => other.get_float64(),
+        };
+        if other == 0f64 {
+            None
+        } else {
+            Some(
+                (match value_type_self {
+                    ValueType::Integer64 => self.get_integer64() as f64,
+                    ValueType::UInteger64 => self.get_uinteger64() as f64,
+                    ValueType::Float64 => self.get_float64(),
+                })
+                .rem(other)
+                .into(),
+            )
+        }
     }
 
     pub fn try_mod_same(&self, value_type: ValueType, other: &Self) -> Option<Self> {
@@ -276,7 +313,7 @@ impl Connection {
     }
 
     pub fn delete_stream(&mut self, stream: impl AsRef<str>) {
-        todo!();
+        todo!("Not deleting stream {:?}", stream.as_ref());
     }
 
     pub fn check_stream_exists(&self, stream: impl AsRef<str>) -> bool {
@@ -303,7 +340,14 @@ impl Connection {
         start: Option<Timestamp>,
         end: Option<Timestamp>,
     ) -> Query {
-        todo!();
+        let ast = parser::parse(query.as_ref()).unwrap();
+        let mut planner = QueryPlanner::new(&ast, start, end);
+        let plan = planner.plan(self);
+
+        Query {
+            plan,
+            connection: self,
+        }
     }
 
     fn try_get_stream_id_from_matcher(
@@ -381,23 +425,26 @@ impl Inserter {
     }
 }
 
-pub struct Query;
+pub struct Query<'a> {
+    connection: &'a mut Connection,
+    plan: TNode,
+}
 
-impl Query {
+impl<'a> Query<'a> {
     pub fn value_type(&self) -> ValueType {
-        todo!();
+        self.plan.value_type()
     }
 
     pub fn return_type(&self) -> ReturnType {
-        todo!();
+        self.plan.return_type()
     }
 
     pub fn next_scalar(&mut self) -> Option<Value> {
-        todo!();
+        self.plan.next_scalar(self.connection)
     }
 
     pub fn next_vector(&mut self) -> Option<Vector> {
-        todo!();
+        self.plan.next_vector(self.connection)
     }
 }
 

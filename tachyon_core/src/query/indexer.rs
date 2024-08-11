@@ -265,15 +265,15 @@ impl IndexerStore for SQLiteIndexerStore {
 }
 
 pub struct Indexer {
-    store: Box<dyn IndexerStore>,
     root_dir: PathBuf,
+    store: Box<dyn IndexerStore>,
 }
 
 impl Indexer {
     pub fn new(root_dir: impl AsRef<Path>) -> Self {
         Self {
-            store: Box::new(SQLiteIndexerStore::new(&root_dir)),
             root_dir: root_dir.as_ref().to_path_buf(),
+            store: Box::new(SQLiteIndexerStore::new(&root_dir)),
         }
     }
 
