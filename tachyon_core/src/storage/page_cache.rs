@@ -272,7 +272,7 @@ mod tests {
         assert_eq!(data_file.timestamps.len(), 100000);
         for i in 0..data_file.timestamps.len() {
             assert_eq!(data_file.timestamps[i], i as Timestamp);
-            assert_eq!(data_file.values[i], ((i + 10) as u64).into());
+            assert!(data_file.values[i].eq_same(ValueType::UInteger64, &((i + 10) as u64).into()));
         }
     }
 
@@ -311,7 +311,7 @@ mod tests {
         assert_eq!(data_file.timestamps.len(), 100000);
         for i in 0..data_file.timestamps.len() {
             assert_eq!(data_file.timestamps[i], i as Timestamp);
-            assert_eq!(data_file.values[i], ((i + 10) as u64).into());
+            assert!(data_file.values[i].eq_same(ValueType::UInteger64, &((i + 10) as u64).into()));
         }
     }
 }

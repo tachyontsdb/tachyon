@@ -18,7 +18,6 @@ const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 pub const MAX_NUM_ENTRIES: usize = 62500;
 
 pub const HEADER_SIZE: usize = 63;
-#[derive(PartialEq)]
 pub struct Header {
     pub version: u16,
     pub stream_id: u64,
@@ -34,6 +33,29 @@ pub struct Header {
     pub max_value: Value,
 
     pub first_value: Value,
+}
+
+impl PartialEq for Header {
+    fn eq(&self, other: &Self) -> bool {
+        self.version == other.version
+            && self.stream_id == other.stream_id
+            && self.min_timestamp == other.min_timestamp
+            && self.max_timestamp == other.max_timestamp
+            && self.count == other.count
+            && self.value_type == other.value_type
+            && self
+                .value_sum
+                .eq(self.value_type, &other.value_sum, other.value_type)
+            && self
+                .min_value
+                .eq(self.value_type, &other.min_value, other.value_type)
+            && self
+                .max_value
+                .eq(self.value_type, &other.max_value, other.value_type)
+            && self
+                .first_value
+                .eq(self.value_type, &other.first_value, other.value_type)
+    }
 }
 
 impl Debug for Header {
@@ -65,11 +87,11 @@ impl Header {
             count: 0,
             value_type,
 
-            value_sum: Value::default(),
-            min_value: Value::default(),
-            max_value: Value::default(),
+            value_sum: Value::get_default(value_type),
+            min_value: Value::get_default(value_type),
+            max_value: Value::get_default(value_type),
 
-            first_value: Value::default(),
+            first_value: Value::get_default(value_type),
         }
     }
 
@@ -363,6 +385,10 @@ impl Cursor {
     pub fn is_done(&self) -> bool {
         self.is_done
     }
+
+    pub fn value_type(&self) -> ValueType {
+        self.header.value_type
+    }
 }
 
 #[derive(Debug)]
@@ -544,7 +570,7 @@ mod tests {
         loop {
             let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, model.timestamps[i]);
-            assert_eq!(value, model.values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &model.values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -572,7 +598,7 @@ mod tests {
             let Vector { timestamp, value } = cursor.fetch();
             println!("{} {}", timestamp, value.get_uinteger64());
             assert_eq!(timestamp, 1);
-            assert_eq!(value, 2u64.into());
+            assert!(value.eq_same(ValueType::UInteger64, &2u64.into()));
             if cursor.next().is_none() {
                 break;
             }
@@ -618,7 +644,7 @@ mod tests {
         loop {
             let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, timestamps[i]);
-            assert_eq!(value, values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -664,7 +690,7 @@ mod tests {
         loop {
             let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, timestamps[i]);
-            assert_eq!(value, values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -700,7 +726,7 @@ mod tests {
         loop {
             let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, timestamps[i]);
-            assert_eq!(value, values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -734,7 +760,7 @@ mod tests {
         loop {
             let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, timestamps[i]);
-            assert_eq!(value, values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -781,7 +807,7 @@ mod tests {
         loop {
             let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, timestamps[i]);
-            assert_eq!(value, values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -833,14 +859,14 @@ mod tests {
 
         let (res, i) = get_value(0, 30, ScanHint::Sum);
         assert_eq!(i, 3);
-        assert_eq!(res, 465u64.into());
+        assert!(res.eq_same(ValueType::UInteger64, &465u64.into()));
 
         let (res, i) = get_value(5, 28, ScanHint::Sum);
-        assert_eq!(res, 420u64.into());
+        assert!(res.eq_same(ValueType::UInteger64, &420u64.into()));
         assert_eq!(i, 15);
 
         let (res, _) = get_value(0, 9, ScanHint::Sum);
-        assert_eq!(res, 55u64.into());
+        assert!(res.eq_same(ValueType::UInteger64, &55u64.into()));
     }
 
     #[test]
@@ -886,14 +912,14 @@ mod tests {
         };
 
         let (res, i) = get_value(0, 30, ScanHint::Min);
-        assert_eq!(res, 1u64.into());
+        assert!(res.eq_same(ValueType::UInteger64, &1u64.into()));
         assert_eq!(i, 3);
 
         let (res, i) = get_value(5, 28, ScanHint::Min);
-        assert_eq!(res, 6u64.into());
+        assert!(res.eq_same(ValueType::UInteger64, &6u64.into()));
         assert_eq!(i, 15);
 
         let (res, _) = get_value(2, 9, ScanHint::Min);
-        assert_eq!(res, 3u64.into());
+        assert!(res.eq_same(ValueType::UInteger64, &3u64.into()));
     }
 }

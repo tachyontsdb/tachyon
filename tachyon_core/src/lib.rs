@@ -3,8 +3,10 @@ use crate::storage::page_cache::PageCache;
 use crate::storage::writer::Writer;
 use promql_parser::parser;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::fs;
+use std::ops::{Add, Mul, Sub};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use uuid::Uuid;
@@ -62,18 +64,6 @@ pub union Value {
     float64: f64,
 }
 
-impl Default for Value {
-    fn default() -> Self {
-        Self { uinteger64: 0 }
-    }
-}
-
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        self.get_uinteger64() == other.get_uinteger64()
-    }
-}
-
 impl From<u64> for Value {
     fn from(value: u64) -> Self {
         Self { uinteger64: value }
@@ -98,20 +88,106 @@ impl Debug for Value {
     }
 }
 
+macro_rules! create_value_primitive_fn {
+    ($function_name: ident, $function_name_same: ident, $called_fn: ident) => {
+        pub fn $function_name(
+            &self,
+            value_type_self: crate::ValueType,
+            other: &Self,
+            value_type_other: crate::ValueType,
+        ) -> Self {
+            if value_type_self == value_type_other {
+                match value_type_self {
+                    crate::ValueType::Integer64 => {
+                        (self.get_integer64().$called_fn(other.get_integer64())).into()
+                    }
+                    crate::ValueType::UInteger64 => {
+                        (self.get_uinteger64().$called_fn(other.get_uinteger64())).into()
+                    }
+                    crate::ValueType::Float64 => {
+                        (self.get_float64().$called_fn(other.get_float64())).into()
+                    }
+                }
+            } else {
+                todo!();
+            }
+        }
+
+        pub fn $function_name_same(&self, value_type: crate::ValueType, other: &Self) -> Self {
+            self.$function_name(value_type, other, value_type)
+        }
+    };
+}
+
 impl Value {
     #[inline]
-    pub fn get_integer64(&self) -> i64 {
+    pub const fn get_integer64(&self) -> i64 {
         unsafe { self.integer64 }
     }
 
     #[inline]
-    pub fn get_uinteger64(&self) -> u64 {
+    pub const fn get_uinteger64(&self) -> u64 {
         unsafe { self.uinteger64 }
     }
 
     #[inline]
-    pub fn get_float64(&self) -> f64 {
+    pub const fn get_float64(&self) -> f64 {
         unsafe { self.float64 }
+    }
+
+    #[inline]
+    pub const fn get_default(value_type: ValueType) -> Self {
+        match value_type {
+            ValueType::Integer64 => Value { integer64: 0i64 },
+            ValueType::UInteger64 => Value { uinteger64: 0u64 },
+            ValueType::Float64 => Value { float64: 0f64 },
+        }
+    }
+
+    #[inline]
+    pub fn eq(
+        &self,
+        value_type_self: ValueType,
+        other: &Self,
+        value_type_other: ValueType,
+    ) -> bool {
+        if value_type_self != value_type_other {
+            false
+        } else {
+            match value_type_self {
+                ValueType::Integer64 => self.get_integer64() == other.get_integer64(),
+                ValueType::UInteger64 => self.get_uinteger64() == other.get_uinteger64(),
+                ValueType::Float64 => self.get_float64() == other.get_float64(),
+            }
+        }
+    }
+
+    #[inline]
+    pub fn eq_same(&self, value_type: ValueType, other: &Self) -> bool {
+        self.eq(value_type, other, value_type)
+    }
+
+    #[inline]
+    pub fn partial_cmp(
+        &self,
+        value_type_self: ValueType,
+        other: &Self,
+        value_type_other: ValueType,
+    ) -> Option<Ordering> {
+        if value_type_self != value_type_other {
+            None
+        } else {
+            match value_type_self {
+                ValueType::Integer64 => self.get_integer64().partial_cmp(&other.get_integer64()),
+                ValueType::UInteger64 => self.get_uinteger64().partial_cmp(&other.get_uinteger64()),
+                ValueType::Float64 => self.get_float64().partial_cmp(&other.get_float64()),
+            }
+        }
+    }
+
+    #[inline]
+    pub fn partial_cmp_same(&self, value_type: ValueType, other: &Self) -> Option<Ordering> {
+        self.partial_cmp(value_type, other, value_type)
     }
 
     pub fn get_output(&self, value_type: ValueType) -> String {
@@ -122,71 +198,41 @@ impl Value {
         }
     }
 
-    pub fn add(
+    pub fn try_div(
         &self,
         value_type_self: ValueType,
-        other: &Value,
+        other: &Self,
         value_type_other: ValueType,
-    ) -> Self {
-        if value_type_self == value_type_other {
-            match value_type_self {
-                ValueType::Integer64 => (self.get_integer64() + other.get_integer64()).into(),
-                ValueType::UInteger64 => (self.get_uinteger64() + other.get_uinteger64()).into(),
-                ValueType::Float64 => (self.get_float64() + other.get_float64()).into(),
-            }
-        } else {
-            todo!();
-        }
+    ) -> Option<Self> {
+        todo!();
     }
 
-    pub fn add_same(&self, value_type: ValueType, other: &Value) -> Self {
-        self.add(value_type, other, value_type)
+    pub fn try_div_same(&self, value_type: ValueType, other: &Self) -> Option<Self> {
+        self.try_div(value_type, other, value_type)
     }
 
-    pub fn min(
+    pub fn try_mod(
         &self,
         value_type_self: ValueType,
-        other: &Value,
+        other: &Self,
         value_type_other: ValueType,
-    ) -> Self {
-        if value_type_self == value_type_other {
-            match value_type_self {
-                ValueType::Integer64 => (self.get_integer64().min(other.get_integer64())).into(),
-                ValueType::UInteger64 => (self.get_uinteger64().min(other.get_uinteger64())).into(),
-                ValueType::Float64 => (self.get_float64().min(other.get_float64())).into(),
-            }
-        } else {
-            todo!();
-        }
+    ) -> Option<Self> {
+        todo!();
     }
 
-    pub fn min_same(&self, value_type: ValueType, other: &Value) -> Self {
-        self.min(value_type, other, value_type)
+    pub fn try_mod_same(&self, value_type: ValueType, other: &Self) -> Option<Self> {
+        self.try_mod(value_type, other, value_type)
     }
 
-    pub fn max(
-        &self,
-        value_type_self: ValueType,
-        other: &Value,
-        value_type_other: ValueType,
-    ) -> Self {
-        if value_type_self == value_type_other {
-            match value_type_self {
-                ValueType::Integer64 => (self.get_integer64().max(other.get_integer64())).into(),
-                ValueType::UInteger64 => (self.get_uinteger64().max(other.get_uinteger64())).into(),
-                ValueType::Float64 => (self.get_float64().max(other.get_float64())).into(),
-            }
-        } else {
-            todo!();
-        }
-    }
+    create_value_primitive_fn!(add, add_same, add);
+    create_value_primitive_fn!(sub, sub_same, sub);
+    create_value_primitive_fn!(mul, mul_same, mul);
 
-    pub fn max_same(&self, value_type: ValueType, other: &Value) -> Self {
-        self.max(value_type, other, value_type)
-    }
+    create_value_primitive_fn!(min, min_same, min);
+    create_value_primitive_fn!(max, max_same, max);
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Vector {
     pub timestamp: Timestamp,
@@ -300,14 +346,14 @@ pub struct Inserter {
 
 macro_rules! create_inserter_insert {
     ($function_name: ident, $type: ty, $value_type: expr, $value_field: ident) => {
-        pub fn $function_name(&mut self, timestamp: Timestamp, value: $type) {
+        pub fn $function_name(&mut self, timestamp: crate::Timestamp, value: $type) {
             if self.value_type != $value_type {
                 panic!("Invalid value type on insert!");
             }
 
             self.insert(
                 timestamp,
-                Value {
+                crate::Value {
                     $value_field: value,
                 },
             );

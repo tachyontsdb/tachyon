@@ -169,7 +169,10 @@ mod tests {
 
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].timestamps, timestamps);
-        assert_eq!(files[0].values, values);
+        assert_eq!(files[0].values.len(), values.len());
+        for i in 0..values.len() {
+            assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
+        }
     }
 
     #[test]
@@ -202,7 +205,10 @@ mod tests {
             let files = get_files(&dirs[0].join(stream_id.to_string()));
             assert_eq!(files.len(), 1);
             assert_eq!(files[0].timestamps, timestamps[0]);
-            assert_eq!(files[0].values, values[0]);
+            assert_eq!(files[0].values.len(), values[0].len());
+            for i in 0..values[0].len() {
+                assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[0][i]));
+            }
         }
     }
 
@@ -270,7 +276,10 @@ mod tests {
 
         for i in 0..3 {
             assert_eq!(files[i].timestamps, timestamps_per_file[i]);
-            assert_eq!(files[i].values, values_per_file[i]);
+            assert_eq!(files[i].values.len(), values_per_file[i].len());
+            for j in 0..values_per_file[i].len() {
+                assert!(files[i].values[j].eq_same(ValueType::UInteger64, &values_per_file[i][j]));
+            }
         }
     }
 }
