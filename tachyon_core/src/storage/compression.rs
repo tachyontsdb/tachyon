@@ -423,10 +423,10 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
             (value.wrapping_sub(self.last_value)) as i64,
         );
 
-        let double_delta = curr_deltas.0 - self.last_deltas.0;
+        let double_delta = curr_deltas.0.wrapping_sub(self.last_deltas.0);
         self.ts_d_deltas[self.buffer_idx] = CompressionUtils::zig_zag_encode(double_delta);
 
-        let double_delta = curr_deltas.1 - self.last_deltas.1;
+        let double_delta = curr_deltas.1.wrapping_sub(self.last_deltas.1);
         self.v_d_deltas[self.buffer_idx] = CompressionUtils::zig_zag_encode(double_delta);
 
         self.buffer_idx += 1;
@@ -605,8 +605,14 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV2<T> {
             self.buffer_idx = 0;
         }
 
-        self.last_deltas.0 += self.ts_d_deltas[self.buffer_idx as usize];
-        self.last_deltas.1 += self.v_d_deltas[self.buffer_idx as usize];
+        self.last_deltas.0 = self
+            .last_deltas
+            .0
+            .wrapping_add(self.ts_d_deltas[self.buffer_idx as usize]);
+        self.last_deltas.1 = self
+            .last_deltas
+            .1
+            .wrapping_add(self.v_d_deltas[self.buffer_idx as usize]);
 
         self.current_timestamp = self
             .current_timestamp

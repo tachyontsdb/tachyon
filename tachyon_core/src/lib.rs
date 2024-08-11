@@ -114,6 +114,14 @@ impl Value {
         unsafe { self.float64 }
     }
 
+    pub fn get_output(&self, value_type: ValueType) -> String {
+        match value_type {
+            ValueType::Integer64 => self.get_uinteger64().to_string(),
+            ValueType::UInteger64 => self.get_integer64().to_string(),
+            ValueType::Float64 => self.get_float64().to_string(),
+        }
+    }
+
     pub fn add(
         &self,
         value_type_self: ValueType,
@@ -352,3 +360,7 @@ mod ffi;
 mod query;
 mod storage;
 mod utils;
+
+pub use storage::file::Header;
+pub use storage::file::HEADER_SIZE;
+pub use storage::file::MAGIC_SIZE;

@@ -6,18 +6,19 @@ use super::FileReaderUtils;
 use crate::storage::page_cache::page_cache_sequential_read;
 use crate::{Timestamp, Value, ValueType, Vector};
 use std::cell::RefCell;
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-const MAGIC_SIZE: usize = 4;
+pub const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
 pub const MAX_NUM_ENTRIES: usize = 62500;
 
-const HEADER_SIZE: usize = 63;
-#[derive(PartialEq, Debug)]
+pub const HEADER_SIZE: usize = 63;
+#[derive(PartialEq)]
 pub struct Header {
     pub version: u16,
     pub stream_id: u64,
@@ -33,6 +34,23 @@ pub struct Header {
     pub max_value: Value,
 
     pub first_value: Value,
+}
+
+impl Debug for Header {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Header")
+            .field("version", &self.version)
+            .field("stream_id", &self.stream_id)
+            .field("min_timestamp", &self.min_timestamp)
+            .field("max_timestamp", &self.max_timestamp)
+            .field("count", &self.count)
+            .field("value_type", &self.value_type)
+            .field("value_sum", &self.value_sum.get_output(self.value_type))
+            .field("min_value", &self.min_value.get_output(self.value_type))
+            .field("max_value", &self.max_value.get_output(self.value_type))
+            .field("first_value", &self.first_value.get_output(self.value_type))
+            .finish()
+    }
 }
 
 impl Header {
@@ -75,8 +93,11 @@ impl Header {
         if buffer[0..MAGIC_SIZE] != MAGIC {
             panic!("Corrupted file - invalid magic for .ty file!");
         }
-        let buffer = &mut buffer[MAGIC_SIZE..];
+        let buffer = &buffer[MAGIC_SIZE..];
+        Self::parse_bytes(buffer)
+    }
 
+    pub fn parse_bytes(buffer: &[u8]) -> Self {
         let value_type = FileReaderUtils::read_u64_1(&buffer[30..31])
             .try_into()
             .unwrap();

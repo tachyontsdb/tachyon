@@ -182,7 +182,7 @@ impl IndexerStore for SQLiteIndexerStore {
         self.conn
             .execute(
                 &format!(
-                    "INSERT OR REPLACE INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
                     SQLITE_ID_TO_FILENAME_TABLE
                 ),
                 (id, file.to_str(), start, end),
