@@ -1,0 +1,16 @@
+[package]
+name = "tachyon_benchmarks"
+version = "0.2.0"
+edition = "2021"
+
+[[bench]]
+name = "read"
+harness = false
+
+[dependencies]
+tachyon_core = { path = "../tachyon_core" }
+
+[dev-dependencies]
+criterion = { version = "0.5.1", features = ["stable", "html_reports"] }
+csv = "1.3.0"
+pprof = { version = "0.13.0", features = ["cpp", "flamegraph", "criterion"] }
