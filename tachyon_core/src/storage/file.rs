@@ -854,7 +854,7 @@ mod tests {
                 }
             }
 
-            (res.into(), i)
+            (res, i)
         };
 
         let (res, i) = get_value(0, 30, ScanHint::Sum);

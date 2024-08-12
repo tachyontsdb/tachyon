@@ -17,7 +17,7 @@ jobs:
         run: cargo test --verbose
       - name: Run C test
         run: |
-          cd ./scripts/c/
+          cd ./scripts/build/test/c/
           chmod +x ./run.sh
           ./run.sh
         shell: bash

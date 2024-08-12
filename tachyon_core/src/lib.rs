@@ -289,7 +289,7 @@ impl Connection {
     pub fn new(db_dir: impl AsRef<Path>) -> Self {
         fs::create_dir_all(&db_dir).unwrap();
 
-        let indexer = Rc::new(RefCell::new(Indexer::new(db_dir.as_ref().to_path_buf())));
+        let indexer = Rc::new(RefCell::new(Indexer::new(db_dir.as_ref())));
         indexer.borrow_mut().create_store();
         Self {
             db_dir: db_dir.as_ref().to_path_buf(),

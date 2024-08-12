@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 // SQLite Store Constants
-const SQLITE_DB_NAME: &'static str = "indexer.sqlite";
-const SQLITE_STREAM_TO_IDS_TABLE: &'static str = "stream_to_ids";
-const SQLITE_ID_TO_FILENAME_TABLE: &'static str = "id_to_file";
-const SQLITE_ID_TO_VALUE_TYPE_TABLE: &'static str = "id_to_value_type";
+const SQLITE_DB_NAME: &str = "indexer.sqlite";
+const SQLITE_STREAM_TO_IDS_TABLE: &str = "stream_to_ids";
+const SQLITE_ID_TO_FILENAME_TABLE: &str = "id_to_file";
+const SQLITE_ID_TO_VALUE_TYPE_TABLE: &str = "id_to_value_type";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct IdsEntry {

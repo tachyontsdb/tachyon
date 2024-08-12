@@ -97,7 +97,7 @@ pub struct NumberLiteralNode {
 
 impl NumberLiteralNode {
     pub fn new(val: Value) -> Self {
-        Self { val: val }
+        Self { val }
     }
 }
 
@@ -545,13 +545,13 @@ impl Eq for TypeValuePair {}
 
 impl PartialOrd for TypeValuePair {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.1.partial_cmp(self.0, &other.1, other.0)
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for TypeValuePair {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(&other).unwrap()
+        self.1.partial_cmp(self.0, &other.1, other.0).unwrap()
     }
 }
 

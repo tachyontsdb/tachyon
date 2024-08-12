@@ -170,6 +170,7 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].timestamps, timestamps);
         assert_eq!(files[0].values.len(), values.len());
+        #[allow(clippy::needless_range_loop)]
         for i in 0..values.len() {
             assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
         }

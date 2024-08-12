@@ -23,6 +23,7 @@ struct PageInfo {
     data: [u8; PAGE_SIZE],
 }
 
+#[allow(clippy::large_enum_variant)]
 enum Frame {
     Empty,
     Page(PageInfo),
