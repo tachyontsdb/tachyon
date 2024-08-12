@@ -31,6 +31,7 @@ trait IndexerStore {
         end: Timestamp,
     ) -> Vec<PathBuf>;
     fn get_value_type_for_stream_id(&self, stream_id: Uuid) -> Option<ValueType>;
+    fn get_all_streams(&self) -> Vec<(Uuid, String, ValueType)>;
 }
 
 struct SQLiteIndexerStore {
@@ -262,6 +263,34 @@ impl IndexerStore for SQLiteIndexerStore {
                 |value_type: u8| Some(value_type.try_into().unwrap()),
             )
     }
+
+    fn get_all_streams(&self) -> Vec<(Uuid, String, ValueType)> {
+        let mut stmt = self
+            .conn
+            .prepare_cached(&format!(
+                "SELECT id, value_type FROM {}",
+                SQLITE_ID_TO_VALUE_TYPE_TABLE
+            ))
+            .unwrap();
+
+        stmt.query(())
+            .unwrap()
+            .mapped(|row| {
+                Ok((
+                    row.get::<usize, String>(0).unwrap(),
+                    row.get::<usize, u8>(1).unwrap(),
+                ))
+            })
+            .map(|item: Result<(String, u8), _>| {
+                let item = item.unwrap();
+                (
+                    serde_json::from_str(&item.0).unwrap(),
+                    String::from("TODO"),
+                    item.1.try_into().unwrap(),
+                )
+            })
+            .collect()
+    }
 }
 
 pub struct Indexer {
@@ -300,6 +329,10 @@ impl Indexer {
 
     pub fn insert_new_file(&self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
         self.store.insert_new_file(id, file, start, end);
+    }
+
+    pub fn get_all_streams(&self) -> Vec<(Uuid, String, ValueType)> {
+        self.store.get_all_streams()
     }
 
     pub fn get_stream_ids(&self, stream: &str, matchers: &Matchers) -> HashSet<Uuid> {

@@ -1,6 +1,6 @@
 use super::file::{TimeDataFile, MAX_NUM_ENTRIES};
 use crate::query::indexer::Indexer;
-use crate::{Timestamp, Value, ValueType, Vector};
+use crate::{Timestamp, Value, ValueType, Vector, FILE_EXTENSION};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
@@ -86,8 +86,12 @@ impl Writer {
     }
 
     fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, file: &TimeDataFile) -> PathBuf {
-        root.as_ref()
-            .join(format!("{}/{}.ty", stream_id, file.get_file_name()))
+        root.as_ref().join(format!(
+            "{}/{}.{}",
+            stream_id,
+            file.get_file_name(),
+            FILE_EXTENSION
+        ))
     }
 }
 

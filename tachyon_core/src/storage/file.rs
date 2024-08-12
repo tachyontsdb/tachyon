@@ -116,10 +116,7 @@ impl Header {
             panic!("Corrupted file - invalid magic for .ty file!");
         }
         let buffer = &buffer[MAGIC_SIZE..];
-        Self::parse_bytes(buffer)
-    }
 
-    pub fn parse_bytes(buffer: &[u8]) -> Self {
         let value_type = FileReaderUtils::read_u64_1(&buffer[30..31])
             .try_into()
             .unwrap();
@@ -391,7 +388,6 @@ impl Cursor {
     }
 }
 
-#[derive(Debug)]
 pub struct TimeDataFile {
     pub header: Header,
     pub timestamps: Vec<Timestamp>,

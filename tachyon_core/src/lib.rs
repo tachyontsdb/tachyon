@@ -9,14 +9,16 @@ use promql_parser::parser;
 use query::node::ExecutorNode;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::str::FromStr;
 use uuid::Uuid;
 
 pub const CURRENT_VERSION: u16 = 2;
+pub const FILE_EXTENSION: &str = "ty";
 
 pub type Timestamp = u64;
 
@@ -33,9 +35,9 @@ impl TryFrom<u8> for ValueType {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(ValueType::Integer64),
-            1 => Ok(ValueType::UInteger64),
-            2 => Ok(ValueType::Float64),
+            0 => Ok(Self::Integer64),
+            1 => Ok(Self::UInteger64),
+            2 => Ok(Self::Float64),
             _ => Err(()),
         }
     }
@@ -44,12 +46,35 @@ impl TryFrom<u8> for ValueType {
 impl TryFrom<u64> for ValueType {
     type Error = ();
 
-    fn try_from(value: u64) -> Result<Self, ()> {
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(ValueType::Integer64),
-            1 => Ok(ValueType::UInteger64),
-            2 => Ok(ValueType::Float64),
+            0 => Ok(Self::Integer64),
+            1 => Ok(Self::UInteger64),
+            2 => Ok(Self::Float64),
             _ => Err(()),
+        }
+    }
+}
+
+impl FromStr for ValueType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "i" => Ok(Self::Integer64),
+            "u" => Ok(Self::UInteger64),
+            "f" => Ok(Self::Float64),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Integer64 => f.write_str("Integer64"),
+            Self::UInteger64 => f.write_str("UInteger64"),
+            Self::Float64 => f.write_str("Float64"),
         }
     }
 }
@@ -84,12 +109,6 @@ impl From<i64> for Value {
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Self { float64: value }
-    }
-}
-
-impl Debug for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_fmt(format_args!("u64r {}", self.get_uinteger64()))
     }
 }
 
@@ -138,6 +157,15 @@ impl Value {
     #[inline]
     pub const fn get_float64(&self) -> f64 {
         unsafe { self.float64 }
+    }
+
+    #[inline]
+    pub const fn convert_into_f64(&self, value_type: ValueType) -> f64 {
+        match value_type {
+            ValueType::Integer64 => self.get_integer64() as f64,
+            ValueType::UInteger64 => self.get_uinteger64() as f64,
+            ValueType::Float64 => self.get_float64(),
+        }
     }
 
     #[inline]
@@ -209,23 +237,11 @@ impl Value {
         other: &Self,
         value_type_other: ValueType,
     ) -> Option<Self> {
-        let other = match value_type_other {
-            ValueType::Integer64 => other.get_integer64() as f64,
-            ValueType::UInteger64 => other.get_uinteger64() as f64,
-            ValueType::Float64 => other.get_float64(),
-        };
+        let other = other.convert_into_f64(value_type_other);
         if other == 0f64 {
             None
         } else {
-            Some(
-                (match value_type_self {
-                    ValueType::Integer64 => self.get_integer64() as f64,
-                    ValueType::UInteger64 => self.get_uinteger64() as f64,
-                    ValueType::Float64 => self.get_float64(),
-                })
-                .div(other)
-                .into(),
-            )
+            Some(self.convert_into_f64(value_type_self).div(other).into())
         }
     }
 
@@ -239,23 +255,11 @@ impl Value {
         other: &Self,
         value_type_other: ValueType,
     ) -> Option<Self> {
-        let other = match value_type_other {
-            ValueType::Integer64 => other.get_integer64() as f64,
-            ValueType::UInteger64 => other.get_uinteger64() as f64,
-            ValueType::Float64 => other.get_float64(),
-        };
+        let other = other.convert_into_f64(value_type_other);
         if other == 0f64 {
             None
         } else {
-            Some(
-                (match value_type_self {
-                    ValueType::Integer64 => self.get_integer64() as f64,
-                    ValueType::UInteger64 => self.get_uinteger64() as f64,
-                    ValueType::Float64 => self.get_float64(),
-                })
-                .rem(other)
-                .into(),
-            )
+            Some(self.convert_into_f64(value_type_self).rem(other).into())
         }
     }
 
@@ -271,7 +275,7 @@ impl Value {
     create_value_primitive_fn!(max, max_same, max);
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Vector {
     pub timestamp: Timestamp,
@@ -320,6 +324,10 @@ impl Connection {
 
     pub fn check_stream_exists(&self, stream: impl AsRef<str>) -> bool {
         self.try_get_stream_id_from_matcher(stream).0.is_some()
+    }
+
+    pub fn get_all_streams(&self) -> Vec<(Uuid, String, ValueType)> {
+        self.indexer.borrow().get_all_streams()
     }
 
     pub fn prepare_insert(&mut self, stream: impl AsRef<str>) -> Inserter {
@@ -456,6 +464,4 @@ mod query;
 mod storage;
 mod utils;
 
-pub use storage::file::Header;
-pub use storage::file::HEADER_SIZE;
-pub use storage::file::MAGIC_SIZE;
+pub use crate::storage::file::TimeDataFile;
