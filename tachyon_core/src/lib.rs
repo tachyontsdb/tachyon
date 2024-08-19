@@ -331,7 +331,10 @@ impl Connection {
     }
 
     pub fn prepare_insert(&mut self, stream: impl AsRef<str>) -> Inserter {
-        let stream_id = self.try_get_stream_id_from_matcher(stream).0.unwrap();
+        let stream_id = self
+            .try_get_stream_id_from_matcher(stream.as_ref())
+            .0
+            .unwrap_or_else(|| panic!("Stream {:?} not found in db!", stream.as_ref()));
 
         Inserter {
             value_type: self
