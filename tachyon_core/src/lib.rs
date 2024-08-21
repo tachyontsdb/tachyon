@@ -467,4 +467,8 @@ mod query;
 mod storage;
 mod utils;
 
-pub use crate::storage::file::TimeDataFile;
+#[cfg(feature = "tachyon_benchmarks")]
+pub mod tachyon_benchmarks {
+    pub use crate::storage::file::*;
+    pub use crate::storage::page_cache::PageCache;
+}

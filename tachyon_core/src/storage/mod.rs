@@ -5,6 +5,8 @@ pub mod file;
 pub mod page_cache;
 pub mod writer;
 
+const MAX_NUM_ENTRIES: usize = 62500;
+
 /// Varint decoding
 pub struct FileReaderUtils;
 

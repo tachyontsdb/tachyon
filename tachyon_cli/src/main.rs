@@ -10,7 +10,8 @@ use std::{
     fs::{self, File},
     io::Write,
 };
-use tachyon_core::{Connection, TimeDataFile, Timestamp, ValueType, Vector, FILE_EXTENSION};
+use tachyon_core::tachyon_benchmarks::TimeDataFile;
+use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
 
 const HEADER: &str = r"

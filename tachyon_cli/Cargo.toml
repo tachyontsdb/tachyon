@@ -8,5 +8,5 @@ clap = { version = "4.5.16", features = ["derive"] }
 csv = "1.3.0"
 prettytable-rs = "0.10.0"
 rustyline = "14.0.0"
-tachyon_core = { path = "../tachyon_core" }
+tachyon_core = { path = "../tachyon_core", features = ["tachyon_benchmarks"] }
 textplots = "0.8.6"

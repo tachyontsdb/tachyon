@@ -3,6 +3,9 @@ name = "tachyon_core"
 version = "0.2.0"
 edition = "2021"
 
+[features]
+tachyon_benchmarks = []
+
 [lib]
 crate-type = ["lib", "cdylib"]
 

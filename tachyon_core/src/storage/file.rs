@@ -2,7 +2,7 @@ use super::compression::{
     CompressionEngine, CompressionScheme, DecompressionEngine, DefaultScheme,
 };
 use super::page_cache::{FileId, PageCache, SeqPageRead};
-use super::FileReaderUtils;
+use super::{FileReaderUtils, MAX_NUM_ENTRIES};
 use crate::storage::page_cache::page_cache_sequential_read;
 use crate::{Timestamp, Value, ValueType, Vector};
 use std::cell::RefCell;
@@ -12,12 +12,10 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-pub const MAGIC_SIZE: usize = 4;
+const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
-pub const MAX_NUM_ENTRIES: usize = 62500;
-
-pub const HEADER_SIZE: usize = 63;
+const HEADER_SIZE: usize = 63;
 pub struct Header {
     pub version: u16,
     pub stream_id: u64,
@@ -332,7 +330,7 @@ impl Cursor {
         Some(())
     }
 
-    pub fn next(&mut self) -> Option<Vector> {
+    pub fn next_vector(&mut self) -> Option<Vector> {
         if self.is_done {
             return None;
         }
@@ -385,6 +383,14 @@ impl Cursor {
 
     pub fn value_type(&self) -> ValueType {
         self.header.value_type
+    }
+}
+
+impl Iterator for Cursor {
+    type Item = Vector;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_vector()
     }
 }
 

@@ -1,4 +1,5 @@
-use super::file::{TimeDataFile, MAX_NUM_ENTRIES};
+use super::file::TimeDataFile;
+use super::MAX_NUM_ENTRIES;
 use crate::query::indexer::Indexer;
 use crate::{Timestamp, Value, ValueType, Vector, FILE_EXTENSION};
 use std::cell::RefCell;
