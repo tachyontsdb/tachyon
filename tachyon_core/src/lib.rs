@@ -467,6 +467,9 @@ mod query;
 mod storage;
 mod utils;
 
+#[cfg(test)]
+mod e2e_tests;
+
 #[cfg(feature = "tachyon_benchmarks")]
 pub mod tachyon_benchmarks {
     pub use crate::storage::file::*;

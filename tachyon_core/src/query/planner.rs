@@ -237,3 +237,105 @@ impl<'a> QueryPlanner<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vector_selector_query() {
+        let query_string = r#"http_requests_total{service = "web" or service = "nice"} @ 324"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::VectorSelector(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not a vector selector");
+            }
+        };
+    }
+
+    #[test]
+    fn test_sum_query() {
+        let query_string = r#"sum(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_count_query() {
+        let query_string = r#"count(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_avg_query() {
+        let query_string = r#"avg(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_min_query() {
+        let query_string = r#"min(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_max_query() {
+        let query_string = r#"max(http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_bottomk_query() {
+        let query_string =
+            r#"bottomk(5, http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+
+    #[test]
+    fn test_topk_query() {
+        let query_string = r#"topk(5, http_requests_total{service = "web" or service = "nice"})"#;
+        let res = parser::parse(query_string).unwrap();
+        match res {
+            Expr::Aggregate(selector) => println!("{:#?}", selector),
+            _ => {
+                panic!("not an aggregate");
+            }
+        };
+    }
+}
