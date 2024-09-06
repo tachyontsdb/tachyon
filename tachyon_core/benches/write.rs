@@ -6,7 +6,7 @@ use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use tachyon::storage::file::*;
+use tachyon_core::storage::file::*;
 
 const NUM_ITEMS: u64 = 100000;
 

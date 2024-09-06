@@ -5,7 +5,7 @@ use pprof::{
     flamegraph::Options,
 };
 use std::{cell::RefCell, iter::zip, rc::Rc};
-use tachyon::storage::{file::*, page_cache::PageCache};
+use tachyon_core::storage::{file::*, page_cache::PageCache};
 
 const NUM_ITEMS: u64 = 100000;
 

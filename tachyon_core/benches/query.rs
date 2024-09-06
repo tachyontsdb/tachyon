@@ -6,7 +6,7 @@ use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use tachyon::api::{Connection, TachyonResultType};
+use tachyon_core::api::{Connection, TachyonResultType};
 
 fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
     println!("Reading from: {}", path);
