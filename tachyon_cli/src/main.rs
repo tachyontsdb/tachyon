@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 use csv::{Reader, Writer};
 use prettytable::{row, Table};
 use rustyline::{error::ReadlineError, DefaultEditor};
-use tachyon::{
+use tachyon_core::{
     api::{Connection, TachyonResultType},
     common::{Timestamp, Value},
     storage::file::TimeDataFile,

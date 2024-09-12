@@ -1,0 +1,12 @@
+[package]
+name = "tachyon_cli"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.16", features = ["derive"] }
+csv = "1.3.0"
+prettytable-rs = "0.10.0"
+rustyline = "14.0.0"
+tachyon_core = { path = "../tachyon_core", features = ["tachyon_benchmarks"] }
+textplots = "0.8.6"

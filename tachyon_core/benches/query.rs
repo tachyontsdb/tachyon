@@ -6,7 +6,7 @@ use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use tachyon::api::{Connection, TachyonResultType};
+use tachyon_core::api::{Connection, TachyonResultType};
 
 fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
     println!("Reading from: {}", path);
@@ -45,7 +45,7 @@ fn bench_query(query: &str, start: Option<u64>, end: Option<u64>, conn: &mut Con
 }
 
 fn vector_selector_benchmark(c: &mut Criterion) {
-    let root_dir = PathBuf::from_str("./tmp/db").unwrap();
+    let root_dir = PathBuf::from_str("../tmp/db").unwrap();
     fs::create_dir_all(&root_dir).unwrap();
 
     let queries = vec![
@@ -61,7 +61,7 @@ fn vector_selector_benchmark(c: &mut Criterion) {
 
     let mut conn = Connection::new(root_dir.clone());
 
-    let (timestamps, values) = read_from_csv("./data/voltage_dataset.csv");
+    let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
 
     let mut batch_writer = conn.batch_insert(r#"http_requests_total{service = "web"}"#);
 

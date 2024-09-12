@@ -1,0 +1,10 @@
+language = "C"
+include_guard = "TACHYON_H"
+
+usize_is_size_t = true
+
+[export]
+prefix = "Tachyon"
+
+[enum]
+prefix_with_name = true

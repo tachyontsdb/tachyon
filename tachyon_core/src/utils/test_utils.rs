@@ -3,7 +3,7 @@ use std::{
     str::FromStr,
 };
 
-pub const TEST_DIR: &str = "tmp";
+pub const TEST_DIR: &str = "../tmp";
 
 macro_rules! set_up_dirs {
     ($dir_var:ident, $($x:expr),+ $(,)? ) => {

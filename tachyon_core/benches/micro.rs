@@ -1,7 +1,7 @@
 use std::{path::PathBuf, str::FromStr};
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use tachyon::storage::page_cache::PageCache;
+use tachyon_core::storage::page_cache::PageCache;
 
 fn bench_page_cache_init() -> u64 {
     let _ = PageCache::new(10000);
