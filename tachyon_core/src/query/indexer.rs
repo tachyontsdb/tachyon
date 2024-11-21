@@ -23,6 +23,12 @@ pub struct IdsEntry {
     ids: HashSet<Uuid>,
 }
 
+struct FileMetadata {
+    path: PathBuf,
+    start_timestamp: Timestamp,
+    end_timestamp: Timestamp,
+}
+
 trait IndexerStore {
     fn create_store(&mut self);
     fn drop_store(&mut self);
@@ -36,6 +42,8 @@ trait IndexerStore {
         start: &Timestamp,
         end: &Timestamp,
     ) -> Vec<PathBuf>;
+
+    fn get_all_file_metadatas_for_stream_id(&self, stream_id: &Uuid) -> Vec<FileMetadata>;
 }
 
 struct SQLiteIndexerStore {
@@ -212,6 +220,36 @@ impl IndexerStore for SQLiteIndexerStore {
 
         paths
     }
+
+    fn get_all_file_metadatas_for_stream_id(&self, stream_id: &Uuid) -> Vec<FileMetadata> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "
+            SELECT filename, start, end FROM {} WHERE id = ?
+        ",
+                SQLITE_ID_TO_FILENAME_TABLE
+            ))
+            .unwrap();
+
+        stmt.query((stream_id,))
+            .unwrap()
+            .mapped(|row| {
+                Ok(FileMetadata {
+                    path: PathBuf::from(row.get::<usize, String>(0).unwrap()),
+                    start_timestamp: row.get::<usize, Timestamp>(1).unwrap(),
+                    end_timestamp: row.get::<usize, Timestamp>(2).unwrap(),
+                })
+            })
+            .map(|metadata| metadata.unwrap())
+            .collect::<Vec<FileMetadata>>()
+    }
+}
+
+pub struct StreamMetadata {
+    num_files: usize,
+    min_timestamp: Option<Timestamp>,
+    max_timestamp: Option<Timestamp>,
 }
 
 pub struct Indexer {
@@ -275,6 +313,16 @@ impl Indexer {
         end: &Timestamp,
     ) -> Vec<PathBuf> {
         self.store.get_files_for_stream_id(stream_id, start, end)
+    }
+
+    pub fn get_stream_metadata(&self, stream_id: &Uuid) -> StreamMetadata {
+        let all_files = self.store.get_all_file_metadatas_for_stream_id(stream_id);
+
+        StreamMetadata {
+            num_files: all_files.len(),
+            min_timestamp: all_files.iter().map(|file| file.start_timestamp).min(),
+            max_timestamp: all_files.iter().map(|file| file.end_timestamp).max(),
+        }
     }
 }
 
@@ -384,6 +432,45 @@ mod tests {
 
         let file4 = PathBuf::from(format!("{}/{}/file4.ty", dirs[0].to_str().unwrap(), id2));
         indexer.insert_new_file(&id2, &file4, &5, &8);
+
+        indexer.drop_store();
+    }
+
+    #[test]
+    fn get_stream_metadata() {
+        set_up_dirs!(dirs, "db");
+
+        // seed indexer storage
+        let mut indexer = Indexer::new(dirs[0].clone());
+        indexer.drop_store();
+        indexer.create_store();
+        let stream = "https";
+        let matchers = Matchers::new(vec![
+            Matcher::new(MatchOp::Equal, "app", "dummy"),
+            Matcher::new(MatchOp::Equal, "service", "backend"),
+        ]);
+        let id = indexer.insert_new_id(stream, &matchers);
+
+        let metadata = indexer.get_stream_metadata(&id);
+        assert_eq!(metadata.min_timestamp, None);
+        assert_eq!(metadata.max_timestamp, None);
+        assert_eq!(metadata.num_files, 0);
+
+        let file1 = PathBuf::from(format!("{}/{}/file1.ty", dirs[0].to_str().unwrap(), id));
+        indexer.insert_new_file(&id, &file1, &1, &3);
+
+        let file2 = PathBuf::from(format!("{}/{}/file2.ty", dirs[0].to_str().unwrap(), id));
+        indexer.insert_new_file(&id, &file2, &3, &5);
+
+        let file3 = PathBuf::from(format!("{}/{}/file3.ty", dirs[0].to_str().unwrap(), id));
+        indexer.insert_new_file(&id, &file3, &5, &7);
+
+        // query indexer storage
+        let metadata = indexer.get_stream_metadata(&id);
+
+        assert_eq!(metadata.min_timestamp, Some(1));
+        assert_eq!(metadata.max_timestamp, Some(7));
+        assert_eq!(metadata.num_files, 3);
 
         indexer.drop_store();
     }

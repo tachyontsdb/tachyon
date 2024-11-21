@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use csv::{Reader, Writer};
+use csv::Writer;
 use prettytable::{row, Table};
 use rustyline::{error::ReadlineError, DefaultEditor};
 use tachyon_core::{
@@ -15,6 +15,10 @@ use tachyon_core::{
     storage::file::TimeDataFile,
 };
 use textplots::{Chart, Plot, Shape};
+
+mod ingestion;
+
+use ingestion::{csv::Csv, Ingestor};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -38,16 +42,18 @@ enum Commands {
         export_path: Option<String>,
     },
 
-    Csv {
-        file: String,
-        matcher: String,
-    },
-
     Debug {
         file: String,
 
         #[arg(short, long)]
         csv: Option<String>,
+    },
+
+    Ingest {
+        matcher: String,
+
+        #[command(subcommand)]
+        ingestion: ingestion::Ingestion,
     },
 }
 
@@ -179,31 +185,6 @@ fn export_as_csv(path: &Path, timeseries: &Vec<(f32, f32)>) {
     }
 }
 
-fn insert_from_csv(mut conn: Connection, matcher: String, file: String) {
-    fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
-        println!("Reading from: {}", path);
-        let mut rdr = Reader::from_path(path).unwrap();
-
-        let mut timestamps = Vec::new();
-        let mut values = Vec::new();
-        for result in rdr.records() {
-            let record = result.unwrap();
-            timestamps.push(record[0].parse::<u64>().unwrap());
-            values.push(record[1].parse::<u64>().unwrap());
-        }
-        println!("Done reading from: {}\n", path);
-
-        (timestamps, values)
-    }
-
-    let (time, values) = read_from_csv(&file);
-    let mut batch_writer = conn.batch_insert(&matcher);
-    for (t, v) in zip(time, values) {
-        batch_writer.insert(t, v);
-    }
-    drop(conn);
-}
-
 pub fn main() {
     let args = Args::parse();
 
@@ -219,8 +200,26 @@ pub fn main() {
             Commands::Query { query, export_path } => {
                 handle_query_command(&mut conn, query, export_path)
             }
-            Commands::Csv { file, matcher } => insert_from_csv(conn, matcher, file),
             Commands::Debug { file, csv } => handle_debug_command(conn, file, csv),
+            Commands::Ingest { ingestion, matcher } => {
+                let mut batch_writer = conn.batch_insert(&matcher);
+                match ingestion {
+                    ingestion::Ingestion::Csv {
+                        path,
+                        timestamp_column,
+                        value_column,
+                        attribute_columns,
+                        timestamp_format,
+                    } => Csv::new(
+                        path,
+                        timestamp_column,
+                        value_column,
+                        attribute_columns,
+                        timestamp_format,
+                    )
+                    .ingest(&mut batch_writer),
+                }
+            }
         },
         None => repl(conn),
     }

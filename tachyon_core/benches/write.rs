@@ -61,7 +61,7 @@ fn write_sequential(c: &mut Criterion) {
 }
 
 fn write_memory_dataset(c: &mut Criterion) {
-    let (timestamps, values) = read_from_csv("./data/memory_dataset.csv");
+    let (timestamps, values) = read_from_csv("../data/memory_dataset.csv");
     c.bench_function(
         &format!(
             "tachyon: write memory dataset ({} entries)",
@@ -72,7 +72,7 @@ fn write_memory_dataset(c: &mut Criterion) {
 }
 
 fn write_voltage_dataset(c: &mut Criterion) {
-    let (timestamps, values) = read_from_csv("./data/voltage_dataset.csv");
+    let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
     c.bench_function(
         &format!(
             "tachyon: write voltage dataset ({} entries)",
