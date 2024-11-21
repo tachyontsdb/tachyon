@@ -1,59 +1,60 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    fs,
-    mem::size_of,
-    path::{Path, PathBuf},
-    rc::Rc,
-};
-
+use super::file::TimeDataFile;
+use super::MAX_NUM_ENTRIES;
+use crate::query::indexer::Indexer;
+use crate::{Timestamp, Value, ValueType, Vector, FILE_EXTENSION};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use uuid::Uuid;
 
-use crate::{
-    common::{Timestamp, Value},
-    query::indexer::Indexer,
-};
-
-use super::file::{TimeDataFile, MAX_NUM_ENTRIES};
-
 pub struct Writer {
-    open_data_files: HashMap<Uuid, TimeDataFile>, // stream id to in-mem file
+    open_data_files: HashMap<Uuid, TimeDataFile>, // Stream ID to in-mem file
     root: PathBuf,
     indexer: Rc<RefCell<Indexer>>,
+    version: u16,
 }
 
 impl Writer {
-    pub fn new(root: PathBuf, indexer: Rc<RefCell<Indexer>>) -> Self {
+    pub fn new(root: impl AsRef<Path>, indexer: Rc<RefCell<Indexer>>, version: u16) -> Self {
         Writer {
             open_data_files: HashMap::new(),
-            root,
+            root: root.as_ref().to_path_buf(),
             indexer,
+            version,
         }
     }
 
-    pub fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value) {
-        let file = self.open_data_files.entry(stream_id).or_default();
+    pub fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value, value_type: ValueType) {
+        let file = self
+            .open_data_files
+            .entry(stream_id)
+            .or_insert(TimeDataFile::new(self.version, 0u64, value_type)); // TODO: Add stream id
 
         file.write_data_to_file_in_mem(ts, v);
         if file.num_entries() >= MAX_NUM_ENTRIES {
             let file_path = Writer::derive_file_path(&self.root, stream_id, file);
             file.write(file_path.clone());
             self.indexer.borrow_mut().insert_new_file(
-                &stream_id,
+                stream_id,
                 &file_path,
-                &file.header.min_timestamp,
-                &file.header.max_timestamp,
+                file.header.min_timestamp,
+                file.header.max_timestamp,
             );
             self.open_data_files.remove_entry(&stream_id);
         }
     }
 
-    pub fn batch_write(&mut self, stream_id: Uuid, batch: &[(Timestamp, Value)]) {
+    pub fn batch_write(&mut self, stream_id: Uuid, batch: &[Vector], value_type: ValueType) {
         let mut entries_written: usize = 0;
         let num_entries = batch.len();
 
         while entries_written != num_entries {
-            let file = self.open_data_files.entry(stream_id).or_default();
+            let file = self
+                .open_data_files
+                .entry(stream_id)
+                .or_insert(TimeDataFile::new(self.version, 0u64, value_type)); // TODO: Add stream id
 
             entries_written += file.write_batch_data_to_file_in_mem(&batch[entries_written..]);
 
@@ -66,8 +67,8 @@ impl Writer {
 
     pub fn create_stream(&self, stream_id: Uuid) {
         let stream = self.root.join(stream_id.to_string());
-        if !Path::new(&stream).exists() {
-            fs::create_dir(stream);
+        if !stream.exists() {
+            fs::create_dir(stream).unwrap();
         }
     }
 
@@ -76,17 +77,22 @@ impl Writer {
             let file_path = Writer::derive_file_path(&self.root, *stream_id, file);
             file.write(file_path.clone());
             self.indexer.borrow_mut().insert_new_file(
-                stream_id,
+                *stream_id,
                 &file_path,
-                &file.header.min_timestamp,
-                &file.header.max_timestamp,
+                file.header.min_timestamp,
+                file.header.max_timestamp,
             )
         }
         self.open_data_files.clear();
     }
 
-    fn derive_file_path(root: &Path, stream_id: Uuid, file: &TimeDataFile) -> PathBuf {
-        root.join(format!("{}/{}.ty", stream_id, file.get_file_name()))
+    fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, file: &TimeDataFile) -> PathBuf {
+        root.as_ref().join(format!(
+            "{}/{}.{}",
+            stream_id,
+            file.get_file_name(),
+            FILE_EXTENSION
+        ))
     }
 }
 
@@ -99,7 +105,7 @@ impl Drop for Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::test_utils::*;
+    use crate::utils::test::*;
     use std::fs;
 
     // Gets all files from directory sorted from smallest to highest file name suffix
@@ -148,16 +154,18 @@ mod tests {
         let stream_id = Uuid::new_v4();
 
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        let mut writer = Writer::new(dirs[0].clone(), indexer);
+        indexer.borrow_mut().create_store();
+
+        let mut writer = Writer::new(dirs[0].clone(), indexer, 0);
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
         writer.create_stream(stream_id);
 
-        for i in 0..MAX_NUM_ENTRIES {
+        for i in 0..MAX_NUM_ENTRIES as u64 {
             let ts = i as Timestamp;
-            let v = (i * 1000) as Value;
-            writer.write(stream_id, ts, v);
+            let v = (i * 1000).into();
+            writer.write(stream_id, ts, v, ValueType::UInteger64);
             timestamps.push(ts);
             values.push(v);
         }
@@ -166,7 +174,11 @@ mod tests {
 
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].timestamps, timestamps);
-        assert_eq!(files[0].values, values);
+        assert_eq!(files[0].values.len(), values.len());
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..values.len() {
+            assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
+        }
     }
 
     #[test]
@@ -175,7 +187,8 @@ mod tests {
         let stream_ids = [Uuid::new_v4(), Uuid::new_v4()];
 
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        let mut writer = Writer::new(dirs[0].clone(), indexer);
+        indexer.borrow_mut().create_store();
+        let mut writer = Writer::new(dirs[0].clone(), indexer, 0);
 
         let mut timestamps = [Vec::<Timestamp>::new(), Vec::<Timestamp>::new()];
         let mut values = [Vec::<Value>::new(), Vec::<Value>::new()];
@@ -184,11 +197,11 @@ mod tests {
             writer.create_stream(stream_id);
         }
 
-        for i in 0..MAX_NUM_ENTRIES {
+        for i in 0..MAX_NUM_ENTRIES as u64 {
             for (j, stream_id) in stream_ids.iter().enumerate() {
                 let ts = i as Timestamp;
-                let v = (i * 1000) as Value;
-                writer.write(*stream_id, ts, v);
+                let v = (i * 1000).into();
+                writer.write(*stream_id, ts, v, ValueType::UInteger64);
                 timestamps[j].push(ts);
                 values[j].push(v);
             }
@@ -198,7 +211,10 @@ mod tests {
             let files = get_files(&dirs[0].join(stream_id.to_string()));
             assert_eq!(files.len(), 1);
             assert_eq!(files[0].timestamps, timestamps[0]);
-            assert_eq!(files[0].values, values[0]);
+            assert_eq!(files[0].values.len(), values[0].len());
+            for i in 0..values[0].len() {
+                assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[0][i]));
+            }
         }
     }
 
@@ -211,7 +227,7 @@ mod tests {
         let mut base: usize = 0;
 
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        let mut writer = Writer::new(dirs[0].clone(), indexer);
+        let mut writer = Writer::new(dirs[0].clone(), indexer, 0);
         let mut timestamps_per_file = [
             Vec::<Timestamp>::new(),
             Vec::<Timestamp>::new(),
@@ -233,17 +249,17 @@ mod tests {
             writer: &mut Writer,
             stream_id: Uuid,
         ) {
-            let mut entries: Vec<(u64, u64)> = Vec::<(Timestamp, Value)>::with_capacity(n);
+            let mut entries = Vec::<Vector>::with_capacity(n);
 
             for i in 0..n {
-                let ts = (base + i) as Timestamp;
-                let v = (i * 1000) as Value;
-                entries.push((ts, v));
-                timestamps_per_file[(*count / MAX_NUM_ENTRIES)].push(ts);
-                values_per_file[(*count / MAX_NUM_ENTRIES)].push(v);
+                let timestamp = (base + i) as Timestamp;
+                let value = ((i * 1000) as u64).into();
+                entries.push(Vector { timestamp, value });
+                timestamps_per_file[*count / MAX_NUM_ENTRIES].push(timestamp);
+                values_per_file[*count / MAX_NUM_ENTRIES].push(value);
                 *count += 1;
             }
-            writer.batch_write(stream_id, &entries);
+            writer.batch_write(stream_id, &entries, ValueType::UInteger64);
         }
 
         writer.create_stream(stream_id);
@@ -266,7 +282,10 @@ mod tests {
 
         for i in 0..3 {
             assert_eq!(files[i].timestamps, timestamps_per_file[i]);
-            assert_eq!(files[i].values, values_per_file[i]);
+            assert_eq!(files[i].values.len(), values_per_file[i].len());
+            for j in 0..values_per_file[i].len() {
+                assert!(files[i].values[j].eq_same(ValueType::UInteger64, &values_per_file[i][j]));
+            }
         }
     }
 }

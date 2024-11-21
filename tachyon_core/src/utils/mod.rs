@@ -1,6 +1,10 @@
 #[cfg(test)]
-pub mod test_utils;
+pub mod test;
 
-pub mod file_utils;
+macro_rules! static_assert {
+    ($($tt: tt)*) => {
+        const _: () = assert!($($tt)*);
+    }
+}
 
-pub mod common;
+pub(crate) use static_assert;

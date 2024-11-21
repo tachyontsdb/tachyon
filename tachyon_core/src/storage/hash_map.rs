@@ -1,6 +1,6 @@
-use std::ptr::{null, null_mut};
+use std::ptr;
 
-// not safe to clone unless option is None
+/// Not safe to clone unless next is null
 #[derive(Clone)]
 struct Node<V> {
     key: u64,
@@ -8,16 +8,16 @@ struct Node<V> {
     next: *mut Node<V>,
 }
 
-pub(crate) struct IDLookup<V: Sized + Copy> {
-    table: Vec<*mut Node<V>>,
+pub struct IDLookup<V: Copy> {
     size: usize,
+    table: Vec<*mut Node<V>>,
 }
 
 impl<V: Copy> IDLookup<V> {
-    pub fn new_with_size(size: usize) -> Self {
+    pub fn new_with_capacity(capacity: usize) -> Self {
         IDLookup {
-            table: vec![null_mut(); size],
             size: 0,
+            table: vec![ptr::null_mut(); capacity],
         }
     }
 
@@ -25,7 +25,7 @@ impl<V: Copy> IDLookup<V> {
         let idx = (*key as usize) % self.table.len();
         let mut cur = self.table[idx];
         unsafe {
-            while (!cur.is_null() && (*cur).key != *key) {
+            while !cur.is_null() && (*cur).key != *key {
                 cur = (*cur).next;
             }
         }
@@ -40,7 +40,7 @@ impl<V: Copy> IDLookup<V> {
         let idx = (key as usize) % self.table.len();
         let mut cur = self.table[idx];
         unsafe {
-            while (!cur.is_null() && (*cur).key != key) {
+            while !cur.is_null() && (*cur).key != key {
                 cur = (*cur).next;
             }
         }
@@ -57,12 +57,13 @@ impl<V: Copy> IDLookup<V> {
             }
         }
     }
+
     pub fn remove(&mut self, key: &u64) {
         let idx = (*key as usize) % self.table.len();
         let mut cur = self.table[idx];
-        let mut prev = null_mut();
+        let mut prev = ptr::null_mut();
         unsafe {
-            while (!cur.is_null() && (*cur).key != *key) {
+            while !cur.is_null() && (*cur).key != *key {
                 prev = cur;
                 cur = (*cur).next;
             }
@@ -85,25 +86,13 @@ impl<V: Copy> IDLookup<V> {
     }
 }
 
-impl<V: Copy> Drop for IDLookup<V> {
-    fn drop(&mut self) {
-        while let Some(mut item) = self.table.pop() {
-            while !item.is_null() {
-                let next = unsafe { (*item).next };
-                unsafe { drop(Box::from_raw(item)) };
-                item = next;
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_get() {
-        let mut hm = IDLookup::<u64>::new_with_size(10);
+        let mut hm = IDLookup::<u64>::new_with_capacity(10);
         assert_eq!(hm.get(&4), None);
 
         hm.insert(45, 234);
@@ -124,7 +113,7 @@ mod tests {
 
     #[test]
     fn test_insert_remove() {
-        let mut hm = IDLookup::<u64>::new_with_size(10);
+        let mut hm = IDLookup::<u64>::new_with_capacity(10);
         hm.insert(4, 5);
 
         // will all get inserted into same bucket

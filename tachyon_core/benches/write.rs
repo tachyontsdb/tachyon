@@ -1,40 +1,39 @@
-use std::iter::zip;
-
 use criterion::{criterion_group, criterion_main, Criterion};
 use csv::Reader;
 use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use tachyon_core::storage::file::*;
+use std::iter::zip;
+use tachyon_core::{tachyon_benchmarks::*, ValueType};
 
 const NUM_ITEMS: u64 = 100000;
 
 fn bench_write_sequential_timestamps(start: u64, end: u64) {
-    let mut model = TimeDataFile::new();
+    let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
     for i in start..=end {
-        model.write_data_to_file_in_mem(i, i + (i % 100));
+        model.write_data_to_file_in_mem(i, (i + (i % 100)).into());
     }
-    model.write("../tmp/bench_sequential_write.ty".into());
-    std::fs::remove_file("../tmp/bench_sequential_write.ty").unwrap();
+    model.write("./tmp/bench_sequential_write.ty".into());
+    std::fs::remove_file("./tmp/bench_sequential_write.ty").unwrap();
 }
 
 fn bench_write_memory_dataset(timestamps: &[u64], values: &[u64]) {
-    let mut model = TimeDataFile::new();
+    let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
     for (ts, v) in zip(timestamps, values) {
-        model.write_data_to_file_in_mem(*ts, *v);
+        model.write_data_to_file_in_mem(*ts, (*v).into());
     }
-    model.write("../tmp/bench_write_memory_dataset.ty".into());
-    std::fs::remove_file("../tmp/bench_write_memory_dataset.ty").unwrap();
+    model.write("./tmp/bench_write_memory_dataset.ty".into());
+    std::fs::remove_file("./tmp/bench_write_memory_dataset.ty").unwrap();
 }
 
 fn bench_write_voltage_dataset(timestamps: &[u64], values: &[u64]) {
-    let mut model = TimeDataFile::new();
+    let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
     for (ts, v) in zip(timestamps, values) {
-        model.write_data_to_file_in_mem(*ts, *v);
+        model.write_data_to_file_in_mem(*ts, (*v).into());
     }
-    model.write("../tmp/bench_write_voltage_dataset.ty".into());
-    std::fs::remove_file("../tmp/bench_write_voltage_dataset.ty").unwrap();
+    model.write("./tmp/bench_write_voltage_dataset.ty".into());
+    std::fs::remove_file("./tmp/bench_write_voltage_dataset.ty").unwrap();
 }
 
 fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {

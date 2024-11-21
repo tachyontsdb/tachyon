@@ -1,32 +1,49 @@
 # Tachyon DB
 
-## Running Unit Tests
+A lightweight and local time-series database.
+
+## Building
 ```
-cargo test
+cargo build --locked --release
 ```
 
-## Running Clippy
+C/C++ headers will be included in the output directory.
+
+## Running Lints
+
+### Cargo Format
 ```
-cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all --check
 ```
 
-## Running Benchmarks
+### Clippy
+```
+cargo clippy --all-targets --all-features --locked --release -- -D warnings
+```
+
+## Running Tests and Benchmarks
 First, unzip the `data.zip` file. This should create a `./data` directory.
 ```
 unzip data.zip
 ```
 
-Then run:
+### Tests
 ```
-cargo bench --bench <bench-name>
-```
-
-To generate flamegraphs along with the benchmark:
-```
-cargo bench --bench <bench-name> -- --profile-time=20
+cargo test --locked --release
 ```
 
-If running Timescale DB benchmarks, first run the following before running the timescaledb benchmark:
+### Benchmarks
+```
+cargo bench --locked --bench <bench-name>
+```
+
+#### Flamegraphs
+```
+cargo bench --locked --bench <bench-name> -- --profile-time=20
+```
+
+#### Timescale DB
+> Note: If running Timescale DB benchmarks, first run the following before running the timescaledb benchmark:
 ```
 docker run -d --name timescaledb -p 5432:5432 -e POSTGRES_PASSWORD=password timescale/timescaledb-ha:pg16
 ```

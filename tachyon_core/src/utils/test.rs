@@ -1,7 +1,7 @@
-use std::{
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+use crate::storage::file::TimeDataFile;
+use crate::{Timestamp, Value, ValueType};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub const TEST_DIR: &str = "../tmp";
 
@@ -27,7 +27,7 @@ macro_rules! set_up_dirs {
             _new_dirs[i] = _new_dirs[i].clone() + &dir;
         }
 
-        let _tmp = crate::utils::test_utils::TestDir::new_and_create(&_new_dirs);
+        let _tmp = crate::utils::test::TestDir::new_and_create(&_new_dirs);
         let $dir_var = _tmp.dirs.clone();
     };
 }
@@ -39,19 +39,18 @@ pub struct TestDir {
 }
 
 impl TestDir {
-    pub fn new_and_create<S: AsRef<str>>(dirs: &[S]) -> Self {
-        if (!Path::new(TEST_DIR).exists()) {
-            std::fs::create_dir_all(TEST_DIR);
+    pub fn new_and_create(dirs: &[impl AsRef<str>]) -> Self {
+        if !Path::new(TEST_DIR).exists() {
+            fs::create_dir_all(TEST_DIR).unwrap();
         }
-
         let mut new_dirs: Vec<PathBuf> = Vec::new();
-
         for dir in dirs {
             let new_path = Path::new(TEST_DIR).join(dir.as_ref());
-            std::fs::create_dir_all(&new_path);
+            fs::create_dir_all(&new_path).unwrap();
             new_dirs.push(new_path);
         }
         println!("Test Paths: {:#?}", new_dirs);
+
         Self { dirs: new_dirs }
     }
 }
@@ -59,7 +58,7 @@ impl TestDir {
 impl Drop for TestDir {
     fn drop(&mut self) {
         for dir in &self.dirs {
-            std::fs::remove_dir_all(dir);
+            fs::remove_dir_all(dir).unwrap();
         }
     }
 }
@@ -78,38 +77,33 @@ impl Drop for TestDir {
    The files specified by the paths will be dropped when the scope of which the macro is called is done (RAII).
 */
 macro_rules! set_up_files {
-        ($path_var:ident, $($x:expr),+ $(,)?) => {
-            let _name = {
-                fn f() {}
-                fn type_name_of<T>(_: T) -> &'static str {
-                    std::any::type_name::<T>()
-                }
-                let name = type_name_of(f);
-
-                // Find and cut the rest of the path
-                match &name[..name.len() - 3].rfind(':') {
-                    Some(pos) => &name[pos + 1..name.len() - 3],
-                    None => &name[..name.len() - 3],
-                }
-            };
-            let _paths = vec![$($x.to_string()),+];
-            let _name = _name.to_string() + "$";
-            let mut _new_paths = vec![_name; _paths.len()];
-            for (i, path) in _paths.iter().enumerate() {
-                _new_paths[i] = _new_paths[i].clone() + &path;
+    ($path_var:ident, $($x:expr),+ $(,)?) => {
+        let _name = {
+            fn f() {}
+            fn type_name_of<T>(_: T) -> &'static str {
+                std::any::type_name::<T>()
             }
+            let name = type_name_of(f);
 
-            let _tmp = crate::utils::test_utils::TestFile::new(&_new_paths);
-            let $path_var = _tmp.paths.clone();
+            // Find and cut the rest of the path
+            match &name[..name.len() - 3].rfind(':') {
+                Some(pos) => &name[pos + 1..name.len() - 3],
+                None => &name[..name.len() - 3],
+            }
         };
-    }
+        let _paths = vec![$($x.to_string()),+];
+        let _name = _name.to_string() + "$";
+        let mut _new_paths = vec![_name; _paths.len()];
+        for (i, path) in _paths.iter().enumerate() {
+            _new_paths[i] = _new_paths[i].clone() + &path;
+        }
+
+        let _tmp = crate::utils::test::TestFile::new(&_new_paths);
+        let $path_var = _tmp.paths.clone();
+    };
+}
 
 pub(crate) use set_up_files;
-
-use crate::{
-    common::{Timestamp, Value},
-    storage::file::TimeDataFile,
-};
 
 // Will create and drop a file with a given path
 pub struct TestFile {
@@ -117,27 +111,27 @@ pub struct TestFile {
 }
 
 impl TestFile {
-    pub fn new<S: AsRef<str>>(paths: &[S]) -> Self {
-        if (!Path::new(TEST_DIR).exists()) {
-            std::fs::create_dir_all(TEST_DIR);
+    pub fn new(paths: &[impl AsRef<str>]) -> Self {
+        if !Path::new(TEST_DIR).exists() {
+            fs::create_dir_all(TEST_DIR).unwrap();
         }
         let mut new_paths: Vec<PathBuf> = Vec::new();
-
         for path in paths {
             let new_path = Path::new(TEST_DIR).join(path.as_ref());
             new_paths.push(new_path);
         }
         println!("Test Paths: {:#?}", new_paths);
+
         Self { paths: new_paths }
     }
 
-    pub fn new_and_create<S: AsRef<str>>(paths: &[S]) -> Self {
-        if (!Path::new(TEST_DIR).exists()) {
-            std::fs::create_dir_all(TEST_DIR);
+    pub fn new_and_create(paths: &[impl AsRef<str>]) -> Self {
+        if !Path::new(TEST_DIR).exists() {
+            fs::create_dir_all(TEST_DIR).unwrap();
         }
         for path in paths {
             let new_path = Path::new(TEST_DIR).join(path.as_ref());
-            std::fs::File::create(&new_path);
+            fs::File::create(&new_path).unwrap();
         }
 
         Self::new(paths)
@@ -147,14 +141,14 @@ impl TestFile {
 impl Drop for TestFile {
     fn drop(&mut self) {
         for path in &self.paths {
-            std::fs::remove_file(path);
+            fs::remove_file(path).unwrap();
         }
     }
 }
 
 pub fn generate_ty_file(path: PathBuf, timestamps: &[Timestamp], values: &[Value]) {
     assert!(timestamps.len() == values.len());
-    let mut model = TimeDataFile::new();
+    let mut model = TimeDataFile::new(0, 0u64, ValueType::UInteger64);
 
     for i in 0..timestamps.len() {
         model.write_data_to_file_in_mem(timestamps[i], values[i])
@@ -164,13 +158,9 @@ pub fn generate_ty_file(path: PathBuf, timestamps: &[Timestamp], values: &[Value
 
 #[cfg(test)]
 mod tests {
+    use crate::utils::test::{TestDir, TestFile, TEST_DIR};
+    use std::fs::File;
     use std::path::Path;
-    use std::str::FromStr;
-
-    use super::set_up_files;
-    use super::TestDir;
-    use super::TestFile;
-    use super::TEST_DIR;
 
     #[test]
     fn test_file_no_creation() {
@@ -179,7 +169,7 @@ mod tests {
         let expected_path = TEST_DIR.to_string() + "/test_file_no_creation.ty";
         assert!(!Path::new(&expected_path.as_str()).exists());
 
-        std::fs::File::create(&expected_path);
+        File::create(&expected_path).unwrap();
         drop(file);
         assert!(!Path::new(&expected_path.as_str()).exists());
     }
