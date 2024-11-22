@@ -9,12 +9,14 @@ pub type Value = u64;
 #[repr(u8)]
 pub enum TachyonValueType {
     UnsignedInteger,
+    SignedInteger,
     Float,
 }
 
 #[repr(C)]
-pub struct TachyonValue {
+pub union TachyonValue {
     pub unsigned_integer: u64,
+    pub signed_integer: i64,
     pub floating: f64,
 }
 
@@ -71,7 +73,6 @@ impl TestData {
         self.i += 1;
         Some(TachyonValue {
             floating: self.floats[self.i - 1],
-            unsigned_integer: 0,
         })
     }
 
@@ -82,7 +83,6 @@ impl TestData {
         self.i += 1;
         Some(TachyonValue {
             unsigned_integer: self.u64s[self.i - 1],
-            floating: 0.0,
         })
     }
     fn reset(&mut self) {
@@ -213,6 +213,36 @@ fn bench_test_data_u64_2(test_data: &mut TestData2) -> u64 {
     res
 }
 
+fn bench_add_1(test_data_1: &mut TestData, test_data_2: &mut TestData) -> f64 {
+    let mut res = 0.0;
+    loop {
+        let value = test_data_1.get_next_float();
+        let value_2 = test_data_2.get_next_float();
+        if value.is_none() {
+            break;
+        }
+        res += unsafe { value.unwrap().floating + value_2.unwrap().floating };
+    }
+    test_data_1.reset();
+    test_data_2.reset();
+    res
+}
+
+fn bench_add_2(test_data_1: &mut TestData2, test_data_2: &mut TestData2) -> f64 {
+    let mut res = 0.0;
+    loop {
+        let value = test_data_1.get_next_float();
+        let value_2 = test_data_2.get_next_float();
+        if value.is_null() {
+            break;
+        }
+        res += unsafe { *(value as *const f64) + *(value_2 as *const f64) };
+    }
+    test_data_1.reset();
+    test_data_2.reset();
+    res
+}
+
 fn criterion_benchmark(c: &mut Criterion) {
     let mut test_data_1 = TestData::new();
 
@@ -231,6 +261,16 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     c.bench_function("int parsing 2", |b| {
         b.iter(|| bench_test_data_u64_2(&mut test_data_2));
+    });
+
+    let mut test_data_12 = TestData::new();
+    c.bench_function("add 1", |b| {
+        b.iter(|| bench_add_1(&mut test_data_1, &mut test_data_12));
+    });
+
+    let mut test_data_22 = TestData2::new();
+    c.bench_function("add 2", |b| {
+        b.iter(|| bench_add_2(&mut test_data_2, &mut test_data_22));
     });
 }
 
