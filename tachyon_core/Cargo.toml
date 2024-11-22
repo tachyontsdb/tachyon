@@ -37,6 +37,10 @@ harness = false
 name = "write"
 harness = false
 
+[[bench]]
+name = "float"
+harness = false
+
 [dependencies]
 promql-parser = "0.4.0"
 rusqlite = { version = "0.32.1", features = ["serde_json", "bundled", "uuid"] }
