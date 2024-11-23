@@ -19,11 +19,14 @@ type PageId = u32;
 type FrameId = usize;
 
 const FILE_SIZE: usize = 1_000_000;
+
+// < Page_info.num_bytes
 const PAGE_SIZE: usize = 4_096;
 
 struct PageInfo {
     file_id: FileId,
     page_id: PageId,
+    size: u16,
     data: [u8; PAGE_SIZE],
 }
 
@@ -85,6 +88,7 @@ impl SeqPageRead {
                 file_id,
                 page_id,
                 data,
+                size,
             }) = page_cache.frames[self.frame_id]
             {
                 if self.file_id != file_id || self.cur_page_id != page_id {
@@ -98,10 +102,14 @@ impl SeqPageRead {
                 file_id,
                 page_id,
                 data,
+                size,
             }) = &mut page_cache.frames[self.frame_id]
             {
-                let num_bytes =
-                    (PAGE_SIZE - (self.offset % PAGE_SIZE)).min(buffer.len() - bytes_copied);
+                debug_assert!(*size as usize >= (self.offset % PAGE_SIZE));
+                let num_bytes = (PAGE_SIZE - (self.offset % PAGE_SIZE))
+                    .min(buffer.len() - bytes_copied)
+                    .min(*size as usize - (self.offset % PAGE_SIZE));
+
                 let data_to_copy =
                     &data[(self.offset % PAGE_SIZE)..(self.offset % PAGE_SIZE) + num_bytes];
                 self.offset += num_bytes;
@@ -111,9 +119,12 @@ impl SeqPageRead {
                 if self.offset % PAGE_SIZE == 0 {
                     self.cur_page_id += 1;
                 }
+
+                if (*size as usize) < PAGE_SIZE {
+                    break;
+                }
             }
         }
-
         bytes_copied
     }
 }
@@ -187,20 +198,21 @@ impl PageCache {
                     .remove(&(((info.file_id as u64) << 32) | (info.page_id as u64)));
             }
 
+            let mut data = [0; PAGE_SIZE];
+
+            let bytes_read = self
+                .open_files
+                .get_mut(&file_id)
+                .unwrap()
+                .read_at(&mut data, ((PAGE_SIZE as PageId) * page_id) as u64)
+                .unwrap();
+
             let mut new_page_info = PageInfo {
                 file_id,
                 page_id,
-                data: [0; PAGE_SIZE],
+                data,
+                size: bytes_read as u16,
             };
-
-            self.open_files
-                .get_mut(&file_id)
-                .unwrap()
-                .read_at(
-                    &mut new_page_info.data,
-                    ((PAGE_SIZE as PageId) * page_id) as u64,
-                )
-                .unwrap();
 
             self.mapping
                 .insert(((file_id as u64) << 32) | (page_id as u64), frame_id);
@@ -224,6 +236,7 @@ impl PageCache {
                 file_id,
                 page_id,
                 data,
+                size,
             }) = &mut self.frames[frame_id]
             {
                 let num_bytes = (PAGE_SIZE - (offset % PAGE_SIZE)).min(buffer.len() - bytes_copied);
@@ -265,6 +278,7 @@ mod tests {
         common::{Timestamp, Value},
         storage::{file::TimeDataFile, page_cache::page_cache_sequential_read},
     };
+    use std::io::Read;
     use std::{cell::RefCell, cmp::min, fs::File, io::Write, path::PathBuf, rc::Rc, str::FromStr};
 
     #[test]
@@ -300,7 +314,7 @@ mod tests {
     fn test_read_sequential_whole_file() {
         set_up_files!(file_paths, "test.ty", "expected.ty");
 
-        let mut page_cache = PageCache::new(10);
+        let mut page_cache = PageCache::new(1);
         let mut model = TimeDataFile::new();
         for i in 0..100000u64 {
             model.write_data_to_file_in_mem(i, i + 10);
@@ -310,8 +324,9 @@ mod tests {
         let file_id = page_cache.register_or_get_file_id(&file_paths[0]);
         assert_eq!(file_id, 0);
 
-        let mut seq_read =
-            page_cache_sequential_read(Rc::new(RefCell::new(page_cache)), file_id, 0);
+        let page_cache = Rc::new(RefCell::new(page_cache));
+
+        let mut seq_read = page_cache_sequential_read(Rc::clone(&page_cache), file_id, 0);
 
         let mut buffer = vec![0; file_size];
         let mut bytes_read = 0;
@@ -320,6 +335,12 @@ mod tests {
             // read 8 bytes at a time
             bytes_read += seq_read.read(&mut buffer[bytes_read..min(bytes_read + 8, file_size)]);
         }
+
+        let mut seq_read = page_cache_sequential_read(Rc::clone(&page_cache), file_id, 0);
+        let mut all = Vec::new();
+        seq_read.read_to_end(&mut all).unwrap();
+        assert_eq!(all.len(), file_size);
+        assert_eq!(all, buffer);
 
         let mut new_file = File::create(&file_paths[1]).unwrap();
         new_file.write_all(&buffer);

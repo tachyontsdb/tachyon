@@ -4,6 +4,11 @@ use std::{
     mem::size_of,
 };
 
+use pco::{
+    standalone::{simple_decompress, simpler_compress},
+    DEFAULT_COMPRESSION_LEVEL,
+};
+
 use crate::{
     common::{Timestamp, Value},
     utils::{common::static_assert, file_utils::FileReaderUtil},
@@ -618,6 +623,76 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV2<T> {
         self.values_read += 1;
         self.buffer_idx += 1;
         (self.current_timestamp, self.current_value)
+    }
+}
+
+pub struct PcoComp;
+impl<R: Read, W: Write> CompressionScheme<R, W> for PcoComp {
+    type Decompressor = PcoDecompressionEngine<R>;
+    type Compressor = PcoCompressionEngine<W>;
+}
+
+pub struct PcoCompressionEngine<T: Write> {
+    writer: T,
+
+    timestamps: Vec<Timestamp>,
+    values: Vec<Value>,
+    result: Vec<u8>,
+}
+
+impl<T: Write> CompressionEngine<T> for PcoCompressionEngine<T> {
+    fn new(writer: T, header: &Header) -> Self {
+        Self {
+            writer,
+            timestamps: Vec::new(),
+            values: Vec::new(),
+            result: Vec::new(),
+        }
+    }
+
+    fn consume(&mut self, timestamp: Timestamp, value: Value) {
+        self.timestamps.push(timestamp);
+        self.values.push(value);
+    }
+
+    fn bytes_compressed(&self) -> usize {
+        self.result.len()
+    }
+
+    fn flush_all(&mut self) {
+        self.timestamps.extend_from_slice(&self.values);
+        self.result.extend_from_slice(
+            &simpler_compress(&self.timestamps, DEFAULT_COMPRESSION_LEVEL).unwrap(),
+        );
+        self.writer.write_all(&self.result).unwrap();
+    }
+}
+
+pub struct PcoDecompressionEngine<T: Read> {
+    reader: T,
+
+    all: Vec<u64>,
+    num_values: usize,
+    cur: usize,
+}
+
+impl<T: Read> DecompressionEngine<T> for PcoDecompressionEngine<T> {
+    fn new(mut reader: T, header: &Header) -> Self {
+        let mut all_bytes = Vec::new();
+        reader.read_to_end(&mut all_bytes).unwrap();
+        let all = simple_decompress::<u64>(&all_bytes).unwrap();
+        Self {
+            reader,
+            all,
+            num_values: (header.count - 1) as usize,
+            cur: 0,
+        }
+    }
+
+    fn next(&mut self) -> (Timestamp, Value) {
+        let result = (self.all[self.cur], self.all[self.cur + self.num_values]);
+        self.cur += 1;
+        result
     }
 }
 

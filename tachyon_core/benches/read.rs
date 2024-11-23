@@ -69,7 +69,7 @@ fn voltage_benchmark(c: &mut Criterion) {
     let page_cache = Rc::new(RefCell::new(PageCache::new(256)));
 
     // set up voltage benchmark
-    let (timestamps, values) = read_from_csv("./data/voltage_dataset.csv");
+    let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
     let mut model = TimeDataFile::new();
     for (ts, v) in zip(&timestamps, &values) {
         model.write_data_to_file_in_mem(*ts, *v);
@@ -83,7 +83,7 @@ fn voltage_benchmark(c: &mut Criterion) {
         ),
         |b| b.iter(|| bench_read_voltage_dataset(page_cache.clone())),
     );
-    std::fs::remove_file("../tmp/bench_voltage_read.ty").unwrap();
+    // std::fs::remove_file("../tmp/bench_voltage_read.ty").unwrap();
 }
 
 fn get_config() -> Criterion {

@@ -38,6 +38,7 @@ name = "write"
 harness = false
 
 [dependencies]
+pco = "0.4.0"
 promql-parser = "0.4.0"
 rusqlite = { version = "0.32.1", features = ["serde_json", "bundled", "uuid"] }
 rustc-hash = "2.0.0"
