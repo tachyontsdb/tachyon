@@ -22,6 +22,8 @@ impl IntCompressionUtils {
     }
 }
 
+// TODO: Make macro to generate the enum + implementation
+#[allow(clippy::large_enum_variant)]
 pub enum IntDecompressor<R: Read> {
     V1(v1::DecompressionEngineV1<R>),
     V2(v2::DecompressionEngineV2<R>),
@@ -42,6 +44,7 @@ impl<R: Read> DecompressionEngine<R> for IntDecompressor<R> {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum IntCompressor<W: Write> {
     V1(v1::CompressionEngineV1<W>),
     V2(v2::CompressionEngineV2<W>),
