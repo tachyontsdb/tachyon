@@ -86,6 +86,18 @@ impl<V: Copy> IDLookup<V> {
     }
 }
 
+impl<V: Copy> Drop for IDLookup<V> {
+    fn drop(&mut self) {
+        while let Some(mut item) = self.table.pop() {
+            while !item.is_null() {
+                let next = unsafe { (*item).next };
+                unsafe { drop(Box::from_raw(item)) };
+                item = next;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
