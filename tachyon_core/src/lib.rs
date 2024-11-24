@@ -491,7 +491,7 @@ pub mod tachyon_benchmarks {
 
 #[cfg(test)]
 mod tests {
-    use crate::{utils::test::set_up_dirs, Connection, Inserter, Timestamp, ValueType};
+    use crate::{utils::test::set_up_dirs, Connection, Inserter, Timestamp, Value, ValueType};
     use std::{borrow::Borrow, collections::HashSet, iter::zip, path::PathBuf};
 
     fn create_stream_helper(conn: &mut Connection, stream: &str) -> Inserter {
@@ -640,7 +640,7 @@ mod tests {
         operation: &str,
         start: u64,
         end: u64,
-        expected_val: u64,
+        expected_val: Value,
     ) {
         let mut conn = Connection::new(root_dir);
 
@@ -663,7 +663,8 @@ mod tests {
 
         // Process results
         let actual_val = stmt.next_scalar().unwrap();
-        assert_eq!(actual_val.get_uinteger64(), expected_val);
+
+        assert!(actual_val.eq_same(stmt.value_type(), &expected_val));
         assert!(stmt.next_scalar().is_none());
     }
 
@@ -671,70 +672,70 @@ mod tests {
     fn test_e2e_sum_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "sum", 23, 51, 163)
+        e2e_scalar_aggregate_test(root_dir, "sum", 23, 51, 163u64.into())
     }
 
     #[test]
     fn test_e2e_sum_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "sum", 29, 40, 70)
+        e2e_scalar_aggregate_test(root_dir, "sum", 29, 40, 70u64.into())
     }
 
     #[test]
     fn test_e2e_count_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "count", 23, 51, 4)
+        e2e_scalar_aggregate_test(root_dir, "count", 23, 51, 4u64.into())
     }
 
     #[test]
     fn test_e2e_count_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "count", 29, 40, 2)
+        e2e_scalar_aggregate_test(root_dir, "count", 29, 40, 2u64.into())
     }
 
     #[test]
     fn test_e2e_avg_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "avg", 23, 51, 40)
+        e2e_scalar_aggregate_test(root_dir, "avg", 23, 51, 40.75f64.into())
     }
 
     #[test]
     fn test_e2e_avg_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "avg", 29, 40, 35)
+        e2e_scalar_aggregate_test(root_dir, "avg", 29, 40, 35.0f64.into())
     }
 
     #[test]
     fn test_e2e_min_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "min", 23, 51, 23)
+        e2e_scalar_aggregate_test(root_dir, "min", 23, 51, 23u64.into())
     }
 
     #[test]
     fn test_e2e_min_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "min", 29, 40, 23)
+        e2e_scalar_aggregate_test(root_dir, "min", 29, 40, 23u64.into())
     }
 
     #[test]
     fn test_e2e_max_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "max", 23, 51, 48)
+        e2e_scalar_aggregate_test(root_dir, "max", 23, 51, 48u64.into())
     }
 
     #[test]
     fn test_e2e_max_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "max", 29, 40, 47)
+        e2e_scalar_aggregate_test(root_dir, "max", 29, 40, 47u64.into())
     }
 
     fn e2e_scalars_aggregate_test(
@@ -743,7 +744,7 @@ mod tests {
         param: u64,
         start: u64,
         end: u64,
-        expected_val: Vec<u64>,
+        expected_val: Vec<Value>,
     ) {
         let mut conn = Connection::new(root_dir);
 
@@ -768,23 +769,34 @@ mod tests {
         let mut stmt = conn.prepare_query(&query, Some(start), Some(end));
 
         // Process results
-        let mut actual_val: Vec<u64> = Vec::new();
+        let mut i = 0;
         loop {
             let res = stmt.next_scalar();
             if res.is_none() {
                 break;
             }
-            actual_val.push(res.unwrap().get_uinteger64());
+            println!(
+                "Cool: {:#?} {:#?}",
+                res.unwrap().get_uinteger64(),
+                expected_val[i].get_uinteger64()
+            );
+            assert!(res.unwrap().eq_same(stmt.value_type(), &expected_val[i]));
+            i += 1;
         }
-
-        assert_eq!(actual_val, expected_val);
     }
 
     #[test]
     fn test_e2e_bottomk() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalars_aggregate_test(root_dir, "bottomk", 2, 23, 51, [23, 27].to_vec())
+        e2e_scalars_aggregate_test(
+            root_dir,
+            "bottomk",
+            2,
+            23,
+            51,
+            [23u64.into(), 27u64.into()].to_vec(),
+        )
     }
 
     #[test]
@@ -804,7 +816,15 @@ mod tests {
             10000,
             23,
             51,
-            [23, 27, 31, 31, 47, 48].to_vec(),
+            [
+                23u64.into(),
+                27u64.into(),
+                31u64.into(),
+                31u64.into(),
+                47u64.into(),
+                48u64.into(),
+            ]
+            .to_vec(),
         )
     }
 
@@ -812,7 +832,14 @@ mod tests {
     fn test_e2e_topk() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalars_aggregate_test(root_dir, "topk", 2, 23, 51, [48, 47].to_vec())
+        e2e_scalars_aggregate_test(
+            root_dir,
+            "topk",
+            2,
+            23,
+            51,
+            [48u64.into(), 47u64.into()].to_vec(),
+        )
     }
 
     #[test]
@@ -832,7 +859,15 @@ mod tests {
             10000,
             23,
             51,
-            [48, 47, 31, 31, 27, 23].to_vec(),
+            [
+                48u64.into(),
+                47u64.into(),
+                31u64.into(),
+                31u64.into(),
+                27u64.into(),
+                23u64.into(),
+            ]
+            .to_vec(),
         )
     }
 

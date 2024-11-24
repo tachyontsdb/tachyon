@@ -570,6 +570,7 @@ pub enum GetKType {
 pub struct GetKNode {
     ix: usize,
     ks: Vec<Value>,
+    value_type: ValueType,
 }
 
 impl GetKNode {
@@ -595,8 +596,9 @@ impl GetKNode {
                         if maxheap.len() < k {
                             maxheap.push(TypeValuePair(child.value_type(), value));
                         } else {
-                            let ordering =
-                                value.partial_cmp_same(child.value_type(), &value).unwrap();
+                            let ordering = value
+                                .partial_cmp_same(child.value_type(), &maxheap.peek().unwrap().1)
+                                .unwrap();
                             if ordering.is_le() {
                                 maxheap.pop();
                                 maxheap.push(TypeValuePair(child.value_type(), value));
@@ -604,7 +606,11 @@ impl GetKNode {
                         }
                     }
                 }
-                maxheap.into_iter().map(|pair| pair.1).collect()
+                maxheap
+                    .into_sorted_vec()
+                    .into_iter()
+                    .map(|pair| pair.1)
+                    .collect()
             } else if getk_type == GetKType::Top {
                 let mut minheap = BinaryHeap::<Reverse<TypeValuePair>>::new();
                 // Find (up to) k largest values
@@ -614,8 +620,9 @@ impl GetKNode {
                         if minheap.len() < k {
                             minheap.push(Reverse(TypeValuePair(child.value_type(), value)));
                         } else {
-                            let ordering =
-                                value.partial_cmp_same(child.value_type(), &value).unwrap();
+                            let ordering = value
+                                .partial_cmp_same(child.value_type(), &minheap.peek().unwrap().0 .1)
+                                .unwrap();
                             if ordering.is_ge() {
                                 minheap.pop();
                                 minheap.push(Reverse(TypeValuePair(child.value_type(), value)));
@@ -623,15 +630,28 @@ impl GetKNode {
                         }
                     }
                 }
-                minheap.into_iter().map(|rev_pair| rev_pair.0 .1).collect()
+                minheap
+                    .into_sorted_vec()
+                    .into_iter()
+                    .map(|rev_pair| rev_pair.0 .1)
+                    .collect()
             } else {
                 panic!("Invalid GetKType!");
             },
+            value_type: child.value_type(),
         }
     }
 }
 
 impl ExecutorNode for GetKNode {
+    fn value_type(&self) -> ValueType {
+        self.value_type
+    }
+
+    fn return_type(&self) -> ReturnType {
+        ReturnType::Scalar
+    }
+
     fn next_scalar(&mut self, _: &mut Connection) -> Option<Value> {
         if self.ix >= self.ks.len() {
             None
