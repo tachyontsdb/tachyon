@@ -1133,8 +1133,8 @@ mod tests {
 
         let timestamps = [23, 29, 40, 51];
 
-        let values_a = [45, 47, 23, 48];
-        let values_b = [9, 18, 0, 100];
+        let values_a = [45, 47, 24, 48];
+        let values_b = [9, 18, 0, 55];
 
         let mut inserter1 =
             create_stream_helper(&mut conn, r#"http_requests_total{service = "web"}"#);
@@ -1170,7 +1170,7 @@ mod tests {
             }
 
             let res = res.unwrap();
-            assert_eq!(sum_values_a / sum_values_b, res.get_uinteger64());
+            assert_eq!(sum_values_a as f64 / sum_values_b as f64, res.get_float64());
         }
     }
 }
