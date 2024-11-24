@@ -169,18 +169,12 @@ impl Value {
     }
 
     #[inline]
-    pub fn try_convert_into_i64(&self, value_type: ValueType) -> Result<i64, ()> {
+    pub fn try_convert_into_u64(&self, value_type: ValueType) -> u64 {
+        // TODO: Handle errors
         match value_type {
-            ValueType::Integer64 => Ok(self.get_integer64()),
-            ValueType::UInteger64 => self.get_uinteger64().try_into().map_err(|_| ()),
-            ValueType::Float64 => {
-                let value = self.get_float64();
-                if value.fract() == 0.0 {
-                    Ok(value as i64)
-                } else {
-                    Err(())
-                }
-            }
+            ValueType::Integer64 => self.get_integer64() as u64,
+            ValueType::UInteger64 => self.get_uinteger64(),
+            ValueType::Float64 => self.get_float64() as u64,
         }
     }
 
