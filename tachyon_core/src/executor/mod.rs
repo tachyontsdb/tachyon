@@ -249,9 +249,3 @@ pub fn execute(mut context: Context, buffer: &[u8]) {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn read() {}
-}
