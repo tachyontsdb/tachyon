@@ -69,7 +69,7 @@ fn voltage_benchmark(c: &mut Criterion) {
     let page_cache = Rc::new(RefCell::new(PageCache::new(256)));
 
     // set up voltage benchmark
-    let (timestamps, values) = read_from_csv("./data/voltage_dataset.csv");
+    let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
     let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
     for (ts, v) in zip(&timestamps, &values) {
         model.write_data_to_file_in_mem(*ts, (*v).into());

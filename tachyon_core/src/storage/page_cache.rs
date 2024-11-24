@@ -68,16 +68,16 @@ impl Read for SeqPageRead {
             // Make sure correct page is in the frame (not evicted)
             if let Frame::Page(PageInfo {
                 file_id, page_id, ..
-            }) = page_cache.frames[self.frame_id]
+            }) = &page_cache.frames[self.frame_id]
             {
-                if self.file_id != file_id || self.cur_page_id != page_id {
+                if self.file_id != *file_id || self.cur_page_id != *page_id {
                     self.frame_id = page_cache.load_page(self.file_id, self.cur_page_id);
                 }
             } else {
                 self.frame_id = page_cache.load_page(self.file_id, self.cur_page_id);
             }
 
-            if let Frame::Page(PageInfo { data, .. }) = page_cache.frames[self.frame_id] {
+            if let Frame::Page(PageInfo { data, .. }) = &page_cache.frames[self.frame_id] {
                 let num_bytes =
                     (PAGE_SIZE - (self.offset % PAGE_SIZE)).min(buf.len() - bytes_copied);
                 let data_to_copy =
@@ -166,7 +166,7 @@ impl PageCache {
             self.root_free = (self.root_free + 1) % self.frames.len();
 
             // If there was a page there, remove it from mapping
-            if let Frame::Page(info) = &mut self.frames[frame_id] {
+            if let Frame::Page(info) = &self.frames[frame_id] {
                 // evict
                 self.mapping
                     .remove(&(((info.file_id as u64) << 32) | (info.page_id as u64)));
@@ -205,7 +205,7 @@ impl PageCache {
             let frame_id = self.load_page(file_id, page_id);
 
             // Page is now guaranteed to be loaded
-            if let Frame::Page(PageInfo { data, .. }) = self.frames[frame_id] {
+            if let Frame::Page(PageInfo { data, .. }) = &self.frames[frame_id] {
                 let num_bytes = (PAGE_SIZE - (offset % PAGE_SIZE)).min(buffer.len() - bytes_copied);
                 let data_to_copy = &data[(offset % PAGE_SIZE)..(offset % PAGE_SIZE) + num_bytes];
                 offset += num_bytes;
