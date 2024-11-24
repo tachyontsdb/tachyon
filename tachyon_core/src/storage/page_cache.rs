@@ -18,8 +18,7 @@ pub type FileId = u32;
 type PageId = u32;
 type FrameId = usize;
 
-const FILE_SIZE: usize = 1_000_000;
-const PAGE_SIZE: usize = 4_096;
+const PAGE_SIZE: usize = 32_768;
 
 struct PageInfo {
     file_id: FileId,
@@ -82,24 +81,17 @@ impl SeqPageRead {
         while (bytes_copied < buffer.len()) {
             // make sure correct page is in the frame (not evicted)
             if let Frame::Page(PageInfo {
-                file_id,
-                page_id,
-                data,
-            }) = page_cache.frames[self.frame_id]
+                file_id, page_id, ..
+            }) = &page_cache.frames[self.frame_id]
             {
-                if self.file_id != file_id || self.cur_page_id != page_id {
+                if self.file_id != *file_id || self.cur_page_id != *page_id {
                     self.frame_id = page_cache.load_page(self.file_id, self.cur_page_id);
                 }
             } else {
                 self.frame_id = page_cache.load_page(self.file_id, self.cur_page_id);
             }
 
-            if let Frame::Page(PageInfo {
-                file_id,
-                page_id,
-                data,
-            }) = &mut page_cache.frames[self.frame_id]
-            {
+            if let Frame::Page(PageInfo { data, .. }) = &page_cache.frames[self.frame_id] {
                 let num_bytes =
                     (PAGE_SIZE - (self.offset % PAGE_SIZE)).min(buffer.len() - bytes_copied);
                 let data_to_copy =
