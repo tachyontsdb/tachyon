@@ -49,7 +49,7 @@ use super::IntCompressionUtils;
 
 pub struct V2;
 
-const V2_CHUNK_SIZE: usize = 16;
+const V2_CHUNK_SIZE: usize = 256;
 static_assert!(V2_CHUNK_SIZE % 8 == 0);
 
 const V2_NUM_CHUNKS_PER_LENGTH: usize = 8;

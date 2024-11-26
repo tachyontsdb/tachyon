@@ -18,7 +18,7 @@ pub type FileId = u32;
 type PageId = u32;
 type FrameId = usize;
 
-const PAGE_SIZE: usize = 32_768;
+const PAGE_SIZE: usize = 4_096;
 
 struct PageInfo {
     file_id: FileId,
