@@ -14,7 +14,7 @@ fn bench_read_sequential_timestamps(
     end: u64,
     page_cache: Rc<RefCell<PageCache>>,
 ) -> u64 {
-    let file_paths = vec!["./tmp/bench_sequential_read.ty".into()];
+    let file_paths = vec!["../tmp/bench_sequential_read.ty".into()];
     let cursor = Cursor::new(file_paths, start, end, page_cache, ScanHint::None).unwrap();
 
     let mut res = 0;
@@ -25,7 +25,7 @@ fn bench_read_sequential_timestamps(
 }
 
 fn bench_read_voltage_dataset(page_cache: Rc<RefCell<PageCache>>) -> u128 {
-    let file_paths = vec!["./tmp/bench_voltage_read.ty".into()];
+    let file_paths = vec!["../tmp/bench_voltage_read.ty".into()];
     let cursor = Cursor::new(file_paths, 0, u64::MAX, page_cache, ScanHint::None).unwrap();
 
     let mut res = 0u128;
@@ -57,12 +57,12 @@ fn sequential_benchmark(c: &mut Criterion) {
     for i in 0..NUM_ITEMS {
         model.write_data_to_file_in_mem(i, (i + (i % 100)).into());
     }
-    model.write("./tmp/bench_sequential_read.ty".into());
+    model.write("../tmp/bench_sequential_read.ty".into());
     let page_cache = Rc::new(RefCell::new(PageCache::new(256)));
     c.bench_function(&format!("tachyon: read sequential 0-{}", NUM_ITEMS), |b| {
         b.iter(|| bench_read_sequential_timestamps(0, NUM_ITEMS, page_cache.clone()))
     });
-    std::fs::remove_file("./tmp/bench_sequential_read.ty").unwrap();
+    std::fs::remove_file("../tmp/bench_sequential_read.ty").unwrap();
 }
 
 fn voltage_benchmark(c: &mut Criterion) {
@@ -74,7 +74,7 @@ fn voltage_benchmark(c: &mut Criterion) {
     for (ts, v) in zip(&timestamps, &values) {
         model.write_data_to_file_in_mem(*ts, (*v).into());
     }
-    model.write("./tmp/bench_voltage_read.ty".into());
+    model.write("../tmp/bench_voltage_read.ty".into());
 
     c.bench_function(
         &format!(
@@ -83,7 +83,7 @@ fn voltage_benchmark(c: &mut Criterion) {
         ),
         |b| b.iter(|| bench_read_voltage_dataset(page_cache.clone())),
     );
-    std::fs::remove_file("./tmp/bench_voltage_read.ty").unwrap();
+    std::fs::remove_file("../tmp/bench_voltage_read.ty").unwrap();
 }
 
 fn get_config() -> Criterion {

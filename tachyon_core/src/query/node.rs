@@ -10,13 +10,8 @@ use std::rc::Rc;
 use uuid::Uuid;
 
 pub trait ExecutorNode {
-    fn value_type(&self) -> ValueType {
-        panic!("Value type not implemented!");
-    }
-
-    fn return_type(&self) -> ReturnType {
-        panic!("Return type not implemented!");
-    }
+    fn value_type(&self) -> ValueType;
+    fn return_type(&self) -> ReturnType;
 
     fn next_scalar(&mut self, _connection: &mut Connection) -> Option<Value> {
         panic!("Next scalar not implemented!");
@@ -95,11 +90,16 @@ impl ExecutorNode for TNode {
 pub struct NumberLiteralNode {
     val_type: ValueType,
     val: Value,
+    extracted_literal: bool,
 }
 
 impl NumberLiteralNode {
     pub fn new(val_type: ValueType, val: Value) -> Self {
-        Self { val_type, val }
+        Self {
+            val_type,
+            val,
+            extracted_literal: false,
+        }
     }
 }
 
@@ -108,8 +108,17 @@ impl ExecutorNode for NumberLiteralNode {
         self.val_type
     }
 
+    fn return_type(&self) -> ReturnType {
+        ReturnType::Scalar
+    }
+
     fn next_scalar(&mut self, _: &mut Connection) -> Option<Value> {
-        Some(self.val)
+        if self.extracted_literal {
+            None
+        } else {
+            self.extracted_literal = true;
+            Some(self.val)
+        }
     }
 }
 
@@ -200,6 +209,7 @@ impl ExecutorNode for VectorSelectNode {
     }
 }
 
+#[derive(Debug)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -228,7 +238,6 @@ impl BinaryOp {
 
 pub struct BinaryOpNode {
     child: Box<TNode>,
-    return_type_: ReturnType,
 }
 
 impl BinaryOpNode {
@@ -236,27 +245,27 @@ impl BinaryOpNode {
         match (lhs.return_type(), rhs.return_type()) {
             (ReturnType::Scalar, ReturnType::Scalar) => Self {
                 child: Box::new(TNode::ScalarToScalar(ScalarToScalarNode::new(op, lhs, rhs))),
-                return_type_: ReturnType::Scalar,
             },
             (ReturnType::Vector, ReturnType::Scalar) => Self {
                 child: Box::new(TNode::VectorToScalar(VectorToScalarNode::new(op, lhs, rhs))),
-                return_type_: ReturnType::Vector,
             },
             (ReturnType::Scalar, ReturnType::Vector) => Self {
                 child: Box::new(TNode::VectorToScalar(VectorToScalarNode::new(op, rhs, lhs))),
-                return_type_: ReturnType::Vector,
             },
             (ReturnType::Vector, ReturnType::Vector) => Self {
                 child: Box::new(TNode::VectorToVector(VectorToVectorNode::new(op, lhs, rhs))),
-                return_type_: ReturnType::Vector,
             },
         }
     }
 }
 
 impl ExecutorNode for BinaryOpNode {
+    fn value_type(&self) -> ValueType {
+        self.child.value_type()
+    }
+
     fn return_type(&self) -> ReturnType {
-        self.return_type_
+        self.child.return_type()
     }
 
     fn next_vector(&mut self, conn: &mut Connection) -> Option<Vector> {
@@ -281,6 +290,14 @@ impl ScalarToScalarNode {
 }
 
 impl ExecutorNode for ScalarToScalarNode {
+    fn value_type(&self) -> ValueType {
+        if self.lhs.value_type() != self.rhs.value_type() {
+            todo!("Implement operations between different types!");
+        }
+
+        self.lhs.value_type()
+    }
+
     fn return_type(&self) -> ReturnType {
         ReturnType::Scalar
     }
@@ -320,8 +337,16 @@ impl VectorToScalarNode {
 }
 
 impl ExecutorNode for VectorToScalarNode {
+    fn value_type(&self) -> ValueType {
+        if self.vector_node.value_type() != self.scalar_node.value_type() {
+            todo!("Implement operations between different types!");
+        }
+
+        self.vector_node.value_type()
+    }
+
     fn return_type(&self) -> ReturnType {
-        ReturnType::Scalar
+        ReturnType::Vector
     }
 
     fn next_vector(&mut self, conn: &mut Connection) -> Option<Vector> {
@@ -372,6 +397,7 @@ impl VectorToVectorNode {
         if lhs.value_type() == ValueType::Float64 || rhs.value_type() == ValueType::Float64 {
             panic!("Floats not supported yet")
         }
+
         Self {
             op,
             lhs,
@@ -436,6 +462,18 @@ impl VectorToVectorNode {
 }
 
 impl ExecutorNode for VectorToVectorNode {
+    fn value_type(&self) -> ValueType {
+        if self.lhs.value_type() != self.rhs.value_type() {
+            todo!("Implement operations between different types!");
+        }
+
+        self.lhs.value_type()
+    }
+
+    fn return_type(&self) -> ReturnType {
+        ReturnType::Vector
+    }
+
     fn next_vector(&mut self, conn: &mut Connection) -> Option<Vector> {
         // Initial case
         if self.lhs_range.is_empty() && self.rhs_range.is_empty() && self.value_opt.is_none() {
@@ -733,14 +771,6 @@ impl ExecutorNode for VectorToVectorNode {
                 _ => None, // Both of the streams are empty.
             }
         }
-    }
-
-    fn value_type(&self) -> ValueType {
-        ValueType::UInteger64
-    }
-
-    fn return_type(&self) -> ReturnType {
-        ReturnType::Vector
     }
 }
 

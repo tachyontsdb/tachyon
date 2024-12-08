@@ -165,7 +165,7 @@ macro_rules! create_value_primitive_fn_simplified {
                 .into(),
             self.get_float64().$called_fn(other.get_float64()).into(),
             {
-                panic!("Invalid operation!");
+                panic!("Invalid operation between values of different types!");
             }
         );
     };
@@ -274,7 +274,7 @@ impl Value {
             .into(),
         self.get_float64().div(other.get_float64()).into(),
         {
-            panic!("Invalid operation!");
+            panic!("Invalid operation between values of different types!");
         }
     );
     create_value_primitive_fn!(
@@ -291,7 +291,7 @@ impl Value {
             .into(),
         self.get_float64().rem(other.get_float64()).into(),
         {
-            panic!("Invalid operation!");
+            panic!("Invalid operation between values of different types!");
         }
     );
 

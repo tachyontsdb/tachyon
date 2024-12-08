@@ -35,7 +35,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     // setup tachyon benchmark
 
     // setup SQLite benchmark
-    let mut conn = Connection::open(format!("./tmp/bench_sql_{}.sqlite", NUM_ITEMS)).unwrap();
+    let mut conn = Connection::open(format!("../tmp/bench_sql_{}.sqlite", NUM_ITEMS)).unwrap();
     conn.execute(
         "
         CREATE TABLE if not exists Item (
@@ -66,7 +66,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function(&format!("SQLite: read sequential 0-{}", NUM_ITEMS), |b| {
         b.iter(|| bench_read_sqlite(&mut stmt))
     });
-    std::fs::remove_file(format!("./tmp/bench_sql_{}.sqlite", NUM_ITEMS)).unwrap();
+    std::fs::remove_file(format!("../tmp/bench_sql_{}.sqlite", NUM_ITEMS)).unwrap();
 }
 
 fn get_config() -> Criterion {

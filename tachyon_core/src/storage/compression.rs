@@ -30,15 +30,19 @@ impl CompressionUtils {
     }
 }
 
-pub trait CompressionEngine<T: Write>: Sized {
-    fn new(writer: T, header: &Header) -> Self;
+pub trait CompressionEngine<T: Write> {
+    fn new(writer: T, header: &Header) -> Self
+    where
+        Self: Sized;
     fn consume(&mut self, timestamp: Timestamp, value: PhysicalType);
     fn bytes_compressed(&self) -> usize;
     fn flush_all(&mut self);
 }
 
-pub trait DecompressionEngine<T: Read>: Sized {
-    fn new(reader: T, header: &Header) -> Self;
+pub trait DecompressionEngine<T: Read> {
+    fn new(reader: T, header: &Header) -> Self
+    where
+        Self: Sized;
     fn next(&mut self) -> (Timestamp, PhysicalType);
 }
 

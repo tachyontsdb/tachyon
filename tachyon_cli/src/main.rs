@@ -51,10 +51,10 @@ pub enum Commands {
     CreateStream {
         #[arg(value_parser = NonEmptyStringValueParser::new())]
         stream: String,
-        #[arg(value_parser = PossibleValuesParser::new(["i", "u", "f"]).map(|s| match s.as_str() {
-            "i" => ValueType::Integer64,
-            "u" => ValueType::UInteger64,
-            "f" => ValueType::Float64,
+        #[arg(value_parser = PossibleValuesParser::new(["i64", "u64", "f64"]).map(|s| match s.as_str() {
+            "i64" => ValueType::Integer64,
+            "u64" => ValueType::UInteger64,
+            "f64" => ValueType::Float64,
             _ => unreachable!()
         }))]
         value_type: ValueType,
