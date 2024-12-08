@@ -4,7 +4,7 @@ use pprof::{
     flamegraph::Options,
 };
 use std::{cell::RefCell, path::PathBuf, rc::Rc};
-use tachyon_core::{tachyon_benchmarks::*, ValueType};
+use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Version};
 
 const NUM_ITEMS: u64 = 10000000;
 
@@ -49,19 +49,19 @@ fn bench_sum_sequential_timestamps_with_hint(
 
 fn criterion_benchmark(c: &mut Criterion) {
     // setup tachyon benchmark
-    let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
     for i in 0..NUM_ITEMS / 3 {
         model.write_data_to_file_in_mem(i, (i + (i % 100)).into());
     }
     model.write("./tmp/bench_sequential_sum.ty".into());
 
-    let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
     for i in NUM_ITEMS / 3..2 * NUM_ITEMS / 3 {
         model.write_data_to_file_in_mem(i, (100000 - i + (i % 10)).into());
     }
     model.write("./tmp/bench_sequential_sum_2.ty".into());
 
-    let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
     for i in 2 * NUM_ITEMS / 3..NUM_ITEMS {
         model.write_data_to_file_in_mem(i, (9000 - i + (i % 10)).into());
     }

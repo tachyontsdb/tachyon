@@ -4,7 +4,7 @@ use super::compression::{
 use super::page_cache::{FileId, PageCache, SeqPageRead};
 use super::{FileReaderUtils, MAX_NUM_ENTRIES};
 use crate::storage::page_cache::page_cache_sequential_read;
-use crate::{Timestamp, Value, ValueType, Vector};
+use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version};
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::fs::File;
@@ -16,9 +16,10 @@ const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
 const HEADER_SIZE: usize = 63;
+
 pub struct Header {
-    pub version: u16,
-    pub stream_id: u64,
+    pub version: Version,
+    pub stream_id: StreamId,
 
     pub min_timestamp: Timestamp,
     pub max_timestamp: Timestamp,
@@ -41,18 +42,12 @@ impl PartialEq for Header {
             && self.max_timestamp == other.max_timestamp
             && self.count == other.count
             && self.value_type == other.value_type
-            && self
-                .value_sum
-                .eq(self.value_type, &other.value_sum, other.value_type)
-            && self
-                .min_value
-                .eq(self.value_type, &other.min_value, other.value_type)
-            && self
-                .max_value
-                .eq(self.value_type, &other.max_value, other.value_type)
+            && self.value_sum.eq_same(self.value_type, &other.value_sum)
+            && self.min_value.eq_same(self.value_type, &other.min_value)
+            && self.max_value.eq_same(self.value_type, &other.max_value)
             && self
                 .first_value
-                .eq(self.value_type, &other.first_value, other.value_type)
+                .eq_same(self.value_type, &other.first_value)
     }
 }
 
@@ -74,7 +69,7 @@ impl Debug for Header {
 }
 
 impl Header {
-    pub fn new(version: u16, stream_id: u64, value_type: ValueType) -> Self {
+    pub fn new(version: Version, stream_id: StreamId, value_type: ValueType) -> Self {
         Self {
             version,
             stream_id,
@@ -119,10 +114,12 @@ impl Header {
             .try_into()
             .unwrap();
         Self {
-            version: FileReaderUtils::read_u64_2(&buffer[0..2])
-                .try_into()
-                .unwrap(),
-            stream_id: FileReaderUtils::read_u64_8(&buffer[2..10]),
+            version: Version(
+                FileReaderUtils::read_u64_2(&buffer[0..2])
+                    .try_into()
+                    .unwrap(),
+            ),
+            stream_id: StreamId(FileReaderUtils::read_u64_8(&buffer[2..10])),
             min_timestamp: FileReaderUtils::read_u64_8(&buffer[10..18]),
             max_timestamp: FileReaderUtils::read_u64_8(&buffer[18..26]),
             count: FileReaderUtils::read_u64_4(&buffer[26..30])
@@ -148,8 +145,8 @@ impl Header {
     fn write(&self, file: &mut File) -> Result<usize, io::Error> {
         file.write_all(&MAGIC)?;
 
-        file.write_all(&self.version.to_le_bytes())?;
-        file.write_all(&self.stream_id.to_le_bytes())?;
+        file.write_all(&self.version.0.to_le_bytes())?;
+        file.write_all(&self.stream_id.0.to_le_bytes())?;
 
         file.write_all(&self.min_timestamp.to_le_bytes())?;
         file.write_all(&self.max_timestamp.to_le_bytes())?;
@@ -401,7 +398,7 @@ pub struct TimeDataFile {
 }
 
 impl TimeDataFile {
-    pub fn new(version: u16, stream_id: u64, value_type: ValueType) -> Self {
+    pub fn new(version: Version, stream_id: StreamId, value_type: ValueType) -> Self {
         Self {
             header: Header::new(version, stream_id, value_type),
             timestamps: Vec::new(),
@@ -521,7 +518,7 @@ mod tests {
     #[test]
     fn test_write() {
         set_up_files!(paths, "cool.ty");
-        let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
+        let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
         for i in 0..10u64 {
             model.write_data_to_file_in_mem(i, (i + 10).into());
         }
@@ -536,7 +533,7 @@ mod tests {
         let t_header = Header {
             count: 11,
             value_sum: 101u64.into(),
-            ..Header::new(0, 0, ValueType::UInteger64)
+            ..Header::new(Version(0), StreamId(0), ValueType::UInteger64)
         };
 
         t_header.write(&mut temp_file).unwrap();
@@ -551,7 +548,7 @@ mod tests {
     #[test]
     fn test_cursor() {
         set_up_files!(paths, "1.ty");
-        let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
+        let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
         for i in 0..10u64 {
             model.write_data_to_file_in_mem(i, (i + 10).into());
         }

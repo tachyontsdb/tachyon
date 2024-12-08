@@ -220,8 +220,8 @@ impl BinaryOp {
             BinaryOp::Add => lhs.add(lhs_value_type, &rhs, rhs_value_type),
             BinaryOp::Subtract => lhs.sub(lhs_value_type, &rhs, rhs_value_type),
             BinaryOp::Multiply => lhs.mul(lhs_value_type, &rhs, rhs_value_type),
-            BinaryOp::Divide => lhs.try_div(lhs_value_type, &rhs, rhs_value_type).unwrap(),
-            BinaryOp::Modulo => lhs.try_mod(lhs_value_type, &rhs, rhs_value_type).unwrap(),
+            BinaryOp::Divide => lhs.div(lhs_value_type, &rhs, rhs_value_type),
+            BinaryOp::Modulo => lhs.mdl(lhs_value_type, &rhs, rhs_value_type),
         }
     }
 }
@@ -875,7 +875,7 @@ impl ExecutorNode for AverageNode {
 
         match (sum_opt, count_opt) {
             (Some(sum), Some(count)) => {
-                sum.try_div(self.sum.value_type(), &count, self.count.value_type())
+                Some(sum.div(self.sum.value_type(), &count, self.count.value_type()))
             }
             _ => None,
         }
@@ -924,7 +924,7 @@ impl GetKNode {
         mut param: Box<TNode>,
     ) -> Self {
         let k = param.next_scalar(conn).unwrap();
-        let k = (k.try_convert_into_u64(param.value_type())) as usize;
+        let k = (k.convert_into_u64(param.value_type())) as usize;
 
         Self {
             ix: 0,

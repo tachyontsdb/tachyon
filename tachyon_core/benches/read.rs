@@ -5,7 +5,7 @@ use pprof::{
     flamegraph::Options,
 };
 use std::{cell::RefCell, iter::zip, rc::Rc};
-use tachyon_core::{tachyon_benchmarks::*, ValueType};
+use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Version};
 
 const NUM_ITEMS: u64 = 100000;
 
@@ -53,7 +53,7 @@ fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
 
 fn sequential_benchmark(c: &mut Criterion) {
     // setup tachyon benchmark
-    let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
     for i in 0..NUM_ITEMS {
         model.write_data_to_file_in_mem(i, (i + (i % 100)).into());
     }
@@ -70,7 +70,7 @@ fn voltage_benchmark(c: &mut Criterion) {
 
     // set up voltage benchmark
     let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
-    let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
     for (ts, v) in zip(&timestamps, &values) {
         model.write_data_to_file_in_mem(*ts, (*v).into());
     }

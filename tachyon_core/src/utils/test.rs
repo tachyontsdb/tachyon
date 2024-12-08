@@ -1,5 +1,5 @@
 use crate::storage::file::TimeDataFile;
-use crate::{Timestamp, Value, ValueType};
+use crate::{StreamId, Timestamp, Value, ValueType, Version};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -148,7 +148,7 @@ impl Drop for TestFile {
 
 pub fn generate_ty_file(path: PathBuf, timestamps: &[Timestamp], values: &[Value]) {
     assert!(timestamps.len() == values.len());
-    let mut model = TimeDataFile::new(0, 0u64, ValueType::UInteger64);
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
 
     for i in 0..timestamps.len() {
         model.write_data_to_file_in_mem(timestamps[i], values[i])

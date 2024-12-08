@@ -242,7 +242,7 @@ mod tests {
     use super::{page_cache_sequential_read, PageCache};
     use crate::storage::file::TimeDataFile;
     use crate::utils::test::*;
-    use crate::{Timestamp, ValueType};
+    use crate::{StreamId, Timestamp, ValueType, Version};
     use std::cell::RefCell;
     use std::fs::File;
     use std::io::{Read, Write};
@@ -253,7 +253,7 @@ mod tests {
         set_up_files!(file_paths, "test.ty", "expected.ty");
 
         let mut page_cache = PageCache::new(10);
-        let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
+        let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
         for i in 0..100000u64 {
             model.write_data_to_file_in_mem(i, (i + 10).into());
         }
@@ -282,7 +282,7 @@ mod tests {
         set_up_files!(file_paths, "test.ty", "expected.ty");
 
         let mut page_cache = PageCache::new(10);
-        let mut model = TimeDataFile::new(0, 0, ValueType::UInteger64);
+        let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
         for i in 0..100000u64 {
             model.write_data_to_file_in_mem(i, (i + 10).into());
         }

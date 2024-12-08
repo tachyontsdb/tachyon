@@ -2,6 +2,12 @@
 
 A lightweight and local time-series database.
 
+## Requirements
+
+* `x86_64` - Linux (`x86_64-v3`), macOS
+* `aarch64` - Linux, macOS
+* `riscv64` - Linux (`rv64gc`)
+
 ## Building
 ```
 cargo build --locked --release

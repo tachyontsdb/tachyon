@@ -5,7 +5,7 @@ use crate::Timestamp;
 use std::io::{Read, Write};
 use std::mem::size_of;
 
-pub type CompressionValue = u64;
+pub type PhysicalType = u64;
 
 const EXPONENTS: [usize; 4] = [1, 2, 4, 8];
 
@@ -32,14 +32,14 @@ impl CompressionUtils {
 
 pub trait CompressionEngine<T: Write>: Sized {
     fn new(writer: T, header: &Header) -> Self;
-    fn consume(&mut self, timestamp: Timestamp, value: CompressionValue);
+    fn consume(&mut self, timestamp: Timestamp, value: PhysicalType);
     fn bytes_compressed(&self) -> usize;
     fn flush_all(&mut self);
 }
 
 pub trait DecompressionEngine<T: Read>: Sized {
     fn new(reader: T, header: &Header) -> Self;
-    fn next(&mut self) -> (Timestamp, CompressionValue);
+    fn next(&mut self) -> (Timestamp, PhysicalType);
 }
 
 pub trait CompressionScheme<R: Read, W: Write> {
@@ -103,7 +103,7 @@ impl<R: Read, W: Write> CompressionScheme<R, W> for V1 {
 pub struct CompressionEngineV1<T: Write> {
     writer: T,
     last_timestamp: Timestamp,
-    last_value: CompressionValue,
+    last_value: PhysicalType,
     last_deltas: (i64, i64),
     entries_written: u32,
 
@@ -129,7 +129,7 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
         }
     }
 
-    fn consume(&mut self, timestamp: Timestamp, value: CompressionValue) {
+    fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) {
         let curr_deltas = (
             (timestamp.wrapping_sub(self.last_timestamp)) as i64,
             (value.wrapping_sub(self.last_value)) as i64,
@@ -227,11 +227,11 @@ pub struct DecompressionEngineV1<T: Read> {
     cur_length_byte: u8,
 
     current_timestamp: Timestamp,
-    current_value: CompressionValue,
+    current_value: PhysicalType,
     last_deltas: (i64, i64),
 
     next_timestamp: Timestamp,
-    next_value: CompressionValue,
+    next_value: PhysicalType,
 }
 
 impl<T: Read> DecompressionEngine<T> for DecompressionEngineV1<T> {
@@ -256,7 +256,7 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV1<T> {
         }
     }
 
-    fn next(&mut self) -> (Timestamp, CompressionValue) {
+    fn next(&mut self) -> (Timestamp, PhysicalType) {
         if self.values_read % 2 == 0 {
             self.current_timestamp = self.next_timestamp;
             self.current_value = self.next_value;
@@ -278,7 +278,7 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV1<T> {
             + EXPONENTS[indexes[3]];
 
         // Read deltas + next length byte
-        let mut buffer = [0u8; 2 * (size_of::<Timestamp>() + size_of::<CompressionValue>()) + 1];
+        let mut buffer = [0u8; 2 * (size_of::<Timestamp>() + size_of::<PhysicalType>()) + 1];
         self.reader
             .read_exact(&mut buffer[0..total_varint_lengths + 1])
             .unwrap();
@@ -383,7 +383,7 @@ const V2_INT_READERS: [fn(&[u8]) -> u64; 5] = [
 pub struct CompressionEngineV2<T: Write> {
     writer: T,
     last_timestamp: Timestamp,
-    last_value: CompressionValue,
+    last_value: PhysicalType,
     last_deltas: (i64, i64),
     entries_written: u32,
 
@@ -417,7 +417,7 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
         }
     }
 
-    fn consume(&mut self, timestamp: Timestamp, value: CompressionValue) {
+    fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) {
         let curr_deltas = (
             (timestamp.wrapping_sub(self.last_timestamp)) as i64,
             (value.wrapping_sub(self.last_value)) as i64,
@@ -535,7 +535,7 @@ pub struct DecompressionEngineV2<T: Read> {
     buffer_idx: u32,
 
     current_timestamp: Timestamp,
-    current_value: CompressionValue,
+    current_value: PhysicalType,
     last_deltas: (i64, i64),
 
     ts_d_deltas: [i64; V2_CHUNK_SIZE],
@@ -562,7 +562,7 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV2<T> {
         }
     }
 
-    fn next(&mut self) -> (Timestamp, CompressionValue) {
+    fn next(&mut self) -> (Timestamp, PhysicalType) {
         if self.buffer_idx >= V2_CHUNK_SIZE as u32 {
             // Read the next chunk
             if self.chunk_idx >= V2_NUM_CHUNKS_PER_LENGTH as u32 {
@@ -628,7 +628,7 @@ mod tests {
         DecompressionEngineV2, V2_CHUNK_SIZE,
     };
     use crate::storage::file::Header;
-    use crate::ValueType;
+    use crate::{StreamId, ValueType, Version};
 
     #[test]
     fn test_shift() {
@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn test_compression_v2_basic() {
-        let header = Header::new(0, 0, ValueType::UInteger64);
+        let header = Header::new(Version(0), StreamId(0), ValueType::UInteger64);
         let mut result = Vec::new();
         let mut engine = CompressionEngineV2::<&mut Vec<u8>>::new(&mut result, &header);
 
@@ -679,8 +679,10 @@ mod tests {
         assert_eq!(result[(V2_CHUNK_SIZE * 2) / 8 + 3], 0b01000101);
         assert_eq!(result[(V2_CHUNK_SIZE * 2) / 8 + 4], 0);
 
-        let mut decomp =
-            DecompressionEngineV2::<&[u8]>::new(&result, &Header::new(0, 0, ValueType::UInteger64));
+        let mut decomp = DecompressionEngineV2::<&[u8]>::new(
+            &result,
+            &Header::new(Version(0), StreamId(0), ValueType::UInteger64),
+        );
 
         let (time, value) = decomp.next();
         assert_eq!(time, 1);
@@ -696,7 +698,7 @@ mod tests {
         let header = Header {
             min_timestamp: 1,
             first_value: 34u64.into(),
-            ..Header::new(0, 0, ValueType::UInteger64)
+            ..Header::new(Version(0), StreamId(0), ValueType::UInteger64)
         };
 
         let timestamps = [
@@ -755,7 +757,7 @@ mod tests {
         let header = Header {
             min_timestamp: 0,
             first_value: 0u64.into(),
-            ..Header::new(0, 0, ValueType::UInteger64)
+            ..Header::new(Version(0), StreamId(0), ValueType::UInteger64)
         };
 
         let timestamps = [1, 2, 3];

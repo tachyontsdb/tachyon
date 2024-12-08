@@ -1,7 +1,7 @@
 use super::file::TimeDataFile;
 use super::MAX_NUM_ENTRIES;
 use crate::query::indexer::Indexer;
-use crate::{Timestamp, Value, ValueType, Vector, FILE_EXTENSION};
+use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version, FILE_EXTENSION};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
@@ -13,11 +13,11 @@ pub struct Writer {
     open_data_files: HashMap<Uuid, TimeDataFile>, // Stream ID to in-mem file
     root: PathBuf,
     indexer: Rc<RefCell<Indexer>>,
-    version: u16,
+    version: Version,
 }
 
 impl Writer {
-    pub fn new(root: impl AsRef<Path>, indexer: Rc<RefCell<Indexer>>, version: u16) -> Self {
+    pub fn new(root: impl AsRef<Path>, indexer: Rc<RefCell<Indexer>>, version: Version) -> Self {
         Writer {
             open_data_files: HashMap::new(),
             root: root.as_ref().to_path_buf(),
@@ -30,7 +30,7 @@ impl Writer {
         let file = self
             .open_data_files
             .entry(stream_id)
-            .or_insert(TimeDataFile::new(self.version, 0u64, value_type)); // TODO: Add stream id
+            .or_insert(TimeDataFile::new(self.version, StreamId(0), value_type)); // TODO: Add stream id
 
         file.write_data_to_file_in_mem(ts, v);
         if file.num_entries() >= MAX_NUM_ENTRIES {
@@ -54,7 +54,7 @@ impl Writer {
             let file = self
                 .open_data_files
                 .entry(stream_id)
-                .or_insert(TimeDataFile::new(self.version, 0u64, value_type)); // TODO: Add stream id
+                .or_insert(TimeDataFile::new(self.version, StreamId(0), value_type)); // TODO: Add stream id
 
             entries_written += file.write_batch_data_to_file_in_mem(&batch[entries_written..]);
 
@@ -156,7 +156,7 @@ mod tests {
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
         indexer.borrow_mut().create_store();
 
-        let mut writer = Writer::new(dirs[0].clone(), indexer, 0);
+        let mut writer = Writer::new(dirs[0].clone(), indexer, Version(0));
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
@@ -188,7 +188,7 @@ mod tests {
 
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
         indexer.borrow_mut().create_store();
-        let mut writer = Writer::new(dirs[0].clone(), indexer, 0);
+        let mut writer = Writer::new(dirs[0].clone(), indexer, Version(0));
 
         let mut timestamps = [Vec::<Timestamp>::new(), Vec::<Timestamp>::new()];
         let mut values = [Vec::<Value>::new(), Vec::<Value>::new()];
@@ -227,7 +227,7 @@ mod tests {
         let mut base: usize = 0;
 
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        let mut writer = Writer::new(dirs[0].clone(), indexer, 0);
+        let mut writer = Writer::new(dirs[0].clone(), indexer, Version(0));
         let mut timestamps_per_file = [
             Vec::<Timestamp>::new(),
             Vec::<Timestamp>::new(),

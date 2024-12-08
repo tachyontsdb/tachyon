@@ -9,15 +9,24 @@ use promql_parser::parser;
 use query::node::ExecutorNode;
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fmt::{Debug, Display};
 use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
-use std::str::FromStr;
 use uuid::Uuid;
 
-pub const CURRENT_VERSION: u16 = 2;
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[repr(transparent)]
+pub struct Version(pub u16);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(transparent)]
+pub struct StreamId(pub u64);
+
+pub const CURRENT_VERSION: Version = Version(2);
+
 pub const FILE_EXTENSION: &str = "ty";
 
 pub type Timestamp = u64;
@@ -51,19 +60,6 @@ impl TryFrom<u64> for ValueType {
             0 => Ok(Self::Integer64),
             1 => Ok(Self::UInteger64),
             2 => Ok(Self::Float64),
-            _ => Err(()),
-        }
-    }
-}
-
-impl FromStr for ValueType {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "i" => Ok(Self::Integer64),
-            "u" => Ok(Self::UInteger64),
-            "f" => Ok(Self::Float64),
             _ => Err(()),
         }
     }
@@ -113,33 +109,65 @@ impl From<f64> for Value {
 }
 
 macro_rules! create_value_primitive_fn {
-    ($function_name: ident, $function_name_same: ident, $called_fn: ident) => {
+    (
+        $function_name: ident, $function_name_same: ident, $return_type: ty,
+        $same_variable_name: ident, $other_variable_name: ident,
+        $expr_i64: expr, $expr_u64: expr, $expr_f64: expr,
+        $not_equal_block: block
+    ) => {
         pub fn $function_name(
             &self,
             value_type_self: crate::ValueType,
             other: &Self,
             value_type_other: crate::ValueType,
-        ) -> Self {
+        ) -> $return_type {
             if value_type_self == value_type_other {
-                match value_type_self {
-                    crate::ValueType::Integer64 => {
-                        (self.get_integer64().$called_fn(other.get_integer64())).into()
-                    }
-                    crate::ValueType::UInteger64 => {
-                        (self.get_uinteger64().$called_fn(other.get_uinteger64())).into()
-                    }
-                    crate::ValueType::Float64 => {
-                        (self.get_float64().$called_fn(other.get_float64())).into()
-                    }
-                }
+                self.$function_name_same(value_type_self, other)
             } else {
-                todo!();
+                $not_equal_block
             }
         }
 
-        pub fn $function_name_same(&self, value_type: crate::ValueType, other: &Self) -> Self {
-            self.$function_name(value_type, other, value_type)
+        /// Safety: `value_type` must be the same between `self` and `other`.
+        pub fn $function_name_same(
+            &$same_variable_name,
+            value_type: crate::ValueType,
+            $other_variable_name: &Self,
+        ) -> $return_type {
+            match value_type {
+                crate::ValueType::Integer64 => {
+                    $expr_i64
+                }
+                crate::ValueType::UInteger64 => {
+                    $expr_u64
+                }
+                crate::ValueType::Float64 => {
+                    $expr_f64
+                }
+            }
         }
+    };
+}
+
+macro_rules! create_value_primitive_fn_simplified {
+    ($function_name: ident, $function_name_same: ident, $called_fn: ident) => {
+        create_value_primitive_fn!(
+            $function_name,
+            $function_name_same,
+            Self,
+            self,
+            other,
+            self.get_integer64()
+                .$called_fn(other.get_integer64())
+                .into(),
+            self.get_uinteger64()
+                .$called_fn(other.get_uinteger64())
+                .into(),
+            self.get_float64().$called_fn(other.get_float64()).into(),
+            {
+                panic!("Invalid operation!");
+            }
+        );
     };
 }
 
@@ -169,12 +197,22 @@ impl Value {
     }
 
     #[inline]
-    pub fn try_convert_into_u64(&self, value_type: ValueType) -> u64 {
+    pub fn convert_into_u64(&self, value_type: ValueType) -> u64 {
         // TODO: Handle errors
         match value_type {
             ValueType::Integer64 => self.get_integer64() as u64,
             ValueType::UInteger64 => self.get_uinteger64(),
             ValueType::Float64 => self.get_float64() as u64,
+        }
+    }
+
+    #[inline]
+    pub fn convert_into_i64(&self, value_type: ValueType) -> i64 {
+        // TODO: Handle errors
+        match value_type {
+            ValueType::Integer64 => self.get_integer64(),
+            ValueType::UInteger64 => self.get_uinteger64() as i64,
+            ValueType::Float64 => self.get_float64() as i64,
         }
     }
 
@@ -187,52 +225,6 @@ impl Value {
         }
     }
 
-    #[inline]
-    pub fn eq(
-        &self,
-        value_type_self: ValueType,
-        other: &Self,
-        value_type_other: ValueType,
-    ) -> bool {
-        if value_type_self != value_type_other {
-            false
-        } else {
-            match value_type_self {
-                ValueType::Integer64 => self.get_integer64() == other.get_integer64(),
-                ValueType::UInteger64 => self.get_uinteger64() == other.get_uinteger64(),
-                ValueType::Float64 => self.get_float64() == other.get_float64(),
-            }
-        }
-    }
-
-    #[inline]
-    pub fn eq_same(&self, value_type: ValueType, other: &Self) -> bool {
-        self.eq(value_type, other, value_type)
-    }
-
-    #[inline]
-    pub fn partial_cmp(
-        &self,
-        value_type_self: ValueType,
-        other: &Self,
-        value_type_other: ValueType,
-    ) -> Option<Ordering> {
-        if value_type_self != value_type_other {
-            None
-        } else {
-            match value_type_self {
-                ValueType::Integer64 => self.get_integer64().partial_cmp(&other.get_integer64()),
-                ValueType::UInteger64 => self.get_uinteger64().partial_cmp(&other.get_uinteger64()),
-                ValueType::Float64 => self.get_float64().partial_cmp(&other.get_float64()),
-            }
-        }
-    }
-
-    #[inline]
-    pub fn partial_cmp_same(&self, value_type: ValueType, other: &Self) -> Option<Ordering> {
-        self.partial_cmp(value_type, other, value_type)
-    }
-
     pub fn get_output(&self, value_type: ValueType) -> String {
         match value_type {
             ValueType::Integer64 => self.get_uinteger64().to_string(),
@@ -241,48 +233,70 @@ impl Value {
         }
     }
 
-    pub fn try_div(
-        &self,
-        value_type_self: ValueType,
-        other: &Self,
-        value_type_other: ValueType,
-    ) -> Option<Self> {
-        let other = other.convert_into_f64(value_type_other);
-        if other == 0f64 {
-            None
-        } else {
-            Some(self.convert_into_f64(value_type_self).div(other).into())
+    create_value_primitive_fn!(
+        eq,
+        eq_same,
+        bool,
+        self,
+        other,
+        self.get_integer64().eq(&other.get_integer64()),
+        self.get_uinteger64().eq(&other.get_uinteger64()),
+        self.get_float64().eq(&other.get_float64()),
+        { false }
+    );
+    create_value_primitive_fn!(
+        partial_cmp,
+        partial_cmp_same,
+        Option<Ordering>,
+        self,
+        other,
+        self.get_integer64().partial_cmp(&other.get_integer64()),
+        self.get_uinteger64().partial_cmp(&other.get_uinteger64()),
+        self.get_float64().partial_cmp(&other.get_float64()),
+        { None }
+    );
+
+    create_value_primitive_fn_simplified!(add, add_same, add);
+    create_value_primitive_fn_simplified!(sub, sub_same, sub);
+    create_value_primitive_fn_simplified!(mul, mul_same, mul);
+
+    create_value_primitive_fn!(
+        div,
+        div_same,
+        Self,
+        self,
+        other,
+        (self.get_integer64() as f64)
+            .div(other.get_integer64() as f64)
+            .into(),
+        (self.get_uinteger64() as f64)
+            .div(other.get_uinteger64() as f64)
+            .into(),
+        self.get_float64().div(other.get_float64()).into(),
+        {
+            panic!("Invalid operation!");
         }
-    }
-
-    pub fn try_div_same(&self, value_type: ValueType, other: &Self) -> Option<Self> {
-        self.try_div(value_type, other, value_type)
-    }
-
-    pub fn try_mod(
-        &self,
-        value_type_self: ValueType,
-        other: &Self,
-        value_type_other: ValueType,
-    ) -> Option<Self> {
-        let other = other.convert_into_f64(value_type_other);
-        if other == 0f64 {
-            None
-        } else {
-            Some(self.convert_into_f64(value_type_self).rem(other).into())
+    );
+    create_value_primitive_fn!(
+        mdl,
+        mdl_same,
+        Self,
+        self,
+        other,
+        (self.get_integer64() as f64)
+            .rem(other.get_integer64() as f64)
+            .into(),
+        (self.get_uinteger64() as f64)
+            .rem(other.get_uinteger64() as f64)
+            .into(),
+        self.get_float64().rem(other.get_float64()).into(),
+        {
+            panic!("Invalid operation!");
         }
-    }
+    );
 
-    pub fn try_mod_same(&self, value_type: ValueType, other: &Self) -> Option<Self> {
-        self.try_mod(value_type, other, value_type)
-    }
-
-    create_value_primitive_fn!(add, add_same, add);
-    create_value_primitive_fn!(sub, sub_same, sub);
-    create_value_primitive_fn!(mul, mul_same, mul);
-
-    create_value_primitive_fn!(min, min_same, min);
-    create_value_primitive_fn!(max, max_same, max);
+    create_value_primitive_fn_simplified!(min, min_same, min);
+    create_value_primitive_fn_simplified!(max, max_same, max);
 }
 
 #[derive(Clone, Copy)]
@@ -292,37 +306,55 @@ pub struct Vector {
     pub value: Value,
 }
 
+/// Safety: A connection is only single-threaded
 pub struct Connection {
-    db_dir: PathBuf,
     page_cache: Rc<RefCell<PageCache>>,
     indexer: Rc<RefCell<Indexer>>,
     writer: Rc<RefCell<Writer>>,
 }
 
 impl Connection {
+    /// Recursively creates the directories to `db_dir` if they do not exist
     pub fn new(db_dir: impl AsRef<Path>) -> Self {
         fs::create_dir_all(&db_dir).unwrap();
 
         let indexer = Rc::new(RefCell::new(Indexer::new(db_dir.as_ref())));
         indexer.borrow_mut().create_store();
         Self {
-            db_dir: db_dir.as_ref().to_path_buf(),
             page_cache: Rc::new(RefCell::new(PageCache::new(10))),
             indexer: indexer.clone(),
             writer: Rc::new(RefCell::new(Writer::new(db_dir, indexer, CURRENT_VERSION))),
         }
     }
 
+    fn try_parse(&self, stream: impl AsRef<str>) -> parser::VectorSelector {
+        let Ok(parser::Expr::VectorSelector(selector)) = parser::parse(stream.as_ref()) else {
+            panic!("Expected a vector selector!");
+        };
+
+        if selector.at.is_some() || selector.offset.is_some() {
+            panic!("Cannot include at / offset for insert query!");
+        }
+
+        selector
+    }
+
+    fn get_stream_ids_for_selector(&self, selector: &parser::VectorSelector) -> HashSet<Uuid> {
+        self.indexer
+            .borrow()
+            .get_stream_ids(selector.name.as_ref().unwrap(), &selector.matchers)
+    }
+
     pub fn create_stream(&mut self, stream: impl AsRef<str>, value_type: ValueType) {
-        let stream_id = self.try_get_stream_id_from_matcher(stream);
-        if stream_id.0.is_some() {
+        let selector = self.try_parse(stream);
+
+        if !self.get_stream_ids_for_selector(&selector).is_empty() {
             panic!("Attempting to create a stream that already exists!");
         }
 
-        let vec_sel = stream_id.1;
         let stream_id = self.indexer.borrow_mut().insert_new_id(
-            vec_sel.name.as_ref().unwrap(),
-            &vec_sel.matchers,
+            selector.name.as_ref().unwrap(),
+            &selector.matchers,
             value_type,
         );
         self.writer.borrow_mut().create_stream(stream_id);
@@ -333,7 +365,9 @@ impl Connection {
     }
 
     pub fn check_stream_exists(&self, stream: impl AsRef<str>) -> bool {
-        self.try_get_stream_id_from_matcher(stream).0.is_some()
+        !self
+            .get_stream_ids_for_selector(&self.try_parse(stream))
+            .is_empty()
     }
 
     pub fn get_all_streams(&self) -> Vec<(Uuid, String, ValueType)> {
@@ -341,10 +375,13 @@ impl Connection {
     }
 
     pub fn prepare_insert(&mut self, stream: impl AsRef<str>) -> Inserter {
-        let stream_id = self
-            .try_get_stream_id_from_matcher(stream.as_ref())
-            .0
-            .unwrap_or_else(|| panic!("Stream {:?} not found in db!", stream.as_ref()));
+        let stream_ids = self.get_stream_ids_for_selector(&self.try_parse(stream.as_ref()));
+
+        if stream_ids.len() != 1 {
+            panic!("Invalid number of streams found in the database!");
+        }
+
+        let stream_id = stream_ids.into_iter().next().unwrap();
 
         Inserter {
             value_type: self
@@ -371,37 +408,6 @@ impl Connection {
             plan,
             connection: self,
         }
-    }
-
-    fn try_get_stream_id_from_matcher(
-        &self,
-        stream: impl AsRef<str>,
-    ) -> (Option<Uuid>, parser::VectorSelector) {
-        let ast = parser::parse(stream.as_ref()).unwrap();
-
-        let parser::Expr::VectorSelector(vec_sel) = ast else {
-            panic!("Expected a vector selector!");
-        };
-
-        if vec_sel.at.is_some() || vec_sel.offset.is_some() {
-            panic!("Cannot include at / offset for insert query!");
-        }
-
-        let stream_ids = self
-            .indexer
-            .borrow()
-            .get_stream_ids(vec_sel.name.as_ref().unwrap(), &vec_sel.matchers);
-
-        (
-            match stream_ids.len() {
-                0 => None,
-                1 => Some(stream_ids.into_iter().next().unwrap()),
-                _ => panic!(
-                    "Multiple streams matched selector, can only insert into one stream at a time!"
-                ),
-            },
-            vec_sel,
-        )
     }
 }
 
@@ -453,7 +459,7 @@ pub struct Query<'a> {
     plan: TNode,
 }
 
-impl<'a> Query<'a> {
+impl Query<'_> {
     pub fn value_type(&self) -> ValueType {
         self.plan.value_type()
     }

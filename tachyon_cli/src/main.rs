@@ -51,7 +51,12 @@ pub enum Commands {
     CreateStream {
         #[arg(value_parser = NonEmptyStringValueParser::new())]
         stream: String,
-        #[arg(value_parser = PossibleValuesParser::new(["i", "u", "f"]).map(|s| s.parse::<ValueType>().unwrap()))]
+        #[arg(value_parser = PossibleValuesParser::new(["i", "u", "f"]).map(|s| match s.as_str() {
+            "i" => ValueType::Integer64,
+            "u" => ValueType::UInteger64,
+            "f" => ValueType::Float64,
+            _ => unreachable!()
+        }))]
         value_type: ValueType,
     },
     Insert {
@@ -73,8 +78,8 @@ fn handle_parse_headers_command(paths: Vec<PathBuf>) {
         let mut table = Table::new();
 
         table.add_row(row!["File", path.to_str().unwrap()]);
-        table.add_row(row!["Version", file.header.version]);
-        table.add_row(row!["Stream ID", file.header.stream_id]);
+        table.add_row(row!["Version", file.header.version.0]);
+        table.add_row(row!["Stream ID", file.header.stream_id.0]);
 
         table.add_row(row!["Min Timestamp", file.header.min_timestamp]);
         table.add_row(row!["Max Timestamp", file.header.max_timestamp]);
@@ -143,7 +148,13 @@ fn handle_query_command(
     export_csv_path: Option<PathBuf>,
 ) {
     // TODO: Fix temporary start and end hack
-    let mut query = connection.prepare_query(query, start.or(Some(0)), end.or(Some(1719776339748)));
+    const HACK_TIME_START: u64 = 0;
+    const HACK_TIME_END: u64 = 1719776339748;
+    let mut query = connection.prepare_query(
+        query,
+        start.or(Some(HACK_TIME_START)),
+        end.or(Some(HACK_TIME_END)),
+    );
 
     match query.return_type() {
         tachyon_core::ReturnType::Scalar => {
@@ -158,12 +169,12 @@ fn handle_query_command(
             let mut min_value = f32::MAX;
 
             while let Some(Vector { timestamp, value }) = query.next_vector() {
-                let value_f64 = value.convert_into_f64(query.value_type()) as f32;
+                let value = value.convert_into_f64(query.value_type()) as f32;
 
-                max_value = max_value.max(value_f64);
-                min_value = min_value.min(value_f64);
+                max_value = max_value.max(value);
+                min_value = min_value.min(value);
 
-                timeseries.push((timestamp as f32, value_f64));
+                timeseries.push((timestamp as f32, value));
             }
 
             Chart::new(180, 60, timeseries[0].0, timeseries.last().unwrap().0)
