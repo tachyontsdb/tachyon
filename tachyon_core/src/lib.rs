@@ -1,12 +1,11 @@
 #![allow(dead_code)]
 
+use crate::execution::node::{ExecutorNode, TNode};
 use crate::query::indexer::Indexer;
-use crate::query::node::TNode;
 use crate::query::planner::QueryPlanner;
 use crate::storage::page_cache::PageCache;
 use crate::storage::writer::Writer;
 use promql_parser::parser;
-use query::node::ExecutorNode;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -16,6 +15,13 @@ use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::path::Path;
 use std::rc::Rc;
 use uuid::Uuid;
+
+mod ffi;
+
+mod execution;
+mod query;
+mod storage;
+mod utils;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[repr(transparent)]
@@ -478,12 +484,6 @@ impl Query<'_> {
         self.plan.next_vector(self.connection)
     }
 }
-
-mod ffi;
-
-mod query;
-mod storage;
-mod utils;
 
 #[cfg(feature = "tachyon_benchmarks")]
 pub mod tachyon_benchmarks {

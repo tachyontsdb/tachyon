@@ -156,10 +156,12 @@ fn handle_query_command(
         end.or(Some(HACK_TIME_END)),
     );
 
+    let query_value_type = query.value_type();
+
     match query.return_type() {
         tachyon_core::ReturnType::Scalar => {
             while let Some(value) = query.next_scalar() {
-                println!("{:?}", value.get_output(query.value_type()));
+                println!("{:?}", value.get_output(query_value_type));
             }
         }
         tachyon_core::ReturnType::Vector => {
@@ -169,7 +171,7 @@ fn handle_query_command(
             let mut min_value = f32::MAX;
 
             while let Some(Vector { timestamp, value }) = query.next_vector() {
-                let value = value.convert_into_f64(query.value_type()) as f32;
+                let value = value.convert_into_f64(query_value_type) as f32;
 
                 max_value = max_value.max(value);
                 min_value = min_value.min(value);

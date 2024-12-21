@@ -1,4 +1,4 @@
-use super::indexer::Indexer;
+use crate::query::indexer::Indexer;
 use crate::storage::file::{Cursor, ScanHint};
 use crate::storage::page_cache::PageCache;
 use crate::{Connection, ReturnType, Timestamp, Value, ValueType, Vector};
@@ -291,11 +291,13 @@ impl ScalarToScalarNode {
 
 impl ExecutorNode for ScalarToScalarNode {
     fn value_type(&self) -> ValueType {
-        if self.lhs.value_type() != self.rhs.value_type() {
+        let lhs_value_type = self.lhs.value_type();
+
+        if lhs_value_type != self.rhs.value_type() {
             todo!("Implement operations between different types!");
         }
 
-        self.lhs.value_type()
+        lhs_value_type
     }
 
     fn return_type(&self) -> ReturnType {
@@ -338,11 +340,13 @@ impl VectorToScalarNode {
 
 impl ExecutorNode for VectorToScalarNode {
     fn value_type(&self) -> ValueType {
-        if self.vector_node.value_type() != self.scalar_node.value_type() {
+        let vector_value_type = self.vector_node.value_type();
+
+        if vector_value_type != self.scalar_node.value_type() {
             todo!("Implement operations between different types!");
         }
 
-        self.vector_node.value_type()
+        vector_value_type
     }
 
     fn return_type(&self) -> ReturnType {
@@ -395,7 +399,7 @@ enum VectorToVectorStream {
 impl VectorToVectorNode {
     pub fn new(op: BinaryOp, lhs: Box<TNode>, rhs: Box<TNode>) -> Self {
         if lhs.value_type() == ValueType::Float64 || rhs.value_type() == ValueType::Float64 {
-            panic!("Floats not supported yet")
+            todo!("Floats not supported yet");
         }
 
         Self {
@@ -424,12 +428,13 @@ impl VectorToVectorNode {
             let (v1, v2) = (range[1].value, range[0].value);
             let (t1, t2) = (range[1].timestamp, range[0].timestamp);
 
+            let rhs_value_type = self.rhs.value_type();
+
             let slope = (v2.convert_into_f64(self.lhs.value_type())
-                - v1.convert_into_f64(self.rhs.value_type()))
+                - v1.convert_into_f64(rhs_value_type))
                 / (t2 as f64 - t1 as f64);
-            let res = ((ts as f64 - t1 as f64) * slope
-                + v1.convert_into_f64(self.rhs.value_type()))
-            .round();
+            let res =
+                ((ts as f64 - t1 as f64) * slope + v1.convert_into_f64(rhs_value_type)).round();
 
             // TODO: Allow floats
             (res as u64).into()
@@ -463,11 +468,13 @@ impl VectorToVectorNode {
 
 impl ExecutorNode for VectorToVectorNode {
     fn value_type(&self) -> ValueType {
-        if self.lhs.value_type() != self.rhs.value_type() {
+        let lhs_value_type = self.lhs.value_type();
+
+        if lhs_value_type != self.rhs.value_type() {
             todo!("Implement operations between different types!");
         }
 
-        self.lhs.value_type()
+        lhs_value_type
     }
 
     fn return_type(&self) -> ReturnType {
@@ -798,12 +805,14 @@ impl AggregateNode {
 
 impl ExecutorNode for AggregateNode {
     fn value_type(&self) -> ValueType {
+        let child_value_type = self.child.value_type();
+
         match self.aggregate_type {
             AggregateType::Count => match *self.child {
-                TNode::VectorSelect(_) => self.child.value_type(),
+                TNode::VectorSelect(_) => child_value_type,
                 _ => ValueType::UInteger64,
             },
-            _ => self.child.value_type(),
+            _ => child_value_type,
         }
     }
 
@@ -820,8 +829,10 @@ impl ExecutorNode for AggregateNode {
 
                 let mut sum = first_vector.unwrap().value;
 
+                let value_type = self.value_type();
+
                 while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
-                    sum = sum.add_same(self.value_type(), &value);
+                    sum = sum.add_same(value_type, &value);
                 }
 
                 Some(sum)
@@ -833,8 +844,9 @@ impl ExecutorNode for AggregateNode {
 
                 if let TNode::VectorSelect(_) = *self.child {
                     let mut count = first_vector.unwrap().value;
+                    let value_type = self.value_type();
                     while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
-                        count = count.add_same(self.value_type(), &value);
+                        count = count.add_same(value_type, &value);
                     }
                     Some(count)
                 } else {
@@ -847,7 +859,8 @@ impl ExecutorNode for AggregateNode {
             }
             AggregateType::Min | AggregateType::Max => {
                 let mut is_first_value = true;
-                let mut val = Value::get_default(self.value_type());
+                let value_type = self.value_type();
+                let mut val = Value::get_default(value_type);
 
                 while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
                     if is_first_value {
@@ -856,9 +869,9 @@ impl ExecutorNode for AggregateNode {
                     }
 
                     if self.aggregate_type == AggregateType::Min {
-                        val = val.min_same(self.value_type(), &value);
+                        val = val.min_same(value_type, &value);
                     } else if self.aggregate_type == AggregateType::Max {
-                        val = val.max_same(self.value_type(), &value);
+                        val = val.max_same(value_type, &value);
                     }
                 }
 
