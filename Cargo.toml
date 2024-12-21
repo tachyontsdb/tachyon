@@ -5,6 +5,7 @@ resolver = "2"
 [profile.dev]
 lto = "off"
 opt-level = 0
+debug = "full"
 
 [profile.release]
 codegen-units = 1

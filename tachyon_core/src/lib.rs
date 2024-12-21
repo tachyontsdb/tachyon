@@ -306,6 +306,8 @@ pub struct Vector {
     pub value: Value,
 }
 
+pub type StreamSummaryType = (Uuid, Vec<(String, String)>, ValueType);
+
 /// Safety: A connection is only single-threaded
 pub struct Connection {
     page_cache: Rc<RefCell<PageCache>>,
@@ -370,7 +372,7 @@ impl Connection {
             .is_empty()
     }
 
-    pub fn get_all_streams(&self) -> Vec<(Uuid, String, ValueType)> {
+    pub fn get_all_streams(&self) -> Vec<StreamSummaryType> {
         self.indexer.borrow().get_all_streams()
     }
 

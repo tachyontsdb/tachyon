@@ -250,9 +250,16 @@ pub fn main() {
     match args.command {
         Some(Commands::ListAllStreams) => {
             let mut table = Table::new();
-            table.add_row(row!["Stream ID", "Stream", "Value Type"]);
+            table.add_row(row!["Stream ID", "Stream Name + Matchers", "Value Type"]);
             for stream in connection.get_all_streams() {
-                table.add_row(row![stream.0, stream.1, stream.2]);
+                let matchers: Vec<String> = stream
+                    .1
+                    .into_iter()
+                    .map(|(matcher_name, matcher_value)| {
+                        format!("\"{matcher_name}\" = \"{matcher_value}\"")
+                    })
+                    .collect();
+                table.add_row(row![stream.0, matchers.join(" | "), stream.2]);
             }
             table.printstd();
         }

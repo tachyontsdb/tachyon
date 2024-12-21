@@ -74,7 +74,11 @@ fn write_voltage_dataset(c: &mut Criterion) {
         ),
         |b| {
             b.iter(|| {
-                bench_write_dataset(&timestamps, &values, "../tmp/bench_write_voltage_dataset.ty")
+                bench_write_dataset(
+                    &timestamps,
+                    &values,
+                    "../tmp/bench_write_voltage_dataset.ty",
+                )
             })
         },
     );
