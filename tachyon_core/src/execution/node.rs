@@ -954,95 +954,110 @@ pub enum GetKType {
 }
 
 pub struct GetKNode {
+    getk_type: GetKType,
+    child: Box<TNode>,
+    param: Box<TNode>,
+
+    k: Option<usize>,
+
     ix: usize,
-    ks: Vec<Value>,
-    value_type: ValueType,
+    ks: Option<Vec<Value>>,
 }
 
 impl GetKNode {
     pub fn new(
-        conn: &mut Connection,
+        _: &mut Connection,
         getk_type: GetKType,
-        mut child: Box<TNode>,
-        mut param: Box<TNode>,
+        child: Box<TNode>,
+        param: Box<TNode>,
     ) -> Self {
-        let k = param.next_scalar(conn).unwrap();
-        let k = (k.convert_into_u64(param.value_type())) as usize;
-
         Self {
+            getk_type,
+            child,
+            param,
+            k: None,
+            ks: None,
             ix: 0,
-            ks: if getk_type == GetKType::Bottom {
-                let mut maxheap = BinaryHeap::<TypeValuePair>::new();
-                // Find (up to) k smallest values
-                // Newer values overwrite older values in case of ties
-                if k > 0 {
-                    while let Some(Vector { value, .. }) = child.next_vector(conn) {
-                        if maxheap.len() < k {
-                            maxheap.push(TypeValuePair(child.value_type(), value));
-                        } else {
-                            let ordering = value
-                                .partial_cmp_same(child.value_type(), &maxheap.peek().unwrap().1)
-                                .unwrap();
-                            if ordering.is_le() {
-                                maxheap.pop();
-                                maxheap.push(TypeValuePair(child.value_type(), value));
-                            }
-                        }
-                    }
-                }
-                maxheap
-                    .into_sorted_vec()
-                    .into_iter()
-                    .map(|pair| pair.1)
-                    .collect()
-            } else if getk_type == GetKType::Top {
-                let mut minheap = BinaryHeap::<Reverse<TypeValuePair>>::new();
-                // Find (up to) k largest values
-                // Newer values overwrite older values in case of ties
-                if k > 0 {
-                    while let Some(Vector { value, .. }) = child.next_vector(conn) {
-                        if minheap.len() < k {
-                            minheap.push(Reverse(TypeValuePair(child.value_type(), value)));
-                        } else {
-                            let ordering = value
-                                .partial_cmp_same(child.value_type(), &minheap.peek().unwrap().0 .1)
-                                .unwrap();
-                            if ordering.is_ge() {
-                                minheap.pop();
-                                minheap.push(Reverse(TypeValuePair(child.value_type(), value)));
-                            }
-                        }
-                    }
-                }
-                minheap
-                    .into_sorted_vec()
-                    .into_iter()
-                    .map(|rev_pair| rev_pair.0 .1)
-                    .collect()
-            } else {
-                panic!("Invalid GetKType!");
-            },
-            value_type: child.value_type(),
         }
     }
 }
 
 impl ExecutorNode for GetKNode {
     fn value_type(&self) -> ValueType {
-        self.value_type
+        self.child.value_type()
     }
 
     fn return_type(&self) -> ReturnType {
         ReturnType::Scalar
     }
 
-    fn next_scalar(&mut self, _: &mut Connection) -> Option<Value> {
-        if self.ix >= self.ks.len() {
+    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        if self.k.is_none() {
+            // Generate heaps during the first call
+
+            let k = ((self.param.next_scalar(conn).unwrap())
+                .convert_into_u64(self.param.value_type())) as usize;
+            self.k = Some(k);
+
+            self.ks = Some(if k == 0 {
+                Vec::new()
+            } else {
+                let child_value_type = self.child.value_type();
+
+                // Newer values overwrite older values in case of ties
+
+                if self.getk_type == GetKType::Bottom {
+                    let mut maxheap = BinaryHeap::<TypeValuePair>::new();
+                    while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
+                        if maxheap.len() < k {
+                            maxheap.push(TypeValuePair(child_value_type, value));
+                        } else {
+                            let ordering = value
+                                .partial_cmp_same(child_value_type, &maxheap.peek().unwrap().1)
+                                .unwrap();
+                            if ordering.is_le() {
+                                maxheap.pop();
+                                maxheap.push(TypeValuePair(child_value_type, value));
+                            }
+                        }
+                    }
+                    maxheap
+                        .into_sorted_vec()
+                        .into_iter()
+                        .map(|pair| pair.1)
+                        .collect()
+                } else {
+                    let mut minheap = BinaryHeap::<Reverse<TypeValuePair>>::new();
+                    while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
+                        if minheap.len() < k {
+                            minheap.push(Reverse(TypeValuePair(child_value_type, value)));
+                        } else {
+                            let ordering = value
+                                .partial_cmp_same(child_value_type, &minheap.peek().unwrap().0 .1)
+                                .unwrap();
+                            if ordering.is_ge() {
+                                minheap.pop();
+                                minheap.push(Reverse(TypeValuePair(child_value_type, value)));
+                            }
+                        }
+                    }
+                    minheap
+                        .into_sorted_vec()
+                        .into_iter()
+                        .map(|rev_pair| rev_pair.0 .1)
+                        .collect()
+                }
+            });
+        }
+
+        let ks = self.ks.as_ref().unwrap();
+
+        if self.ix >= ks.len() {
             None
         } else {
-            let next = self.ks[self.ix];
+            let value = ks[self.ix];
             self.ix += 1;
-            Some(next)
+            Some(value)
         }
     }
 }
