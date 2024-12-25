@@ -30,7 +30,11 @@ impl Writer {
         let file = self
             .open_data_files
             .entry(stream_id)
-            .or_insert(TimeDataFile::new(self.version, StreamId(0), value_type)); // TODO: Add stream id
+            .or_insert(TimeDataFile::new(
+                self.version,
+                StreamId(stream_id.as_u128()),
+                value_type,
+            ));
 
         file.write_data_to_file_in_mem(ts, v);
         if file.num_entries() >= MAX_NUM_ENTRIES {
@@ -54,7 +58,11 @@ impl Writer {
             let file = self
                 .open_data_files
                 .entry(stream_id)
-                .or_insert(TimeDataFile::new(self.version, StreamId(0), value_type)); // TODO: Add stream id
+                .or_insert(TimeDataFile::new(
+                    self.version,
+                    StreamId(stream_id.as_u128()),
+                    value_type,
+                ));
 
             entries_written += file.write_batch_data_to_file_in_mem(&batch[entries_written..]);
 

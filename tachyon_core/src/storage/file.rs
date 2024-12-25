@@ -15,7 +15,7 @@ use std::rc::Rc;
 const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
-const HEADER_SIZE: usize = 63;
+const HEADER_SIZE: usize = 71;
 
 pub struct Header {
     pub version: Version,
@@ -110,7 +110,7 @@ impl Header {
         }
         let buffer = &buffer[MAGIC_SIZE..];
 
-        let value_type = FileReaderUtils::read_u64_1(&buffer[30..31])
+        let value_type = (FileReaderUtils::read_u64_1(&buffer[38..39]) as u8)
             .try_into()
             .unwrap();
         Self {
@@ -119,17 +119,17 @@ impl Header {
                     .try_into()
                     .unwrap(),
             ),
-            stream_id: StreamId(FileReaderUtils::read_u64_8(&buffer[2..10])),
-            min_timestamp: FileReaderUtils::read_u64_8(&buffer[10..18]),
-            max_timestamp: FileReaderUtils::read_u64_8(&buffer[18..26]),
-            count: FileReaderUtils::read_u64_4(&buffer[26..30])
+            stream_id: StreamId(FileReaderUtils::read_u128_16(&buffer[2..18])),
+            min_timestamp: FileReaderUtils::read_u64_8(&buffer[18..26]),
+            max_timestamp: FileReaderUtils::read_u64_8(&buffer[26..34]),
+            count: FileReaderUtils::read_u64_4(&buffer[34..38])
                 .try_into()
                 .unwrap(),
             value_type,
-            value_sum: Self::parse_value(value_type, &buffer[31..39]),
-            min_value: Self::parse_value(value_type, &buffer[39..47]),
-            max_value: Self::parse_value(value_type, &buffer[47..55]),
-            first_value: Self::parse_value(value_type, &buffer[55..63]),
+            value_sum: Self::parse_value(value_type, &buffer[39..47]),
+            min_value: Self::parse_value(value_type, &buffer[47..55]),
+            max_value: Self::parse_value(value_type, &buffer[55..63]),
+            first_value: Self::parse_value(value_type, &buffer[63..71]),
         }
     }
 

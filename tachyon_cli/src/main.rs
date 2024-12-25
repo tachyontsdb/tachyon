@@ -14,7 +14,7 @@ use tachyon_core::tachyon_benchmarks::TimeDataFile;
 use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
 
-const HEADER: &str = r"
+const TACHYON_CLI_HEADER: &str = r"
  ______                 __                              ____    ____      
 /\__  _\               /\ \                            /\  _`\ /\  _`\    
 \/_/\ \/    __      ___\ \ \___   __  __    ___     ___\ \ \/\ \ \ \L\ \  
@@ -108,11 +108,11 @@ fn handle_parse_headers_command(paths: Vec<PathBuf>) {
         table.printstd();
     }
 
-    fn recurse(path: PathBuf) {
+    fn recurse_subdirs_and_output_headers(path: PathBuf) {
         if path.is_dir() {
             let files = fs::read_dir(path).unwrap();
             for file in files {
-                recurse(file.unwrap().path());
+                recurse_subdirs_and_output_headers(file.unwrap().path());
             }
         } else if path
             .extension()
@@ -125,7 +125,7 @@ fn handle_parse_headers_command(paths: Vec<PathBuf>) {
     }
 
     for path in paths {
-        recurse(path);
+        recurse_subdirs_and_output_headers(path);
     }
 }
 
@@ -173,8 +173,8 @@ fn handle_query_command(
             while let Some(Vector { timestamp, value }) = query.next_vector() {
                 let value = value.convert_into_f64(query_value_type) as f32;
 
-                max_value = max_value.max(value);
-                min_value = min_value.min(value);
+                max_value = f32::max(max_value, value);
+                min_value = f32::min(min_value, value);
 
                 timeseries.push((timestamp as f32, value));
             }
@@ -223,7 +223,7 @@ fn handle_import_csv_command(mut connection: Connection, stream: String, csv_fil
 }
 
 pub fn repl(mut connection: Connection) {
-    println!("{}", HEADER);
+    println!("{}", TACHYON_CLI_HEADER);
 
     let mut rl = DefaultEditor::new().unwrap();
     loop {

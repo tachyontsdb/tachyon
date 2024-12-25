@@ -27,9 +27,10 @@ mod utils;
 #[repr(transparent)]
 pub struct Version(pub u16);
 
+/// Encoded as a 128-bit UUID
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(transparent)]
-pub struct StreamId(pub u64);
+pub struct StreamId(pub u128);
 
 pub const CURRENT_VERSION: Version = Version(2);
 
@@ -49,19 +50,6 @@ impl TryFrom<u8> for ValueType {
     type Error = ();
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Integer64),
-            1 => Ok(Self::UInteger64),
-            2 => Ok(Self::Float64),
-            _ => Err(()),
-        }
-    }
-}
-
-impl TryFrom<u64> for ValueType {
-    type Error = ();
-
-    fn try_from(value: u64) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Integer64),
             1 => Ok(Self::UInteger64),
@@ -335,7 +323,7 @@ impl Connection {
         }
     }
 
-    fn try_parse(&self, stream: impl AsRef<str>) -> parser::VectorSelector {
+    fn parse_stream(&self, stream: impl AsRef<str>) -> parser::VectorSelector {
         let Ok(parser::Expr::VectorSelector(selector)) = parser::parse(stream.as_ref()) else {
             panic!("Expected a vector selector!");
         };
@@ -354,7 +342,7 @@ impl Connection {
     }
 
     pub fn create_stream(&mut self, stream: impl AsRef<str>, value_type: ValueType) {
-        let selector = self.try_parse(stream);
+        let selector = self.parse_stream(stream);
 
         if !self.get_stream_ids_for_selector(&selector).is_empty() {
             panic!("Attempting to create a stream that already exists!");
@@ -374,7 +362,7 @@ impl Connection {
 
     pub fn check_stream_exists(&self, stream: impl AsRef<str>) -> bool {
         !self
-            .get_stream_ids_for_selector(&self.try_parse(stream))
+            .get_stream_ids_for_selector(&self.parse_stream(stream))
             .is_empty()
     }
 
@@ -383,7 +371,7 @@ impl Connection {
     }
 
     pub fn prepare_insert(&mut self, stream: impl AsRef<str>) -> Inserter {
-        let stream_ids = self.get_stream_ids_for_selector(&self.try_parse(stream.as_ref()));
+        let stream_ids = self.get_stream_ids_for_selector(&self.parse_stream(stream.as_ref()));
 
         if stream_ids.len() != 1 {
             panic!("Invalid number of streams found in the database!");

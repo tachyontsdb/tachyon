@@ -89,16 +89,14 @@ impl ExecutorNode for TNode {
 
 pub struct NumberLiteralNode {
     val_type: ValueType,
-    val: Value,
-    extracted_literal: bool,
+    val: Option<Value>,
 }
 
 impl NumberLiteralNode {
     pub fn new(val_type: ValueType, val: Value) -> Self {
         Self {
             val_type,
-            val,
-            extracted_literal: false,
+            val: Some(val),
         }
     }
 }
@@ -113,12 +111,7 @@ impl ExecutorNode for NumberLiteralNode {
     }
 
     fn next_scalar(&mut self, _: &mut Connection) -> Option<Value> {
-        if self.extracted_literal {
-            None
-        } else {
-            self.extracted_literal = true;
-            Some(self.val)
-        }
+        self.val.take()
     }
 }
 
@@ -823,12 +816,7 @@ impl ExecutorNode for AggregateNode {
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
         match self.aggregate_type {
             AggregateType::Sum => {
-                let first_vector = self.child.next_vector(conn);
-
-                first_vector?;
-
-                let mut sum = first_vector.unwrap().value;
-
+                let mut sum = self.child.next_vector(conn)?.value;
                 let value_type = self.value_type();
 
                 while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
@@ -838,12 +826,10 @@ impl ExecutorNode for AggregateNode {
                 Some(sum)
             }
             AggregateType::Count => {
-                let first_vector = self.child.next_vector(conn);
-
-                first_vector?;
+                let first_vector = self.child.next_vector(conn)?;
 
                 if let TNode::VectorSelect(_) = *self.child {
-                    let mut count = first_vector.unwrap().value;
+                    let mut count = first_vector.value;
                     let value_type = self.value_type();
                     while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
                         count = count.add_same(value_type, &value);
@@ -858,16 +844,10 @@ impl ExecutorNode for AggregateNode {
                 }
             }
             AggregateType::Min | AggregateType::Max => {
-                let mut is_first_value = true;
                 let value_type = self.value_type();
-                let mut val = Value::get_default(value_type);
+                let mut val = self.child.next_vector(conn)?.value;
 
                 while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
-                    if is_first_value {
-                        val = value;
-                        is_first_value = false;
-                    }
-
                     if self.aggregate_type == AggregateType::Min {
                         val = val.min_same(value_type, &value);
                     } else if self.aggregate_type == AggregateType::Max {
@@ -875,11 +855,7 @@ impl ExecutorNode for AggregateNode {
                     }
                 }
 
-                if is_first_value {
-                    None
-                } else {
-                    Some(val)
-                }
+                Some(val)
             }
         }
     }
@@ -961,7 +937,7 @@ pub struct GetKNode {
     k: Option<usize>,
 
     ix: usize,
-    ks: Option<Vec<Value>>,
+    ks: Vec<Value>,
 }
 
 impl GetKNode {
@@ -976,7 +952,7 @@ impl GetKNode {
             child,
             param,
             k: None,
-            ks: None,
+            ks: Vec::new(),
             ix: 0,
         }
     }
@@ -999,7 +975,7 @@ impl ExecutorNode for GetKNode {
                 .convert_into_u64(self.param.value_type())) as usize;
             self.k = Some(k);
 
-            self.ks = Some(if k == 0 {
+            self.ks = if k == 0 {
                 Vec::new()
             } else {
                 let child_value_type = self.child.value_type();
@@ -1047,15 +1023,13 @@ impl ExecutorNode for GetKNode {
                         .map(|rev_pair| rev_pair.0 .1)
                         .collect()
                 }
-            });
+            };
         }
 
-        let ks = self.ks.as_ref().unwrap();
-
-        if self.ix >= ks.len() {
+        if self.ix >= self.ks.len() {
             None
         } else {
-            let value = ks[self.ix];
+            let value = self.ks[self.ix];
             self.ix += 1;
             Some(value)
         }

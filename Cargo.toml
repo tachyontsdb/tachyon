@@ -3,6 +3,7 @@ members = ["tachyon_core", "tachyon_cli"]
 resolver = "2"
 
 [profile.dev]
+overflow-checks = true
 lto = "off"
 opt-level = 0
 debug = "full"

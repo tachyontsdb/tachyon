@@ -135,8 +135,8 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
 
     fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) {
         let curr_deltas = (
-            (timestamp.wrapping_sub(self.last_timestamp)) as i64,
-            (value.wrapping_sub(self.last_value)) as i64,
+            (timestamp - self.last_timestamp) as i64,
+            (value - self.last_value) as i64,
         );
 
         let double_delta_1 = curr_deltas.0 - self.last_deltas.0;
@@ -423,14 +423,14 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
 
     fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) {
         let curr_deltas = (
-            (timestamp.wrapping_sub(self.last_timestamp)) as i64,
-            (value.wrapping_sub(self.last_value)) as i64,
+            (timestamp - self.last_timestamp) as i64,
+            (value - self.last_value) as i64,
         );
 
-        let double_delta = curr_deltas.0.wrapping_sub(self.last_deltas.0);
+        let double_delta = curr_deltas.0 - (self.last_deltas.0);
         self.ts_d_deltas[self.buffer_idx] = CompressionUtils::zig_zag_encode(double_delta);
 
-        let double_delta = curr_deltas.1.wrapping_sub(self.last_deltas.1);
+        let double_delta = curr_deltas.1 - (self.last_deltas.1);
         self.v_d_deltas[self.buffer_idx] = CompressionUtils::zig_zag_encode(double_delta);
 
         self.buffer_idx += 1;
@@ -472,7 +472,7 @@ impl<T: Write> CompressionEngineV2<T> {
         for arr in [&self.ts_d_deltas, &self.v_d_deltas] {
             let mut max_bits_needed = 0;
             for x in arr {
-                max_bits_needed = max_bits_needed.max(Self::bits_needed_u64(*x));
+                max_bits_needed = u8::max(max_bits_needed, Self::bits_needed_u64(*x));
             }
 
             let length_code = V2_LENGTH_LOOKUP[max_bits_needed as usize];
@@ -615,10 +615,11 @@ impl<T: Read> DecompressionEngine<T> for DecompressionEngineV2<T> {
         self.current_timestamp = self
             .current_timestamp
             .wrapping_add_signed(self.last_deltas.0);
-
         self.current_value = self.current_value.wrapping_add_signed(self.last_deltas.1);
+
         self.values_read += 1;
         self.buffer_idx += 1;
+
         (self.current_timestamp, self.current_value)
     }
 }

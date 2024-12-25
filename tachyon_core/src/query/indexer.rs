@@ -4,21 +4,16 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-const STREAM_NAME_COLUMN_IDENTIFIER: &str = "__name";
-
 trait IndexerStore {
     fn create_store(&mut self);
     fn drop_store(&mut self);
 
     fn get_all_streams(&self) -> Vec<StreamSummaryType>;
-
-    fn get_stream_and_matchers_for_stream_id(&self, stream_id: Uuid) -> Vec<(String, String)>;
     fn get_value_type_for_stream_id(&self, stream_id: Uuid) -> Option<ValueType>;
 
     fn insert_new_id(&mut self, stream: &str, matchers: &Matchers, value_type: ValueType) -> Uuid;
     fn insert_new_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp);
 
-    fn get_ids_or_empty(&self, name: &str, value: &str) -> HashSet<Uuid>;
     fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<Uuid>>;
     fn get_files_for_stream_id(
         &self,
@@ -40,14 +35,68 @@ mod sqlite {
     impl SQLiteIndexerStore {
         // SQLite Store Constants
         const SQLITE_DB_NAME: &str = "indexer.sqlite";
+
         const SQLITE_STREAM_TO_IDS_TABLE: &str = "stream_to_ids";
         const SQLITE_ID_TO_FILENAME_TABLE: &str = "id_to_file";
         const SQLITE_ID_TO_VALUE_TYPE_TABLE: &str = "id_to_value_type";
+
+        const SQLITE_STREAM_NAME_COLUMN: &str = "__name";
 
         pub fn new(root_dir: impl AsRef<Path>) -> Self {
             Self {
                 conn: Connection::open(root_dir.as_ref().join(Self::SQLITE_DB_NAME)).unwrap(),
             }
+        }
+    }
+
+    impl SQLiteIndexerStore {
+        fn get_ids_or_empty(&self, name: &str, value: &str) -> HashSet<Uuid> {
+            self.conn
+                .query_row(
+                    &format!(
+                        "SELECT ids FROM {} WHERE name = ? AND value = ?",
+                        Self::SQLITE_STREAM_TO_IDS_TABLE
+                    ),
+                    [name, value],
+                    |row| row.get::<usize, String>(0),
+                )
+                .map_or_else(
+                    |_| HashSet::new(),
+                    |stream_ids_str| serde_json::from_str(&stream_ids_str).unwrap(),
+                )
+        }
+
+        fn get_stream_and_matchers_for_stream_id(&self, stream_id: Uuid) -> Vec<(String, String)> {
+            let mut stmt = self
+                .conn
+                .prepare_cached(&format!(
+                    "SELECT name, value, ids FROM {}",
+                    Self::SQLITE_STREAM_TO_IDS_TABLE
+                ))
+                .unwrap();
+
+            let rows = stmt
+                .query_map((), |row| {
+                    Ok((
+                        row.get::<usize, String>(0).unwrap(),
+                        row.get::<usize, String>(1).unwrap(),
+                        row.get::<usize, String>(2).unwrap(),
+                    ))
+                })
+                .unwrap();
+
+            let mut result = Vec::<(String, String)>::new();
+
+            for item in rows {
+                let (name, value, stream_ids_str) = item.unwrap();
+
+                let stream_ids: HashSet<Uuid> = serde_json::from_str(&stream_ids_str).unwrap();
+                if stream_ids.contains(&stream_id) {
+                    result.push((name, value));
+                }
+            }
+
+            result
         }
     }
 
@@ -148,7 +197,7 @@ mod sqlite {
             let new_id = Uuid::new_v4();
 
             // Get old ids and add new one
-            let mut stream_ids = self.get_ids_or_empty(STREAM_NAME_COLUMN_IDENTIFIER, stream);
+            let mut stream_ids = self.get_ids_or_empty(Self::SQLITE_STREAM_NAME_COLUMN, stream);
             stream_ids.insert(new_id);
 
             let mut matcher_ids_map = HashMap::<String, HashSet<Uuid>>::default();
@@ -170,7 +219,7 @@ mod sqlite {
                 .unwrap();
 
             let stream_id_str = serde_json::to_string(&stream_ids).unwrap();
-            stmt.execute([STREAM_NAME_COLUMN_IDENTIFIER, stream, &stream_id_str])
+            stmt.execute([Self::SQLITE_STREAM_NAME_COLUMN, stream, &stream_id_str])
                 .unwrap();
 
             for matcher in &matchers.matchers {
@@ -208,22 +257,6 @@ mod sqlite {
                 .unwrap();
         }
 
-        fn get_ids_or_empty(&self, name: &str, value: &str) -> HashSet<Uuid> {
-            self.conn
-                .query_row(
-                    &format!(
-                        "SELECT ids FROM {} WHERE name = ? AND value = ?",
-                        Self::SQLITE_STREAM_TO_IDS_TABLE
-                    ),
-                    [name, value],
-                    |row| row.get::<usize, String>(0),
-                )
-                .map_or_else(
-                    |_| HashSet::new(),
-                    |stream_ids_str| serde_json::from_str(&stream_ids_str).unwrap(),
-                )
-        }
-
         fn get_stream_and_matcher_ids(
             &self,
             stream: &str,
@@ -231,7 +264,7 @@ mod sqlite {
         ) -> Vec<HashSet<Uuid>> {
             let mut ids = Vec::<HashSet<Uuid>>::new();
 
-            ids.push(self.get_ids_or_empty(STREAM_NAME_COLUMN_IDENTIFIER, stream));
+            ids.push(self.get_ids_or_empty(Self::SQLITE_STREAM_NAME_COLUMN, stream));
             for matcher in &matchers.matchers {
                 ids.push(self.get_ids_or_empty(&matcher.name, &matcher.value));
             }
@@ -270,39 +303,6 @@ mod sqlite {
                     |row| row.get::<usize, u8>(0),
                 )
                 .map_or_else(|_| None, |value_type| Some(value_type.try_into().unwrap()))
-        }
-
-        fn get_stream_and_matchers_for_stream_id(&self, stream_id: Uuid) -> Vec<(String, String)> {
-            let mut stmt = self
-                .conn
-                .prepare_cached(&format!(
-                    "SELECT name, value, ids FROM {}",
-                    Self::SQLITE_STREAM_TO_IDS_TABLE
-                ))
-                .unwrap();
-
-            let rows = stmt
-                .query_map((), |row| {
-                    Ok((
-                        row.get::<usize, String>(0).unwrap(),
-                        row.get::<usize, String>(1).unwrap(),
-                        row.get::<usize, String>(2).unwrap(),
-                    ))
-                })
-                .unwrap();
-
-            let mut result = Vec::<(String, String)>::new();
-
-            for item in rows {
-                let (name, value, stream_ids_str) = item.unwrap();
-
-                let stream_ids: HashSet<Uuid> = serde_json::from_str(&stream_ids_str).unwrap();
-                if stream_ids.contains(&stream_id) {
-                    result.push((name, value));
-                }
-            }
-
-            result
         }
 
         fn get_all_streams(&self) -> Vec<StreamSummaryType> {

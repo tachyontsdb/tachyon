@@ -45,4 +45,9 @@ impl FileReaderUtils {
     pub fn read_f64_8(buf: &[u8]) -> f64 {
         f64::from_le_bytes(buf.try_into().unwrap())
     }
+
+    #[inline]
+    pub fn read_u128_16(buf: &[u8]) -> u128 {
+        u128::from_le_bytes(buf.try_into().unwrap())
+    }
 }

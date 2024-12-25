@@ -140,9 +140,9 @@ impl PageCache {
 
         self.file_path_to_id.insert(path.clone(), self.cur_file_id);
         self.file_id_to_path.insert(self.cur_file_id, path.clone());
-        self.cur_file_id = self.cur_file_id.wrapping_add(1);
+        self.cur_file_id += 1;
 
-        self.cur_file_id.wrapping_sub(1)
+        self.cur_file_id - 1
     }
 
     fn load_page(&mut self, file_id: FileId, page_id: PageId) -> FrameId {
