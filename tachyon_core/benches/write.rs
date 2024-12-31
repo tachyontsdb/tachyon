@@ -4,26 +4,34 @@ use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use std::{iter::zip, path::Path};
+use std::{hint::black_box, iter::zip, path::Path};
 use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Version};
 
 const NUM_ITEMS: u64 = 100000;
 
 fn bench_write_sequential_timestamps(start: u64, end: u64) {
-    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
+    let mut model = black_box(TimeDataFile::new(
+        black_box(Version(0)),
+        black_box(StreamId(0)),
+        black_box(ValueType::UInteger64),
+    ));
     for i in start..=end {
-        model.write_data_to_file_in_mem(i, (i + (i % 100)).into());
+        model.write_data_to_file_in_mem(black_box(i), black_box((i + (i % 100)).into()));
     }
-    model.write("../tmp/bench_sequential_write.ty".into());
+    model.write(black_box("../tmp/bench_sequential_write.ty".into()));
     std::fs::remove_file("../tmp/bench_sequential_write.ty").unwrap();
 }
 
 fn bench_write_dataset(timestamps: &[u64], values: &[u64], file: impl AsRef<Path>) {
-    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
+    let mut model = black_box(TimeDataFile::new(
+        black_box(Version(0)),
+        black_box(StreamId(0)),
+        black_box(ValueType::UInteger64),
+    ));
     for (ts, v) in zip(timestamps, values) {
-        model.write_data_to_file_in_mem(*ts, (*v).into());
+        model.write_data_to_file_in_mem(black_box(*ts), black_box((*v).into()));
     }
-    model.write(file.as_ref().to_path_buf());
+    model.write(black_box(file.as_ref().to_path_buf()));
     std::fs::remove_file(file.as_ref()).unwrap();
 }
 

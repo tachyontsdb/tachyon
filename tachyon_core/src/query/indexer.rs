@@ -514,4 +514,96 @@ mod tests {
 
         indexer.drop_store();
     }
+
+    #[test]
+    fn test_get_value_type_for_stream() {
+        set_up_dirs!(dirs, "db");
+
+        let mut indexer = Indexer::new(dirs[0].clone());
+        indexer.drop_store();
+        indexer.create_store();
+
+        let (stream1, matchers1, stream_value_type_1) = (
+            "str1",
+            Matchers::new(vec![Matcher::new(MatchOp::Equal, "a", "b")]),
+            ValueType::UInteger64,
+        );
+        let s1id = indexer.insert_new_id(stream1, &matchers1, stream_value_type_1);
+
+        let (stream2, matchers2, stream_value_type_2) = (
+            "str2",
+            Matchers::new(vec![Matcher::new(MatchOp::Equal, "c", "d")]),
+            ValueType::Integer64,
+        );
+        let s2id = indexer.insert_new_id(stream2, &matchers2, stream_value_type_2);
+
+        let (stream3, matchers3, stream_value_type_3) = (
+            "str3",
+            Matchers::new(vec![Matcher::new(MatchOp::Equal, "e", "f")]),
+            ValueType::Float64,
+        );
+        let s3id = indexer.insert_new_id(stream3, &matchers3, stream_value_type_3);
+
+        assert_eq!(
+            indexer.get_stream_value_type(s1id),
+            Some(ValueType::UInteger64)
+        );
+        assert_eq!(
+            indexer.get_stream_value_type(s2id),
+            Some(ValueType::Integer64)
+        );
+        assert_eq!(
+            indexer.get_stream_value_type(s3id),
+            Some(ValueType::Float64)
+        );
+    }
+
+    #[test]
+    fn test_get_all_streams() {
+        set_up_dirs!(dirs, "db");
+
+        let mut indexer = Indexer::new(dirs[0].clone());
+        indexer.drop_store();
+        indexer.create_store();
+
+        let (stream1, matchers1, stream_value_type_1) = (
+            "str1",
+            Matchers::new(vec![Matcher::new(MatchOp::Equal, "a", "b")]),
+            ValueType::UInteger64,
+        );
+        let s1id = indexer.insert_new_id(stream1, &matchers1, stream_value_type_1);
+
+        let (stream2, matchers2, stream_value_type_2) = (
+            "str2",
+            Matchers::new(vec![Matcher::new(MatchOp::Equal, "c", "d")]),
+            ValueType::Integer64,
+        );
+        let s2id = indexer.insert_new_id(stream2, &matchers2, stream_value_type_2);
+
+        let (stream3, matchers3, stream_value_type_3) = (
+            "str3",
+            Matchers::new(vec![Matcher::new(MatchOp::Equal, "e", "f")]),
+            ValueType::Float64,
+        );
+        let s3id = indexer.insert_new_id(stream3, &matchers3, stream_value_type_3);
+
+        let all_streams = indexer.get_all_streams();
+        assert_eq!(all_streams.len(), 3);
+
+        assert_eq!(all_streams[0].0, s1id);
+        assert_eq!(all_streams[1].0, s2id);
+        assert_eq!(all_streams[2].0, s3id);
+
+        assert!(all_streams[0].1.contains(&("__name".into(), "str1".into())));
+        assert!(all_streams[1].1.contains(&("__name".into(), "str2".into())));
+        assert!(all_streams[2].1.contains(&("__name".into(), "str3".into())));
+
+        assert!(all_streams[0].1.contains(&("a".into(), "b".into())));
+        assert!(all_streams[1].1.contains(&("c".into(), "d".into())));
+        assert!(all_streams[2].1.contains(&("e".into(), "f".into())));
+
+        assert_eq!(all_streams[0].2, ValueType::UInteger64);
+        assert_eq!(all_streams[1].2, ValueType::Integer64);
+        assert_eq!(all_streams[2].2, ValueType::Float64);
+    }
 }

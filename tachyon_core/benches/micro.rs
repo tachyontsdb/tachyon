@@ -1,18 +1,18 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::{path::PathBuf, str::FromStr};
+use std::{hint::black_box, path::PathBuf, str::FromStr};
 use tachyon_core::tachyon_benchmarks::PageCache;
 
 fn bench_page_cache_init() -> u64 {
-    let _ = PageCache::new(10000);
+    let _ = black_box(PageCache::new(black_box(10000)));
     0
 }
 
 fn bench_page_cache_hash(strings: &[PathBuf]) -> u64 {
-    let mut page_cache = PageCache::new(100);
+    let mut page_cache = black_box(PageCache::new(black_box(100)));
     let mut res = 0;
 
     for path in strings {
-        res += page_cache.register_or_get_file_id(path);
+        res += black_box(page_cache.register_or_get_file_id(black_box(path)));
     }
 
     res as u64

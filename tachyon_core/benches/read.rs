@@ -4,7 +4,7 @@ use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use std::{cell::RefCell, iter::zip, rc::Rc};
+use std::{cell::RefCell, hint::black_box, iter::zip, rc::Rc};
 use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Version};
 
 const NUM_ITEMS: u64 = 100000;
@@ -15,22 +15,40 @@ fn bench_read_sequential_timestamps(
     page_cache: Rc<RefCell<PageCache>>,
 ) -> u64 {
     let file_paths = vec!["../tmp/bench_sequential_read.ty".into()];
-    let cursor = Cursor::new(file_paths, start, end, page_cache, ScanHint::None).unwrap();
+    let cursor = black_box(
+        Cursor::new(
+            black_box(file_paths),
+            black_box(start),
+            black_box(end),
+            black_box(page_cache),
+            black_box(ScanHint::None),
+        )
+        .unwrap(),
+    );
 
     let mut res = 0;
     for vector in cursor {
-        res += vector.timestamp + vector.value.get_uinteger64();
+        res += vector.timestamp + black_box(vector.value.get_uinteger64());
     }
     res
 }
 
 fn bench_read_voltage_dataset(page_cache: Rc<RefCell<PageCache>>) -> u128 {
     let file_paths = vec!["../tmp/bench_voltage_read.ty".into()];
-    let cursor = Cursor::new(file_paths, 0, u64::MAX, page_cache, ScanHint::None).unwrap();
+    let cursor = black_box(
+        Cursor::new(
+            black_box(file_paths),
+            black_box(0),
+            black_box(u64::MAX),
+            black_box(page_cache),
+            black_box(ScanHint::None),
+        )
+        .unwrap(),
+    );
 
     let mut res = 0u128;
     for vector in cursor {
-        res += (vector.timestamp + vector.value.get_uinteger64()) as u128;
+        res += (vector.timestamp + black_box(vector.value.get_uinteger64())) as u128;
     }
     res
 }

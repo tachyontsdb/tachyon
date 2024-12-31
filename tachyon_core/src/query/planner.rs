@@ -34,29 +34,19 @@ impl<'a> QueryPlanner<'a> {
             parser::token::T_SUM
             | parser::token::T_COUNT
             | parser::token::T_MIN
-            | parser::token::T_MAX => Ok(TNode::Aggregate(AggregateNode::new(
-                match expr.op.id() {
-                    parser::token::T_SUM => AggregateType::Sum,
-                    parser::token::T_COUNT => AggregateType::Count,
-                    parser::token::T_MIN => AggregateType::Min,
-                    parser::token::T_MAX => AggregateType::Max,
+            | parser::token::T_MAX => {
+                let (aggregate_type, scan_hint) = match expr.op.id() {
+                    parser::token::T_SUM => (AggregateType::Sum, ScanHint::Sum),
+                    parser::token::T_COUNT => (AggregateType::Count, ScanHint::Count),
+                    parser::token::T_MIN => (AggregateType::Min, ScanHint::Min),
+                    parser::token::T_MAX => (AggregateType::Max, ScanHint::Max),
                     _ => panic!("Unknown aggregation token!"),
-                },
-                Box::new(
-                    self.handle_expr(
-                        &expr.expr,
-                        conn,
-                        match expr.op.id() {
-                            parser::token::T_SUM => ScanHint::Sum,
-                            parser::token::T_COUNT => ScanHint::Count,
-                            parser::token::T_MIN => ScanHint::Min,
-                            parser::token::T_MAX => ScanHint::Max,
-                            _ => panic!("Unknown aggregation token!"),
-                        },
-                    )
-                    .unwrap(),
-                ),
-            ))),
+                };
+                Ok(TNode::Aggregate(AggregateNode::new(
+                    aggregate_type,
+                    Box::new(self.handle_expr(&expr.expr, conn, scan_hint).unwrap()),
+                )))
+            }
             parser::token::T_AVG => Ok(TNode::Average(
                 AverageNode::try_new(
                     Box::new(AggregateNode::new(

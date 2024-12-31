@@ -3,7 +3,7 @@ use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, hint::black_box, path::PathBuf, rc::Rc};
 use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Version};
 
 const NUM_ITEMS: u64 = 10000000;
@@ -14,13 +14,22 @@ fn bench_sum_sequential_timestamps(
     page_cache: Rc<RefCell<PageCache>>,
     file_paths: Vec<PathBuf>,
 ) -> u64 {
-    let mut cursor = Cursor::new(file_paths, start, end, page_cache, ScanHint::None).unwrap();
+    let mut cursor = black_box(
+        Cursor::new(
+            black_box(file_paths),
+            black_box(start),
+            black_box(end),
+            black_box(page_cache),
+            black_box(ScanHint::None),
+        )
+        .unwrap(),
+    );
 
     let mut res = 0;
     loop {
-        let vector = cursor.fetch();
-        res += vector.value.get_uinteger64();
-        if cursor.next().is_none() {
+        let vector = black_box(cursor.fetch());
+        res += black_box(vector.value.get_uinteger64());
+        if black_box(cursor.next()).is_none() {
             break;
         }
     }
@@ -33,14 +42,23 @@ fn bench_sum_sequential_timestamps_with_hint(
     page_cache: Rc<RefCell<PageCache>>,
     file_paths: Vec<PathBuf>,
 ) -> u64 {
-    let mut cursor = Cursor::new(file_paths, start, end, page_cache, ScanHint::Sum).unwrap();
+    let mut cursor = black_box(
+        Cursor::new(
+            black_box(file_paths),
+            black_box(start),
+            black_box(end),
+            black_box(page_cache),
+            black_box(ScanHint::Sum),
+        )
+        .unwrap(),
+    );
 
     let mut res = 0;
 
     loop {
-        let vector = cursor.fetch();
-        res += vector.value.get_uinteger64();
-        if cursor.next().is_none() {
+        let vector = black_box(cursor.fetch());
+        res += black_box(vector.value.get_uinteger64());
+        if black_box(cursor.next()).is_none() {
             break;
         }
     }

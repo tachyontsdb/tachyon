@@ -3,6 +3,7 @@ use csv::Reader;
 use pprof::criterion::{Output, PProfProfiler};
 use pprof::flamegraph::Options;
 use std::fs;
+use std::hint::black_box;
 use std::path::PathBuf;
 use std::str::FromStr;
 use tachyon_core::{Connection, ReturnType, ValueType};
@@ -24,15 +25,16 @@ fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
 }
 
 fn bench_query(query: &str, start: Option<u64>, end: Option<u64>, conn: &mut Connection) {
-    let mut stmt = conn.prepare_query(query, start, end);
+    let mut stmt =
+        black_box(conn.prepare_query(black_box(query), black_box(start), black_box(end)));
 
-    match stmt.return_type() {
+    match black_box(stmt.return_type()) {
         ReturnType::Scalar => {
             stmt.next_scalar().unwrap();
         }
         ReturnType::Vector => loop {
-            let res = stmt.next_vector();
-            if res.is_none() {
+            let res = black_box(stmt.next_vector());
+            if black_box(res.is_none()) {
                 break;
             }
         },
