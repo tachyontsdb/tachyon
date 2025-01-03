@@ -481,15 +481,21 @@ pub mod tachyon_benchmarks {
 
 #[cfg(test)]
 mod tests {
-    use crate::{utils::test::set_up_dirs, Connection, Inserter, Timestamp, Value, ValueType};
+    use crate::{
+        utils::test::set_up_dirs, Connection, Inserter, Query, Timestamp, Value, ValueType,
+    };
     use std::{borrow::Borrow, collections::HashSet, iter::zip, path::PathBuf};
 
-    fn create_stream_helper(conn: &mut Connection, stream: &str) -> Inserter {
-        if !conn.check_stream_exists(stream) {
-            conn.create_stream(stream, ValueType::UInteger64);
+    fn create_stream_helper(
+        conn: &mut Connection,
+        stream: impl AsRef<str>,
+        value_type: ValueType,
+    ) -> Inserter {
+        if !conn.check_stream_exists(stream.as_ref()) {
+            conn.create_stream(stream.as_ref(), value_type);
         }
 
-        conn.prepare_insert(stream)
+        conn.prepare_insert(stream.as_ref())
     }
 
     fn e2e_vector_test(
@@ -504,8 +510,11 @@ mod tests {
         let timestamps = [23, 29, 40, 51];
         let values = [45u64, 47, 23, 48];
 
-        let mut inserter =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "web"}"#);
+        let mut inserter = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::UInteger64,
+        );
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values) {
@@ -562,8 +571,11 @@ mod tests {
         let timestamps = [23, 29, 40, 51];
         let values = [45, 47, 23, 48];
 
-        let mut inserter1 =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "web"}"#);
+        let mut inserter1 = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::UInteger64,
+        );
 
         for (t, v) in zip(timestamps, values) {
             inserter1.insert(t, v.into());
@@ -574,8 +586,11 @@ mod tests {
         let timestamps_2 = [12, 15, 30, 67];
         let values_2 = [1, 5, 40, 20];
 
-        let mut inserter2 =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "cool"}"#);
+        let mut inserter2 = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "cool"}"#,
+            ValueType::UInteger64,
+        );
 
         for (t, v) in zip(timestamps_2, values_2) {
             inserter2.insert(t, v.into());
@@ -637,8 +652,11 @@ mod tests {
         let timestamps = [23, 29, 40, 51];
         let values = [45u64, 47, 23, 48];
 
-        let mut inserter =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "web"}"#);
+        let mut inserter = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::UInteger64,
+        );
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values) {
@@ -741,8 +759,11 @@ mod tests {
         let timestamps = [23, 25, 29, 40, 44, 51];
         let values = [27u64, 31, 47, 23, 31, 48];
 
-        let mut inserter =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "web"}"#);
+        let mut inserter = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::UInteger64,
+        );
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values) {
@@ -873,8 +894,11 @@ mod tests {
         let values_a = [45, 47, 23, 48];
         let values_b = [9, 18, 0, 100];
 
-        let mut inserter1 =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "web"}"#);
+        let mut inserter1 = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::UInteger64,
+        );
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values_a) {
@@ -883,8 +907,11 @@ mod tests {
 
         inserter1.flush();
 
-        let mut inserter2 =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "mobile"}"#);
+        let mut inserter2 = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "mobile"}"#,
+            ValueType::UInteger64,
+        );
 
         for (t, v) in zip(timestamps, values_b) {
             inserter2.insert(t, v.into());
@@ -940,8 +967,11 @@ mod tests {
     ) {
         let mut conn = Connection::new(root_dir);
 
-        let mut inserter1 =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "web"}"#);
+        let mut inserter1 = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::UInteger64,
+        );
 
         // Insert dummy data
         for (t, v) in zip(timestamps_a, values_a) {
@@ -950,8 +980,11 @@ mod tests {
 
         inserter1.flush();
 
-        let mut inserter2 =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "mobile"}"#);
+        let mut inserter2 = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "mobile"}"#,
+            ValueType::UInteger64,
+        );
 
         for (t, v) in zip(timestamps_b, values_b) {
             inserter2.insert(t, v.into());
@@ -1075,8 +1108,11 @@ mod tests {
         let values_a = [45, 47, 23, 48];
         let values_b = [9, 18, 0, 100];
 
-        let mut inserter1 =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "web"}"#);
+        let mut inserter1 = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::UInteger64,
+        );
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values_a) {
@@ -1085,8 +1121,11 @@ mod tests {
 
         inserter1.flush();
 
-        let mut inserter2 =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "mobile"}"#);
+        let mut inserter2 = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "mobile"}"#,
+            ValueType::UInteger64,
+        );
 
         for (t, v) in zip(timestamps, values_b) {
             inserter2.insert(t, v.into());
@@ -1126,8 +1165,11 @@ mod tests {
         let values_a = [45, 47, 24, 48];
         let values_b = [9, 18, 0, 55];
 
-        let mut inserter1 =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "web"}"#);
+        let mut inserter1 = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::UInteger64,
+        );
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values_a) {
@@ -1136,8 +1178,11 @@ mod tests {
 
         inserter1.flush();
 
-        let mut inserter2 =
-            create_stream_helper(&mut conn, r#"http_requests_total{service = "mobile"}"#);
+        let mut inserter2 = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "mobile"}"#,
+            ValueType::UInteger64,
+        );
 
         for (t, v) in zip(timestamps, values_b) {
             inserter2.insert(t, v.into());
@@ -1161,6 +1206,215 @@ mod tests {
 
             let res = res.unwrap();
             assert_eq!(sum_values_a as f64 / sum_values_b as f64, res.get_float64());
+        }
+    }
+
+    trait CreateAndInsertHelper {
+        type InsertType: Into<Value>;
+        const VALUE_TYPE: ValueType;
+
+        fn help(
+            conn: &mut Connection,
+            stream: impl AsRef<str>,
+            timestamps: Vec<Timestamp>,
+            values: Vec<Self::InsertType>,
+        ) -> Inserter {
+            let mut inserter = create_stream_helper(conn, stream, Self::VALUE_TYPE);
+            for (t, v) in zip(timestamps, values) {
+                inserter.insert(t, v.into());
+            }
+            inserter.flush();
+
+            inserter
+        }
+    }
+
+    struct CreateAndInsertU64Helper;
+    impl CreateAndInsertHelper for CreateAndInsertU64Helper {
+        type InsertType = u64;
+        const VALUE_TYPE: ValueType = ValueType::UInteger64;
+    }
+
+    struct CreateAndInsertI64Helper;
+    impl CreateAndInsertHelper for CreateAndInsertI64Helper {
+        type InsertType = i64;
+        const VALUE_TYPE: ValueType = ValueType::Integer64;
+    }
+
+    struct CreateAndInsertF64Helper;
+    impl CreateAndInsertHelper for CreateAndInsertF64Helper {
+        type InsertType = f64;
+        const VALUE_TYPE: ValueType = ValueType::Float64;
+    }
+
+    fn query_values_assert<T: Into<Value>>(
+        mut query: Query,
+        value_type: ValueType,
+        mut values: Vec<T>,
+    ) {
+        assert_eq!(query.value_type(), value_type);
+
+        values.reverse();
+
+        loop {
+            let result = query.next_vector();
+
+            if result.is_none() {
+                assert_eq!(values.len(), 0);
+                break;
+            }
+
+            let v = result.unwrap().value;
+            let value = values.pop().unwrap().into();
+
+            assert!(v.eq_same(value_type, &value));
+        }
+    }
+
+    #[test]
+    fn test_e2e_all_value_types_read() {
+        set_up_dirs!(db_dirs, "db");
+        let db_dir = db_dirs[0].clone();
+
+        let mut connection = Connection::new(db_dir);
+
+        let timestamps = vec![1, 2, 3, 4, 5];
+
+        let u64s = vec![0u64, 5u64, 10u64, 15u64, 20u64];
+        let i64s = vec![-10i64, -5i64, 0i64, 5i64, 10i64];
+        let f64s = vec![
+            -2.5e2,
+            -std::f64::consts::PI,
+            0.0f64,
+            f64::MIN_POSITIVE,
+            2395353.2352,
+        ];
+
+        const USTREAM: &str = r#"mystream{t="u"}"#;
+        const ISTREAM: &str = r#"mystream{t="i"}"#;
+        const FSTREAM: &str = r#"mystream{t="f"}"#;
+
+        let _ = CreateAndInsertU64Helper::help(
+            &mut connection,
+            USTREAM,
+            timestamps.clone(),
+            u64s.clone(),
+        );
+
+        let uquery = connection.prepare_query(USTREAM, Some(0), Some(1000));
+        query_values_assert(uquery, ValueType::UInteger64, u64s);
+
+        let _ = CreateAndInsertI64Helper::help(
+            &mut connection,
+            ISTREAM,
+            timestamps.clone(),
+            i64s.clone(),
+        );
+
+        let iquery = connection.prepare_query(ISTREAM, Some(0), Some(1000));
+        query_values_assert(iquery, ValueType::Integer64, i64s);
+
+        let _ = CreateAndInsertF64Helper::help(
+            &mut connection,
+            FSTREAM,
+            timestamps.clone(),
+            f64s.clone(),
+        );
+
+        let fquery = connection.prepare_query(FSTREAM, Some(0), Some(1000));
+        query_values_assert(fquery, ValueType::Float64, f64s);
+    }
+
+    #[test]
+    fn test_i64_negative_values_misc_tests() {
+        set_up_dirs!(db_dirs, "db");
+        let db_dir = db_dirs[0].clone();
+
+        let mut connection = Connection::new(db_dir);
+
+        let timestamps = vec![1, 2, 3, 4];
+        let values = vec![-5i64, -7i64, -1i64, -1000i64];
+
+        let _ = CreateAndInsertI64Helper::help(
+            &mut connection,
+            r#"mystream{t="i"}"#,
+            timestamps,
+            values.clone(),
+        );
+
+        {
+            let iquery = connection.prepare_query(r#"mystream{t="i"}"#, Some(0), Some(1000));
+            query_values_assert(iquery, ValueType::Integer64, values.clone());
+        }
+
+        {
+            let mut topquery =
+                connection.prepare_query(r#"topk(2, mystream{t="i"})"#, Some(0), Some(1000));
+            assert_eq!(topquery.value_type(), ValueType::Integer64);
+            assert_eq!(topquery.next_scalar().unwrap().get_integer64(), -1i64);
+            assert_eq!(topquery.next_scalar().unwrap().get_integer64(), -5i64);
+            assert!(topquery.next_scalar().is_none());
+        }
+
+        {
+            let mut sumquery =
+                connection.prepare_query(r#"sum(mystream{t="i"})"#, Some(0), Some(1000));
+            assert_eq!(sumquery.value_type(), ValueType::Integer64);
+            assert_eq!(
+                sumquery.next_scalar().unwrap().get_integer64(),
+                values.iter().sum::<i64>()
+            );
+            assert!(sumquery.next_scalar().is_none());
+        }
+
+        {
+            let mut minquery =
+                connection.prepare_query(r#"min(mystream{t="i"})"#, Some(0), Some(1000));
+            assert_eq!(minquery.value_type(), ValueType::Integer64);
+            assert_eq!(minquery.next_scalar().unwrap().get_integer64(), -1000i64);
+            assert!(minquery.next_scalar().is_none());
+        }
+    }
+
+    #[test]
+    fn test_f64_values_misc_tests() {
+        set_up_dirs!(db_dirs, "db");
+        let db_dir = db_dirs[0].clone();
+
+        let mut connection = Connection::new(db_dir);
+
+        let timestamps = vec![1, 2];
+        let values = vec![3.8f64, -23.1f64];
+
+        let _ = CreateAndInsertF64Helper::help(
+            &mut connection,
+            r#"mystream{t="f"}"#,
+            timestamps,
+            values.clone(),
+        );
+
+        {
+            let fquery = connection.prepare_query(r#"mystream{t="f"}"#, Some(0), Some(1000));
+            query_values_assert(fquery, ValueType::Float64, values.clone());
+        }
+
+        {
+            let mut topquery =
+                connection.prepare_query(r#"bottomk(1, mystream{t="f"})"#, Some(0), Some(1000));
+            assert_eq!(topquery.value_type(), ValueType::Float64);
+            assert_eq!(topquery.next_scalar().unwrap().get_float64(), -23.1f64);
+            assert!(topquery.next_scalar().is_none());
+        }
+
+        {
+            let mut avgquery =
+                connection.prepare_query(r#"avg(mystream{t="f"})"#, Some(0), Some(1000));
+            assert_eq!(avgquery.value_type(), ValueType::Float64);
+            assert_eq!(
+                avgquery.next_scalar().unwrap().get_float64(),
+                (3.8f64 + -23.1f64) / 2.0f64
+            );
+            assert!(avgquery.next_scalar().is_none());
         }
     }
 }
