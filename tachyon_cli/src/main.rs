@@ -1,59 +1,20 @@
-use std::{
-    fs::File,
-    io::Write,
-    iter::zip,
-    path::{Path, PathBuf},
+use clap::{
+    builder::{NonEmptyStringValueParser, PossibleValuesParser, TypedValueParser},
+    Parser, Subcommand,
 };
-
-use clap::{Parser, Subcommand};
-use csv::{Reader, Writer};
+use csv::Reader;
 use prettytable::{row, Table};
 use rustyline::{error::ReadlineError, DefaultEditor};
-use tachyon_core::{
-    api::{Connection, TachyonResultType},
-    common::{Timestamp, Value},
-    storage::file::TimeDataFile,
+use std::path::PathBuf;
+use std::{
+    fs::{self, File},
+    io::Write,
 };
+use tachyon_core::tachyon_benchmarks::TimeDataFile;
+use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
 
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {
-    root_dir: String,
-
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    Insert {
-        timestamp: Timestamp,
-        value: Value,
-        matcher: String,
-    },
-
-    Query {
-        query: String,
-        export_path: Option<String>,
-    },
-
-    Csv {
-        file: String,
-        matcher: String,
-    },
-
-    Debug {
-        file: String,
-
-        #[arg(short, long)]
-        csv: Option<String>,
-    },
-}
-
-fn repl(mut conn: Connection) {
-    println!(
-        r"
+const TACHYON_CLI_HEADER: &str = r"
  ______                 __                              ____    ____      
 /\__  _\               /\ \                            /\  _`\ /\  _`\    
 \/_/\ \/    __      ___\ \ \___   __  __    ___     ___\ \ \/\ \ \ \L\ \  
@@ -63,165 +24,283 @@ fn repl(mut conn: Connection) {
       \/_/\/__/\/_/\/____/ \/_/\/_/`/___/> \/___/  \/_/\/_/\/___/  \/___/ 
                                       /\___/                              
                                       \/__/                               
-    "
-    );
-    let mut rl = DefaultEditor::new().unwrap();
+";
+const PROMPT: &str = "> ";
 
-    loop {
-        let input = rl.readline(">>> ");
-        match &input {
-            Ok(line) => {
-                rl.add_history_entry(line.as_str()).unwrap();
-            }
-            Err(ReadlineError::Interrupted) => {
-                println!("CTRL-C");
-                break;
-            }
-            Err(ReadlineError::Eof) => {
-                println!("CTRL-D");
-                break;
-            }
-            Err(err) => {
-                println!("Error: {:?}", err);
-                break;
-            }
-        };
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+pub struct Args {
+    db_dir: PathBuf,
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
 
-        let line = input.unwrap();
+#[derive(Subcommand)]
+pub enum Commands {
+    ListAllStreams,
+    ParseHeaders {
+        paths: Vec<PathBuf>,
+    },
+    Query {
+        #[arg(value_parser = NonEmptyStringValueParser::new())]
+        query: String,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
+        export_csv_path: Option<PathBuf>,
+    },
+    CreateStream {
+        #[arg(value_parser = NonEmptyStringValueParser::new())]
+        stream: String,
+        #[arg(value_parser = PossibleValuesParser::new(["i64", "u64", "f64"]).map(|s| match s.as_str() {
+            "i64" => ValueType::Integer64,
+            "u64" => ValueType::UInteger64,
+            "f64" => ValueType::Float64,
+            _ => unreachable!()
+        }))]
+        value_type: ValueType,
+    },
+    Insert {
+        #[arg(value_parser = NonEmptyStringValueParser::new())]
+        stream: String,
+        timestamp: Timestamp,
+        #[arg(value_parser = NonEmptyStringValueParser::new())]
+        value: String,
+    },
+    ImportCSV {
+        #[arg(value_parser = NonEmptyStringValueParser::new())]
+        stream: String,
+        csv_file: PathBuf,
+    },
+}
 
-        handle_query_command(&mut conn, line, None)
+fn handle_parse_headers_command(paths: Vec<PathBuf>) {
+    fn output_header(path: PathBuf, file: TimeDataFile) {
+        let mut table = Table::new();
+
+        table.add_row(row!["File", path.to_str().unwrap()]);
+        table.add_row(row!["Version", file.header.version.0]);
+        table.add_row(row!["Stream ID", file.header.stream_id.0]);
+
+        table.add_row(row!["Min Timestamp", file.header.min_timestamp]);
+        table.add_row(row!["Max Timestamp", file.header.max_timestamp]);
+
+        table.add_row(row!["Count", file.header.count]);
+        table.add_row(row!["Value Type", file.header.value_type]);
+
+        table.add_row(row![
+            "Value Sum",
+            file.header.value_sum.get_output(file.header.value_type)
+        ]);
+        table.add_row(row![
+            "Min Value",
+            file.header.min_value.get_output(file.header.value_type)
+        ]);
+        table.add_row(row![
+            "Max Value",
+            file.header.max_value.get_output(file.header.value_type)
+        ]);
+
+        table.add_row(row![
+            "First Value",
+            file.header.first_value.get_output(file.header.value_type)
+        ]);
+
+        table.printstd();
+    }
+
+    fn recurse_subdirs_and_output_headers(path: PathBuf) {
+        if path.is_dir() {
+            let files = fs::read_dir(path).unwrap();
+            for file in files {
+                recurse_subdirs_and_output_headers(file.unwrap().path());
+            }
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == FILE_EXTENSION)
+        {
+            let file = TimeDataFile::read_data_file(path.clone());
+            output_header(path, file);
+            println!();
+        }
+    }
+
+    for path in paths {
+        recurse_subdirs_and_output_headers(path);
     }
 }
 
-fn handle_query_command(conn: &mut Connection, query: String, path_opt: Option<String>) {
-    let mut stmt = conn.prepare(&query, Some(0), Some(1719776339748));
+fn export_as_csv(path: PathBuf, timeseries: &[(f32, f32)]) {
+    let mut file = File::create(path).unwrap();
 
-    match stmt.return_type() {
-        TachyonResultType::Scalar => loop {
-            let val = stmt.next_scalar();
-            if val.is_none() {
-                break;
+    file.write_all(b"Timestamp,Value\n").unwrap();
+
+    for (timestamp, value) in timeseries {
+        file.write_all(format!("{},{}\n", timestamp, value).as_bytes())
+            .unwrap();
+    }
+}
+
+fn handle_query_command(
+    connection: &mut Connection,
+    query: impl AsRef<str>,
+    start: Option<Timestamp>,
+    end: Option<Timestamp>,
+    export_csv_path: Option<PathBuf>,
+) {
+    // TODO: Fix temporary start and end hack
+    const HACK_TIME_START: u64 = 0;
+    const HACK_TIME_END: u64 = 1719776339748;
+    let mut query = connection.prepare_query(
+        query,
+        start.or(Some(HACK_TIME_START)),
+        end.or(Some(HACK_TIME_END)),
+    );
+
+    let query_value_type = query.value_type();
+
+    match query.return_type() {
+        tachyon_core::ReturnType::Scalar => {
+            while let Some(value) = query.next_scalar() {
+                println!("{:?}", value.get_output(query_value_type));
             }
-            println!("{}", val.unwrap());
-        },
-        TachyonResultType::Vector => {
+        }
+        tachyon_core::ReturnType::Vector => {
             let mut timeseries = Vec::<(f32, f32)>::new();
 
-            let mut max_value = Value::MIN;
-            let mut min_value = Value::MAX;
+            let mut max_value = f32::MIN;
+            let mut min_value = f32::MAX;
 
-            loop {
-                let val = stmt.next_vector();
-                if val.is_none() {
-                    break;
-                }
-                let (time, val) = val.unwrap();
-                max_value = max_value.max(val);
-                min_value = min_value.min(val);
+            while let Some(Vector { timestamp, value }) = query.next_vector() {
+                let value = value.convert_into_f64(query_value_type) as f32;
 
-                timeseries.push((time as f32, val as f32));
+                max_value = f32::max(max_value, value);
+                min_value = f32::min(min_value, value);
+
+                timeseries.push((timestamp as f32, value));
             }
 
             Chart::new(180, 60, timeseries[0].0, timeseries.last().unwrap().0)
                 .lineplot(&Shape::Lines(&timeseries))
                 .display();
 
-            if let Some(path) = path_opt {
-                export_as_csv(&path.into() as &PathBuf, &timeseries);
+            if let Some(path) = export_csv_path {
+                export_as_csv(path, &timeseries);
             }
         }
-        TachyonResultType::Done => println!(),
     }
 }
 
-fn handle_debug_command(_: Connection, file: String, output_csv: Option<String>) {
-    let t_file = TimeDataFile::read_data_file(file.clone().into());
-
-    let mut table = Table::new();
-    table.add_row(row!["Property", "Value"]);
-    table.add_row(row!["File Name", file]);
-    table.add_row(row!["Stream ID", t_file.header.stream_id.to_string()]);
-    table.add_row(row!["Version", t_file.header.version.to_string()]);
-
-    table.add_row(row!["Count", t_file.header.count.to_string()]);
-    table.add_row(row![
-        "Min Timestamp",
-        t_file.header.min_timestamp.to_string()
-    ]);
-    table.add_row(row![
-        "Max Timestamp",
-        t_file.header.max_timestamp.to_string()
-    ]);
-    table.add_row(row!["Min Value", t_file.header.min_value.to_string()]);
-    table.add_row(row!["Max Value", t_file.header.max_value.to_string()]);
-    table.add_row(row!["First Value", t_file.header.first_value.to_string()]);
-    table.add_row(row!["Value Sum", t_file.header.value_sum.to_string()]);
-
-    table.printstd();
-
-    if let Some(path) = output_csv {
-        let mut wtr = Writer::from_path(path).unwrap();
-        wtr.write_record(["Timestamp", "Value"]).unwrap();
-        for (t, v) in zip(t_file.timestamps, t_file.values) {
-            wtr.write_record(&[t.to_string(), v.to_string()]).unwrap();
-        }
-        wtr.flush().unwrap();
-    };
-}
-
-fn export_as_csv(path: &Path, timeseries: &Vec<(f32, f32)>) {
-    let mut file = File::create(path).unwrap();
-
-    file.write_all("timestamp,value\n".as_bytes()).unwrap();
-
-    for (t, v) in timeseries {
-        file.write_all(format!("{},{}\n", t, v).as_bytes()).unwrap();
-    }
-}
-
-fn insert_from_csv(mut conn: Connection, matcher: String, file: String) {
-    fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
-        println!("Reading from: {}", path);
+fn handle_import_csv_command(mut connection: Connection, stream: String, csv_file: PathBuf) {
+    fn read_from_csv(path: &PathBuf, value_type: ValueType) -> Vec<Vector> {
         let mut rdr = Reader::from_path(path).unwrap();
-
-        let mut timestamps = Vec::new();
-        let mut values = Vec::new();
+        let mut vectors = Vec::new();
         for result in rdr.records() {
             let record = result.unwrap();
-            timestamps.push(record[0].parse::<u64>().unwrap());
-            values.push(record[1].parse::<u64>().unwrap());
+            vectors.push(Vector {
+                timestamp: record[0].parse::<u64>().unwrap(),
+                value: match value_type {
+                    ValueType::Integer64 => record[1].parse::<i64>().unwrap().into(),
+                    ValueType::UInteger64 => record[1].parse::<u64>().unwrap().into(),
+                    ValueType::Float64 => record[1].parse::<f64>().unwrap().into(),
+                },
+            });
         }
-        println!("Done reading from: {}\n", path);
-
-        (timestamps, values)
+        vectors
     }
 
-    let (time, values) = read_from_csv(&file);
-    let mut batch_writer = conn.batch_insert(&matcher);
-    for (t, v) in zip(time, values) {
-        batch_writer.insert(t, v);
+    let mut inserter = connection.prepare_insert(stream);
+    println!("Reading from: {:?}", &csv_file);
+    let vectors = read_from_csv(&csv_file, inserter.value_type());
+    println!("Done reading from: {:?}", &csv_file);
+    for Vector { timestamp, value } in vectors {
+        match inserter.value_type() {
+            ValueType::Integer64 => inserter.insert_integer64(timestamp, value.get_integer64()),
+            ValueType::UInteger64 => inserter.insert_uinteger64(timestamp, value.get_uinteger64()),
+            ValueType::Float64 => inserter.insert_float64(timestamp, value.get_float64()),
+        }
     }
-    drop(conn);
+    inserter.flush();
+}
+
+pub fn repl(mut connection: Connection) {
+    println!("{}", TACHYON_CLI_HEADER);
+
+    let mut rl = DefaultEditor::new().unwrap();
+    loop {
+        let input = rl.readline(PROMPT);
+        match &input {
+            Ok(line) => {
+                rl.add_history_entry(line).unwrap();
+                handle_query_command(&mut connection, line, None, None, None);
+            }
+            Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
+                println!("EXITING");
+                break;
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        }
+    }
 }
 
 pub fn main() {
     let args = Args::parse();
 
-    let mut conn = Connection::new(args.root_dir.into());
+    let mut connection = Connection::new(args.db_dir);
 
     match args.command {
-        Some(commands) => match commands {
-            Commands::Insert {
-                timestamp,
-                value,
-                matcher,
-            } => conn.insert(&matcher, timestamp, value),
-            Commands::Query { query, export_path } => {
-                handle_query_command(&mut conn, query, export_path)
+        Some(Commands::ListAllStreams) => {
+            let mut table = Table::new();
+            table.add_row(row!["Stream ID", "Stream Name + Matchers", "Value Type"]);
+            for stream in connection.get_all_streams() {
+                let matchers: Vec<String> = stream
+                    .1
+                    .into_iter()
+                    .map(|(matcher_name, matcher_value)| {
+                        format!("\"{matcher_name}\" = \"{matcher_value}\"")
+                    })
+                    .collect();
+                table.add_row(row![stream.0, matchers.join(" | "), stream.2]);
             }
-            Commands::Csv { file, matcher } => insert_from_csv(conn, matcher, file),
-            Commands::Debug { file, csv } => handle_debug_command(conn, file, csv),
-        },
-        None => repl(conn),
+            table.printstd();
+        }
+        Some(Commands::ParseHeaders { paths }) => {
+            handle_parse_headers_command(paths);
+        }
+        Some(Commands::Query {
+            query,
+            start,
+            end,
+            export_csv_path,
+        }) => {
+            handle_query_command(&mut connection, query, start, end, export_csv_path);
+        }
+        Some(Commands::CreateStream { stream, value_type }) => {
+            connection.create_stream(stream, value_type);
+        }
+        Some(Commands::Insert {
+            stream,
+            timestamp,
+            value,
+        }) => {
+            let mut inserter = connection.prepare_insert(stream);
+
+            match inserter.value_type() {
+                ValueType::Integer64 => {
+                    inserter.insert_integer64(timestamp, value.parse().unwrap())
+                }
+                ValueType::UInteger64 => {
+                    inserter.insert_uinteger64(timestamp, value.parse().unwrap())
+                }
+                ValueType::Float64 => inserter.insert_float64(timestamp, value.parse().unwrap()),
+            }
+
+            inserter.flush();
+        }
+        Some(Commands::ImportCSV { stream, csv_file }) => {
+            handle_import_csv_command(connection, stream, csv_file);
+        }
+        None => repl(connection),
     }
 }

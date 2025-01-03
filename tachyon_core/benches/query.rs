@@ -1,12 +1,12 @@
-use std::{fs, path::PathBuf, str::FromStr};
-
 use criterion::{criterion_group, criterion_main, Criterion};
 use csv::Reader;
-use pprof::{
-    criterion::{Output, PProfProfiler},
-    flamegraph::Options,
-};
-use tachyon_core::api::{Connection, TachyonResultType};
+use pprof::criterion::{Output, PProfProfiler};
+use pprof::flamegraph::Options;
+use std::fs;
+use std::hint::black_box;
+use std::path::PathBuf;
+use std::str::FromStr;
+use tachyon_core::{Connection, ReturnType, ValueType};
 
 fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
     println!("Reading from: {}", path);
@@ -25,31 +25,30 @@ fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
 }
 
 fn bench_query(query: &str, start: Option<u64>, end: Option<u64>, conn: &mut Connection) {
-    let mut stmt = conn.prepare(query, start, end);
+    let mut stmt =
+        black_box(conn.prepare_query(black_box(query), black_box(start), black_box(end)));
 
-    match stmt.return_type() {
-        TachyonResultType::Scalar => loop {
-            let res = stmt.next_scalar();
-            if res.is_none() {
+    match black_box(stmt.return_type()) {
+        ReturnType::Scalar => {
+            stmt.next_scalar().unwrap();
+        }
+        ReturnType::Vector => loop {
+            let res = black_box(stmt.next_vector());
+            if black_box(res.is_none()) {
                 break;
             }
         },
-        TachyonResultType::Vector => loop {
-            let res = stmt.next_vector();
-            if res.is_none() {
-                break;
-            }
-        },
-        TachyonResultType::Done => panic!("Invalid result type!"),
     }
 }
 
 fn vector_selector_benchmark(c: &mut Criterion) {
-    let root_dir = PathBuf::from_str("../tmp/db").unwrap();
+    let root_dir = PathBuf::from_str("../tmp").unwrap();
     fs::create_dir_all(&root_dir).unwrap();
 
+    const STREAM: &str = r#"http_requests_total{service = "web"}"#;
+
     let queries = vec![
-        r#"http_requests_total{service = "web"}"#,
+        STREAM,
         r#"sum(http_requests_total{service = "web"})"#,
         r#"count(http_requests_total{service = "web"})"#,
         r#"avg(http_requests_total{service = "web"})"#,
@@ -61,15 +60,19 @@ fn vector_selector_benchmark(c: &mut Criterion) {
 
     let mut conn = Connection::new(root_dir.clone());
 
-    let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
-
-    let mut batch_writer = conn.batch_insert(r#"http_requests_total{service = "web"}"#);
-
-    for i in 0..timestamps.len() {
-        batch_writer.insert(timestamps[i], values[i]);
+    if !conn.check_stream_exists(STREAM) {
+        conn.create_stream(STREAM, ValueType::UInteger64);
     }
 
-    conn.writer.flush_all();
+    let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
+
+    let mut inserter = conn.prepare_insert(STREAM);
+
+    for i in 0..timestamps.len() {
+        inserter.insert_uinteger64(timestamps[i], values[i]);
+    }
+
+    inserter.flush();
 
     for query in queries {
         c.bench_function(&format!("tachyon: query benchmark for: {}", query), |b| {
@@ -83,7 +86,7 @@ fn vector_selector_benchmark(c: &mut Criterion) {
 fn get_config() -> Criterion {
     let mut options = Options::default();
     options.flame_chart = true;
-    Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(Some(options))))
+    Criterion::default().with_profiler(PProfProfiler::new(10000, Output::Flamegraph(Some(options))))
 }
 
 criterion_group!(

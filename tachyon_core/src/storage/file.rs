@@ -1,85 +1,170 @@
-use super::compression::{DecompressionEngine, DefaultScheme};
-use super::page_cache::{self, FileId, PageCache, SeqPageRead};
-use crate::common::{Timestamp, Value};
-use crate::storage::compression::{CompressionEngine, CompressionScheme, CompressionUtils};
-use crate::storage::page_cache::page_cache_sequential_read;
-use crate::utils::file_utils::FileReaderUtil;
-use std::cell::RefCell;
-use std::mem;
-use std::{
-    fs::File,
-    io::{Error, Read, Seek, Write},
-    mem::size_of,
-    path::PathBuf,
-    rc::Rc,
+use super::compression::{
+    CompressionEngine, CompressionScheme, DecompressionEngine, DefaultScheme,
 };
+use super::page_cache::{FileId, PageCache, SeqPageRead};
+use super::{FileReaderUtils, MAX_NUM_ENTRIES};
+use crate::storage::page_cache::page_cache_sequential_read;
+use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version};
+use std::cell::RefCell;
+use std::fmt::Debug;
+use std::fs::File;
+use std::io::{self, Write};
+use std::path::PathBuf;
+use std::rc::Rc;
 
 const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
-pub const MAX_NUM_ENTRIES: usize = 62500;
+const HEADER_SIZE: usize = 71;
 
-#[derive(Default, Debug, PartialEq, Eq)]
 pub struct Header {
-    pub version: u16,
-
-    pub stream_id: u64,
+    pub version: Version,
+    pub stream_id: StreamId,
 
     pub min_timestamp: Timestamp,
     pub max_timestamp: Timestamp,
 
-    pub value_sum: Value,
     pub count: u32,
+    pub value_type: ValueType,
+
+    pub value_sum: Value,
     pub min_value: Value,
     pub max_value: Value,
 
     pub first_value: Value,
 }
 
-const HEADER_SIZE: usize = 62;
+impl PartialEq for Header {
+    fn eq(&self, other: &Self) -> bool {
+        self.version == other.version
+            && self.stream_id == other.stream_id
+            && self.min_timestamp == other.min_timestamp
+            && self.max_timestamp == other.max_timestamp
+            && self.count == other.count
+            && self.value_type == other.value_type
+            && self.value_sum.eq_same(self.value_type, &other.value_sum)
+            && self.min_value.eq_same(self.value_type, &other.min_value)
+            && self.max_value.eq_same(self.value_type, &other.max_value)
+            && self
+                .first_value
+                .eq_same(self.value_type, &other.first_value)
+    }
+}
+
+impl Debug for Header {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Header")
+            .field("version", &self.version)
+            .field("stream_id", &self.stream_id)
+            .field("min_timestamp", &self.min_timestamp)
+            .field("max_timestamp", &self.max_timestamp)
+            .field("count", &self.count)
+            .field("value_type", &self.value_type)
+            .field("value_sum", &self.value_sum.get_output(self.value_type))
+            .field("min_value", &self.min_value.get_output(self.value_type))
+            .field("max_value", &self.max_value.get_output(self.value_type))
+            .field("first_value", &self.first_value.get_output(self.value_type))
+            .finish()
+    }
+}
 
 impl Header {
+    pub fn new(version: Version, stream_id: StreamId, value_type: ValueType) -> Self {
+        Self {
+            version,
+            stream_id,
+
+            min_timestamp: Timestamp::default(),
+            max_timestamp: Timestamp::default(),
+
+            count: 0,
+            value_type,
+
+            value_sum: Value::get_default(value_type),
+            min_value: Value::get_default(value_type),
+            max_value: Value::get_default(value_type),
+
+            first_value: Value::get_default(value_type),
+        }
+    }
+
+    fn parse_value(value_type: ValueType, buf: &[u8]) -> Value {
+        match value_type {
+            ValueType::Integer64 => Value {
+                integer64: FileReaderUtils::read_i64_8(buf),
+            },
+            ValueType::UInteger64 => Value {
+                uinteger64: FileReaderUtils::read_u64_8(buf),
+            },
+            ValueType::Float64 => Value {
+                float64: FileReaderUtils::read_f64_8(buf),
+            },
+        }
+    }
+
     fn parse(file_id: FileId, page_cache: &mut PageCache) -> Self {
         let mut buffer = [0x00u8; MAGIC_SIZE + HEADER_SIZE];
         page_cache.read(file_id, 0, &mut buffer);
         if buffer[0..MAGIC_SIZE] != MAGIC {
-            panic!("Corrupted file - invalid magic for .ty file");
+            panic!("Corrupted file - invalid magic for .ty file!");
         }
-        let buffer = &mut buffer[MAGIC_SIZE..];
+        let buffer = &buffer[MAGIC_SIZE..];
 
+        let value_type = (FileReaderUtils::read_u64_1(&buffer[38..39]) as u8)
+            .try_into()
+            .unwrap();
         Self {
-            version: FileReaderUtil::read_u64_2(&buffer[0..2]) as u16,
-            stream_id: FileReaderUtil::read_u64_8(&buffer[2..10]),
-            min_timestamp: FileReaderUtil::read_u64_8(&buffer[10..18]),
-            max_timestamp: FileReaderUtil::read_u64_8(&buffer[18..26]),
-            value_sum: FileReaderUtil::read_u64_8(&buffer[26..34]),
-            count: FileReaderUtil::read_u64_4(&buffer[34..38]) as u32,
-            min_value: FileReaderUtil::read_u64_8(&buffer[38..46]),
-            max_value: FileReaderUtil::read_u64_8(&buffer[46..54]),
-            first_value: FileReaderUtil::read_u64_8(&buffer[54..62]),
+            version: Version(
+                FileReaderUtils::read_u64_2(&buffer[0..2])
+                    .try_into()
+                    .unwrap(),
+            ),
+            stream_id: StreamId(FileReaderUtils::read_u128_16(&buffer[2..18])),
+            min_timestamp: FileReaderUtils::read_u64_8(&buffer[18..26]),
+            max_timestamp: FileReaderUtils::read_u64_8(&buffer[26..34]),
+            count: FileReaderUtils::read_u64_4(&buffer[34..38])
+                .try_into()
+                .unwrap(),
+            value_type,
+            value_sum: Self::parse_value(value_type, &buffer[39..47]),
+            min_value: Self::parse_value(value_type, &buffer[47..55]),
+            max_value: Self::parse_value(value_type, &buffer[55..63]),
+            first_value: Self::parse_value(value_type, &buffer[63..71]),
         }
     }
 
-    fn write(&self, file: &mut File) -> Result<usize, Error> {
+    fn write_value(&self, file: &mut File, value: Value) -> Result<usize, io::Error> {
+        match self.value_type {
+            ValueType::Integer64 => file.write_all(&value.get_integer64().to_le_bytes())?,
+            ValueType::UInteger64 => file.write_all(&value.get_uinteger64().to_le_bytes())?,
+            ValueType::Float64 => file.write_all(&value.get_float64().to_le_bytes())?,
+        }
+        Ok(8)
+    }
+
+    fn write(&self, file: &mut File) -> Result<usize, io::Error> {
         file.write_all(&MAGIC)?;
 
-        file.write_all(&self.version.to_le_bytes())?;
-        file.write_all(&self.stream_id.to_le_bytes())?;
+        file.write_all(&self.version.0.to_le_bytes())?;
+        file.write_all(&self.stream_id.0.to_le_bytes())?;
 
         file.write_all(&self.min_timestamp.to_le_bytes())?;
         file.write_all(&self.max_timestamp.to_le_bytes())?;
 
-        file.write_all(&self.value_sum.to_le_bytes())?;
         file.write_all(&self.count.to_le_bytes())?;
-        file.write_all(&self.min_value.to_le_bytes())?;
-        file.write_all(&self.max_value.to_le_bytes())?;
+        file.write_all(&(self.value_type as u8).to_le_bytes())?;
 
-        file.write_all(&self.first_value.to_le_bytes())?;
+        self.write_value(file, self.value_sum).unwrap();
+        self.write_value(file, self.min_value).unwrap();
+        self.write_value(file, self.max_value).unwrap();
+
+        self.write_value(file, self.first_value).unwrap();
 
         Ok(HEADER_SIZE + MAGIC_SIZE)
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ScanHint {
     None,
     Sum,
@@ -108,24 +193,15 @@ pub struct Cursor {
     is_done: bool,
 }
 
-// TODO: Remove this
-impl Iterator for Cursor {
-    type Item = (Timestamp, Value);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next()
-    }
-}
-
 impl Cursor {
-    // pre: file_paths[0] contains at least one timestamp t such that start <= t
+    /// Precondition: file_paths\[0] contains at least one timestamp t such that start <= t
     pub fn new(
         file_paths: Vec<PathBuf>,
         start: Timestamp,
         end: Timestamp,
         page_cache: Rc<RefCell<PageCache>>,
         scan_hint: ScanHint,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, io::Error> {
         assert!(!file_paths.is_empty());
         assert!(start <= end);
 
@@ -151,18 +227,21 @@ impl Cursor {
             start,
             end,
             values_read: 1,
+
             file_paths,
+
             page_cache,
             decomp_engine,
 
             scan_hint,
+
             is_done: false,
         };
 
         cursor.use_query_hint_for_value(cursor.value);
 
-        // check if we can use hint
-        if !matches!(cursor.scan_hint, ScanHint::None)
+        // Check if we can use hint
+        if cursor.scan_hint != ScanHint::None
             && start <= cursor.header.min_timestamp
             && cursor.header.max_timestamp <= end
         {
@@ -170,11 +249,11 @@ impl Cursor {
         }
 
         while cursor.current_timestamp < start {
-            if let Some((timestamp, value)) = cursor.next() {
+            if let Some(Vector { timestamp, value }) = cursor.next() {
                 cursor.current_timestamp = timestamp;
                 cursor.use_query_hint_for_value(value);
             } else {
-                panic!("Unexpected end of file! File does not contain start timestamp.");
+                panic!("Unexpected end of file! File does not contain start timestamp!");
             }
         }
 
@@ -185,8 +264,12 @@ impl Cursor {
     fn use_query_hint(&mut self) {
         self.current_timestamp = self.header.max_timestamp;
         self.value = match self.scan_hint {
-            ScanHint::Sum => self.header.value_sum as Value,
-            ScanHint::Count => self.header.count as Value,
+            ScanHint::Sum => self.header.value_sum,
+            ScanHint::Count => match self.header.value_type {
+                ValueType::UInteger64 => (self.header.count as u64).into(),
+                ValueType::Integer64 => (self.header.count as i64).into(),
+                ValueType::Float64 => (self.header.count as f64).into(),
+            },
             ScanHint::Min => self.header.min_value,
             ScanHint::Max => self.header.max_value,
             ScanHint::None => unreachable!(),
@@ -196,7 +279,11 @@ impl Cursor {
 
     fn use_query_hint_for_value(&mut self, value: Value) {
         self.value = match self.scan_hint {
-            ScanHint::Count => 1,
+            ScanHint::Count => match self.header.value_type {
+                ValueType::UInteger64 => 1u64.into(),
+                ValueType::Integer64 => 1i64.into(),
+                ValueType::Float64 => 1f64.into(),
+            },
             _ => value,
         };
     }
@@ -230,8 +317,8 @@ impl Cursor {
                 &self.header,
             );
 
-        // use the query hint if applicable on the next file
-        if !matches!(self.scan_hint, ScanHint::None)
+        // Use the query hint if applicable on the next file
+        if self.scan_hint != ScanHint::None
             && self.start <= self.header.min_timestamp
             && self.header.max_timestamp <= self.end
         {
@@ -240,8 +327,7 @@ impl Cursor {
         Some(())
     }
 
-    #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<(Timestamp, Value)> {
+    pub fn next_vector(&mut self) -> Option<Vector> {
         if self.is_done {
             return None;
         }
@@ -252,15 +338,20 @@ impl Cursor {
                 return None;
             }
 
-            // this should never be triggered
+            // This should never be triggered
             if self.current_timestamp > self.end {
-                panic!("Unexpected file change! Cursor timestamp is greater then end timestamp.");
+                panic!("Unexpected file change! Cursor timestamp is greater then end timestamp!");
             }
 
-            return Some((self.current_timestamp, self.value));
+            return Some(Vector {
+                timestamp: self.current_timestamp,
+                value: self.value,
+            });
         }
 
-        (self.current_timestamp, self.value) = self.decomp_engine.next();
+        let current = self.decomp_engine.next();
+        self.current_timestamp = current.0;
+        self.value = current.1.into();
         self.use_query_hint_for_value(self.value);
 
         if self.current_timestamp > self.end {
@@ -269,20 +360,37 @@ impl Cursor {
         }
         self.values_read += 1;
 
-        Some((self.current_timestamp, self.value))
+        Some(Vector {
+            timestamp: self.current_timestamp,
+            value: self.value,
+        })
     }
 
-    // not valid after next returns none
-    pub fn fetch(&self) -> (Timestamp, Value) {
-        (self.current_timestamp, self.value)
+    /// Precondition: Not valid after next returns none
+    pub fn fetch(&self) -> Vector {
+        Vector {
+            timestamp: self.current_timestamp,
+            value: self.value,
+        }
     }
 
     pub fn is_done(&self) -> bool {
         self.is_done
     }
+
+    pub fn value_type(&self) -> ValueType {
+        self.header.value_type
+    }
 }
 
-#[derive(Debug, Default)]
+impl Iterator for Cursor {
+    type Item = Vector;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_vector()
+    }
+}
+
 pub struct TimeDataFile {
     pub header: Header,
     pub timestamps: Vec<Timestamp>,
@@ -290,16 +398,16 @@ pub struct TimeDataFile {
 }
 
 impl TimeDataFile {
-    pub fn new() -> Self {
+    pub fn new(version: Version, stream_id: StreamId, value_type: ValueType) -> Self {
         Self {
-            header: Header::default(),
+            header: Header::new(version, stream_id, value_type),
             timestamps: Vec::new(),
             values: Vec::new(),
         }
     }
 
     pub fn read_data_file(path: PathBuf) -> Self {
-        let mut page_cache = PageCache::new(100);
+        let page_cache = PageCache::new(100);
 
         let mut cursor = Cursor::new(
             vec![path],
@@ -314,11 +422,11 @@ impl TimeDataFile {
         let mut values = Vec::new();
 
         loop {
-            let (timestamp, value) = cursor.fetch();
+            let Vector { timestamp, value } = cursor.fetch();
             timestamps.push(timestamp);
             values.push(value);
 
-            if (cursor.next().is_none()) {
+            if cursor.next().is_none() {
                 break;
             }
         }
@@ -341,13 +449,14 @@ impl TimeDataFile {
             );
 
         for i in 1usize..(self.header.count as usize) {
-            comp_engine.consume(self.timestamps[i], self.values[i]);
+            comp_engine.consume(self.timestamps[i], self.values[i].get_uinteger64());
         }
 
         comp_engine.flush_all();
         header_bytes + comp_engine.bytes_compressed()
     }
 
+    /// Precondition: The ValueType of value must be the same as self.header.value_type
     pub fn write_data_to_file_in_mem(&mut self, timestamp: Timestamp, value: Value) {
         if self.header.count == 0 {
             self.header.first_value = value;
@@ -358,25 +467,35 @@ impl TimeDataFile {
         }
 
         self.header.count += 1;
-        self.header.value_sum += Value::from(value);
 
         self.header.max_timestamp = Timestamp::max(self.header.max_timestamp, timestamp);
         self.header.min_timestamp = Timestamp::min(self.header.min_timestamp, timestamp);
 
-        self.header.max_value = Value::max(self.header.max_value, value);
-        self.header.min_value = Value::min(self.header.min_value, value);
+        self.header.value_sum = self
+            .header
+            .value_sum
+            .add_same(self.header.value_type, &value);
+        self.header.max_value = self
+            .header
+            .max_value
+            .max_same(self.header.value_type, &value);
+        self.header.min_value = self
+            .header
+            .min_value
+            .min_same(self.header.value_type, &value);
 
         self.timestamps.push(timestamp);
         self.values.push(value);
     }
 
-    // Returns the number of entries written in memory
-    pub fn write_batch_data_to_file_in_mem(&mut self, batch: &[(Timestamp, Value)]) -> usize {
+    /// Precondition: The ValueType of all the vectors in the batch must be the same as self.header.value_type
+    /// Returns the number of entries written in memory
+    pub fn write_batch_data_to_file_in_mem(&mut self, batch: &[Vector]) -> usize {
         let space = MAX_NUM_ENTRIES - self.num_entries();
         let n = usize::min(space, batch.len());
 
         for pair in batch.iter().take(n) {
-            self.write_data_to_file_in_mem(pair.0, pair.1);
+            self.write_data_to_file_in_mem(pair.timestamp, pair.value);
         }
 
         n
@@ -394,16 +513,14 @@ impl TimeDataFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
-
-    use crate::utils::test_utils::*;
+    use crate::utils::test::*;
 
     #[test]
     fn test_write() {
         set_up_files!(paths, "cool.ty");
-        let mut model = TimeDataFile::new();
+        let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
         for i in 0..10u64 {
-            model.write_data_to_file_in_mem(i, i + 10);
+            model.write_data_to_file_in_mem(i, (i + 10).into());
         }
         model.write(paths[0].clone());
     }
@@ -413,15 +530,15 @@ mod tests {
         set_up_files!(paths, "temp_file.ty");
         let mut temp_file: File = File::create(&paths[0]).unwrap();
 
-        let mut t_header = Header {
+        let t_header = Header {
             count: 11,
-            value_sum: 101,
-            ..Header::default()
+            value_sum: 101u64.into(),
+            ..Header::new(Version(0), StreamId(0), ValueType::UInteger64)
         };
 
-        t_header.write(&mut temp_file);
+        t_header.write(&mut temp_file).unwrap();
 
-        let mut temp_file: File = File::open(&paths[0]).unwrap();
+        let _temp_file: File = File::open(&paths[0]).unwrap();
         let mut page_cache = PageCache::new(100);
         let file_id = page_cache.register_or_get_file_id(&paths[0]);
         let parsed_header = Header::parse(file_id, &mut page_cache);
@@ -431,13 +548,13 @@ mod tests {
     #[test]
     fn test_cursor() {
         set_up_files!(paths, "1.ty");
-        let mut model = TimeDataFile::new();
+        let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
         for i in 0..10u64 {
-            model.write_data_to_file_in_mem(i, i + 10);
+            model.write_data_to_file_in_mem(i, (i + 10).into());
         }
         model.write(paths[0].clone());
 
-        let mut page_cache = PageCache::new(10);
+        let page_cache = PageCache::new(10);
         let cursor = Cursor::new(
             vec![paths[0].clone()],
             0,
@@ -450,9 +567,9 @@ mod tests {
         let mut cursor = cursor.unwrap();
         let mut i = 0;
         loop {
-            let (timestamp, value) = cursor.fetch();
+            let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, model.timestamps[i]);
-            assert_eq!(value, model.values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &model.values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -463,7 +580,7 @@ mod tests {
     #[test]
     fn test_single_valued_file() {
         set_up_files!(paths, "1.ty");
-        generate_ty_file(paths[0].clone(), &[1], &[2]);
+        generate_ty_file(paths[0].clone(), &[1], &[2u64.into()]);
 
         let mut page_cache = PageCache::new(10);
         page_cache.register_or_get_file_id(&paths[0]);
@@ -476,13 +593,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut i = 0;
         loop {
-            let (timestamp, value) = cursor.fetch();
-            println!("{} {}", timestamp, value);
+            let Vector { timestamp, value } = cursor.fetch();
+            println!("{} {}", timestamp, value.get_uinteger64());
             assert_eq!(timestamp, 1);
-            assert_eq!(value, 2);
-            i += 1;
+            assert!(value.eq_same(ValueType::UInteger64, &2u64.into()));
             if cursor.next().is_none() {
                 break;
             }
@@ -500,9 +615,9 @@ mod tests {
         for file_path in &file_paths {
             let mut local_timestamps = Vec::new();
             let mut local_values = Vec::new();
-            for i in 0..10u64 {
+            for _ in 0..10u64 {
                 local_timestamps.push(timestamp);
-                local_values.push(timestamp + 10);
+                local_values.push((timestamp + 10).into());
                 timestamp += 1;
             }
 
@@ -511,7 +626,7 @@ mod tests {
             values.append(&mut local_values);
         }
 
-        let mut page_cache = PageCache::new(10);
+        let page_cache = PageCache::new(10);
 
         let cursor = Cursor::new(
             file_paths,
@@ -526,9 +641,9 @@ mod tests {
         let mut i = 0;
 
         loop {
-            let (timestamp, value) = cursor.fetch();
+            let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, timestamps[i]);
-            assert_eq!(value, values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -547,9 +662,9 @@ mod tests {
         for file_path in &file_paths {
             let mut local_timestamps = Vec::new();
             let mut local_values = Vec::new();
-            for i in 0..10u64 {
+            for _ in 0..10u64 {
                 local_timestamps.push(timestamp);
-                local_values.push(timestamp + 10);
+                local_values.push((timestamp + 10).into());
                 timestamp += 1;
             }
 
@@ -558,7 +673,7 @@ mod tests {
             values.append(&mut local_values);
         }
 
-        let mut page_cache = PageCache::new(10);
+        let page_cache = PageCache::new(10);
         let cursor = Cursor::new(
             file_paths,
             5,
@@ -572,9 +687,9 @@ mod tests {
         let mut i = 5;
 
         loop {
-            let (timestamp, value) = cursor.fetch();
+            let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, timestamps[i]);
-            assert_eq!(value, values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -587,16 +702,16 @@ mod tests {
     fn test_compression() {
         set_up_files!(paths, "1.ty");
         let mut timestamps = Vec::<u64>::new();
-        let mut values = Vec::<u64>::new();
+        let mut values = Vec::new();
 
         for i in 1..100000u64 {
             timestamps.push(i);
-            values.push(i * 200000);
+            values.push((i * 200000).into());
         }
 
         generate_ty_file(paths[0].clone(), &timestamps, &values);
 
-        let mut page_cache = PageCache::new(100);
+        let page_cache = PageCache::new(100);
         let mut cursor = Cursor::new(
             paths,
             1,
@@ -608,9 +723,9 @@ mod tests {
 
         let mut i = 0;
         loop {
-            let (timestamp, value) = cursor.fetch();
+            let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, timestamps[i]);
-            assert_eq!(value, values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -621,11 +736,16 @@ mod tests {
     #[test]
     fn test_compression_2() {
         set_up_files!(paths, "1.ty");
-        let mut timestamps: Vec<u64> = vec![1, 257, 69000, (u32::MAX as u64) + 69000];
-        let mut values = vec![1, 257, 69000, (u32::MAX as u64) + 69000];
+        let timestamps: Vec<u64> = vec![1, 257, 69000, (u32::MAX as u64) + 69000];
+        let values = vec![
+            1u64.into(),
+            257u64.into(),
+            69000u64.into(),
+            ((u32::MAX as u64) + 69000).into(),
+        ];
         generate_ty_file(paths[0].clone(), &timestamps, &values);
 
-        let mut page_cache = PageCache::new(100);
+        let page_cache = PageCache::new(100);
         let mut cursor = Cursor::new(
             paths,
             1,
@@ -637,9 +757,9 @@ mod tests {
 
         let mut i = 0;
         loop {
-            let (timestamp, value) = cursor.fetch();
+            let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, timestamps[i]);
-            assert_eq!(value, values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -652,19 +772,27 @@ mod tests {
     fn test_compression_negative_deltas() {
         set_up_files!(paths, "1.ty");
 
-        let mut timestamps: Vec<u64> = vec![
+        let timestamps = vec![
             1,
             25,
             27,
             35,
-            (u32::MAX as u64),
+            u32::MAX as u64,
             (u32::MAX as u64) + 69000,
             (u32::MAX as u64) + 69001,
         ];
-        let mut values = vec![100, 3, 23, 0, 100, (u32::MAX as u64), 1];
+        let values = vec![
+            100u64.into(),
+            3u64.into(),
+            23u64.into(),
+            0u64.into(),
+            100u64.into(),
+            (u32::MAX as u64).into(),
+            1u64.into(),
+        ];
         generate_ty_file(paths[0].clone(), &timestamps, &values);
 
-        let mut page_cache = PageCache::new(100);
+        let page_cache = PageCache::new(100);
         let mut cursor = Cursor::new(
             paths,
             1,
@@ -676,9 +804,9 @@ mod tests {
 
         let mut i = 0;
         loop {
-            let (timestamp, value) = cursor.fetch();
+            let Vector { timestamp, value } = cursor.fetch();
             assert_eq!(timestamp, timestamps[i]);
-            assert_eq!(value, values[i]);
+            assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
             if cursor.next().is_none() {
                 break;
@@ -698,9 +826,9 @@ mod tests {
         for file_path in &file_paths {
             let mut local_timestamps = Vec::new();
             let mut local_values = Vec::new();
-            for i in 0..10u64 {
+            for _ in 0..10u64 {
                 local_timestamps.push(timestamp);
-                local_values.push(timestamp + 1);
+                local_values.push((timestamp + 1).into());
                 timestamp += 1;
             }
 
@@ -709,16 +837,16 @@ mod tests {
             values.append(&mut local_values);
         }
 
-        let mut page_cache = Rc::new(RefCell::new(PageCache::new(10)));
+        let page_cache = Rc::new(RefCell::new(PageCache::new(10)));
 
         let get_value = |start: Timestamp, end: Timestamp, hint: ScanHint| -> (Value, i32) {
             let mut cursor =
                 Cursor::new(file_paths.clone(), start, end, page_cache.clone(), hint).unwrap();
             let mut i = 0;
-            let mut res = 0;
+            let mut res: Value = 0u64.into();
             loop {
-                let (timestamp, value) = cursor.fetch();
-                res += value;
+                let Vector { value, .. } = cursor.fetch();
+                res = res.add(ValueType::UInteger64, &value, ValueType::UInteger64);
                 i += 1;
                 if cursor.next().is_none() {
                     break;
@@ -730,14 +858,14 @@ mod tests {
 
         let (res, i) = get_value(0, 30, ScanHint::Sum);
         assert_eq!(i, 3);
-        assert_eq!(res, 465);
+        assert!(res.eq_same(ValueType::UInteger64, &465u64.into()));
 
         let (res, i) = get_value(5, 28, ScanHint::Sum);
-        assert_eq!(res, 420);
+        assert!(res.eq_same(ValueType::UInteger64, &420u64.into()));
         assert_eq!(i, 15);
 
-        let (res, i) = get_value(0, 9, ScanHint::Sum);
-        assert_eq!(res, 55);
+        let (res, _) = get_value(0, 9, ScanHint::Sum);
+        assert!(res.eq_same(ValueType::UInteger64, &55u64.into()));
     }
 
     #[test]
@@ -751,9 +879,9 @@ mod tests {
         for file_path in &file_paths {
             let mut local_timestamps = Vec::new();
             let mut local_values = Vec::new();
-            for i in 0..10u64 {
+            for _ in 0..10u64 {
                 local_timestamps.push(timestamp);
-                local_values.push(timestamp + 1);
+                local_values.push((timestamp + 1).into());
                 timestamp += 1;
             }
 
@@ -762,17 +890,17 @@ mod tests {
             values.append(&mut local_values);
         }
 
-        let mut page_cache = Rc::new(RefCell::new(PageCache::new(10)));
+        let page_cache = Rc::new(RefCell::new(PageCache::new(10)));
 
         let get_value = |start: Timestamp, end: Timestamp, hint: ScanHint| -> (Value, i32) {
             let mut cursor =
                 Cursor::new(file_paths.clone(), start, end, page_cache.clone(), hint).unwrap();
 
             let mut i = 0;
-            let mut res = Value::MAX;
+            let mut res: Value = u64::MAX.into();
             loop {
-                let (timestamp, value) = cursor.fetch();
-                res = res.min(value);
+                let Vector { value, .. } = cursor.fetch();
+                res = res.min(ValueType::UInteger64, &value, ValueType::UInteger64);
                 i += 1;
                 if cursor.next().is_none() {
                     break;
@@ -783,14 +911,14 @@ mod tests {
         };
 
         let (res, i) = get_value(0, 30, ScanHint::Min);
-        assert_eq!(res, 1);
+        assert!(res.eq_same(ValueType::UInteger64, &1u64.into()));
         assert_eq!(i, 3);
 
         let (res, i) = get_value(5, 28, ScanHint::Min);
-        assert_eq!(res, 6);
+        assert!(res.eq_same(ValueType::UInteger64, &6u64.into()));
         assert_eq!(i, 15);
 
-        let (res, i) = get_value(2, 9, ScanHint::Min);
-        assert_eq!(res, 3);
+        let (res, _) = get_value(2, 9, ScanHint::Min);
+        assert!(res.eq_same(ValueType::UInteger64, &3u64.into()));
     }
 }

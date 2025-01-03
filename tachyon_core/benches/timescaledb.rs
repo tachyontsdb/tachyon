@@ -5,6 +5,8 @@ use pprof::{
     flamegraph::Options,
 };
 
+// TODO: Add black_box
+
 const NUM_ITEMS: u64 = 100000;
 
 fn bench_read_timescale(client: &mut Client) -> u64 {

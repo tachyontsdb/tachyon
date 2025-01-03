@@ -3,8 +3,8 @@ use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
-use tachyon_core::storage::{file::*, page_cache::PageCache};
+use std::{cell::RefCell, hint::black_box, path::PathBuf, rc::Rc};
+use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Version};
 
 const NUM_ITEMS: u64 = 10000000;
 
@@ -14,14 +14,22 @@ fn bench_sum_sequential_timestamps(
     page_cache: Rc<RefCell<PageCache>>,
     file_paths: Vec<PathBuf>,
 ) -> u64 {
-    let mut cursor = Cursor::new(file_paths, start, end, page_cache, ScanHint::None).unwrap();
+    let mut cursor = black_box(
+        Cursor::new(
+            black_box(file_paths),
+            black_box(start),
+            black_box(end),
+            black_box(page_cache),
+            black_box(ScanHint::None),
+        )
+        .unwrap(),
+    );
 
     let mut res = 0;
-
     loop {
-        let (_, value) = cursor.fetch();
-        res += value;
-        if cursor.next().is_none() {
+        let vector = black_box(cursor.fetch());
+        res += black_box(vector.value.get_uinteger64());
+        if black_box(cursor.next()).is_none() {
             break;
         }
     }
@@ -34,14 +42,23 @@ fn bench_sum_sequential_timestamps_with_hint(
     page_cache: Rc<RefCell<PageCache>>,
     file_paths: Vec<PathBuf>,
 ) -> u64 {
-    let mut cursor = Cursor::new(file_paths, start, end, page_cache, ScanHint::Sum).unwrap();
+    let mut cursor = black_box(
+        Cursor::new(
+            black_box(file_paths),
+            black_box(start),
+            black_box(end),
+            black_box(page_cache),
+            black_box(ScanHint::Sum),
+        )
+        .unwrap(),
+    );
 
     let mut res = 0;
 
     loop {
-        let (_, value) = cursor.fetch();
-        res += value;
-        if cursor.next().is_none() {
+        let vector = black_box(cursor.fetch());
+        res += black_box(vector.value.get_uinteger64());
+        if black_box(cursor.next()).is_none() {
             break;
         }
     }
@@ -50,21 +67,21 @@ fn bench_sum_sequential_timestamps_with_hint(
 
 fn criterion_benchmark(c: &mut Criterion) {
     // setup tachyon benchmark
-    let mut model = TimeDataFile::new();
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
     for i in 0..NUM_ITEMS / 3 {
-        model.write_data_to_file_in_mem(i, i + (i % 100));
+        model.write_data_to_file_in_mem(i, (i + (i % 100)).into());
     }
     model.write("../tmp/bench_sequential_sum.ty".into());
 
-    let mut model = TimeDataFile::new();
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
     for i in NUM_ITEMS / 3..2 * NUM_ITEMS / 3 {
-        model.write_data_to_file_in_mem(i, 100000 - i + (i % 10));
+        model.write_data_to_file_in_mem(i, (100000 - i + (i % 10)).into());
     }
     model.write("../tmp/bench_sequential_sum_2.ty".into());
 
-    let mut model = TimeDataFile::new();
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
     for i in 2 * NUM_ITEMS / 3..NUM_ITEMS {
-        model.write_data_to_file_in_mem(i, 9000 - i + (i % 10));
+        model.write_data_to_file_in_mem(i, (9000 - i + (i % 10)).into());
     }
     model.write("../tmp/bench_sequential_sum_3.ty".into());
 

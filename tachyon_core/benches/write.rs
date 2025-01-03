@@ -1,40 +1,38 @@
-use std::iter::zip;
-
 use criterion::{criterion_group, criterion_main, Criterion};
 use csv::Reader;
 use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use tachyon_core::storage::file::*;
+use std::{hint::black_box, iter::zip, path::Path};
+use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Version};
 
 const NUM_ITEMS: u64 = 100000;
 
 fn bench_write_sequential_timestamps(start: u64, end: u64) {
-    let mut model = TimeDataFile::new();
+    let mut model = black_box(TimeDataFile::new(
+        black_box(Version(0)),
+        black_box(StreamId(0)),
+        black_box(ValueType::UInteger64),
+    ));
     for i in start..=end {
-        model.write_data_to_file_in_mem(i, i + (i % 100));
+        model.write_data_to_file_in_mem(black_box(i), black_box((i + (i % 100)).into()));
     }
-    model.write("../tmp/bench_sequential_write.ty".into());
+    model.write(black_box("../tmp/bench_sequential_write.ty".into()));
     std::fs::remove_file("../tmp/bench_sequential_write.ty").unwrap();
 }
 
-fn bench_write_memory_dataset(timestamps: &[u64], values: &[u64]) {
-    let mut model = TimeDataFile::new();
+fn bench_write_dataset(timestamps: &[u64], values: &[u64], file: impl AsRef<Path>) {
+    let mut model = black_box(TimeDataFile::new(
+        black_box(Version(0)),
+        black_box(StreamId(0)),
+        black_box(ValueType::UInteger64),
+    ));
     for (ts, v) in zip(timestamps, values) {
-        model.write_data_to_file_in_mem(*ts, *v);
+        model.write_data_to_file_in_mem(black_box(*ts), black_box((*v).into()));
     }
-    model.write("../tmp/bench_write_memory_dataset.ty".into());
-    std::fs::remove_file("../tmp/bench_write_memory_dataset.ty").unwrap();
-}
-
-fn bench_write_voltage_dataset(timestamps: &[u64], values: &[u64]) {
-    let mut model = TimeDataFile::new();
-    for (ts, v) in zip(timestamps, values) {
-        model.write_data_to_file_in_mem(*ts, *v);
-    }
-    model.write("../tmp/bench_write_voltage_dataset.ty".into());
-    std::fs::remove_file("../tmp/bench_write_voltage_dataset.ty").unwrap();
+    model.write(black_box(file.as_ref().to_path_buf()));
+    std::fs::remove_file(file.as_ref()).unwrap();
 }
 
 fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
@@ -61,24 +59,36 @@ fn write_sequential(c: &mut Criterion) {
 }
 
 fn write_memory_dataset(c: &mut Criterion) {
-    let (timestamps, values) = read_from_csv("./data/memory_dataset.csv");
+    let (timestamps, values) = read_from_csv("../data/memory_dataset.csv");
     c.bench_function(
         &format!(
             "tachyon: write memory dataset ({} entries)",
             timestamps.len()
         ),
-        |b| b.iter(|| bench_write_memory_dataset(&timestamps, &values)),
+        |b| {
+            b.iter(|| {
+                bench_write_dataset(&timestamps, &values, "../tmp/bench_write_memory_dataset.ty")
+            })
+        },
     );
 }
 
 fn write_voltage_dataset(c: &mut Criterion) {
-    let (timestamps, values) = read_from_csv("./data/voltage_dataset.csv");
+    let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
     c.bench_function(
         &format!(
             "tachyon: write voltage dataset ({} entries)",
             timestamps.len()
         ),
-        |b| b.iter(|| bench_write_voltage_dataset(&timestamps, &values)),
+        |b| {
+            b.iter(|| {
+                bench_write_dataset(
+                    &timestamps,
+                    &values,
+                    "../tmp/bench_write_voltage_dataset.ty",
+                )
+            })
+        },
     );
 }
 

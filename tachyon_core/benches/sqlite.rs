@@ -7,6 +7,8 @@ use rusqlite::{Connection, Statement};
 
 const NUM_ITEMS: u64 = 100000;
 
+// TODO: Add black_box
+
 #[derive(Debug)]
 struct Item {
     timestamp: u64,

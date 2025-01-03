@@ -4,8 +4,8 @@ use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use std::{cell::RefCell, iter::zip, rc::Rc};
-use tachyon_core::storage::{file::*, page_cache::PageCache};
+use std::{cell::RefCell, hint::black_box, iter::zip, rc::Rc};
+use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Version};
 
 const NUM_ITEMS: u64 = 100000;
 
@@ -15,22 +15,40 @@ fn bench_read_sequential_timestamps(
     page_cache: Rc<RefCell<PageCache>>,
 ) -> u64 {
     let file_paths = vec!["../tmp/bench_sequential_read.ty".into()];
-    let cursor = Cursor::new(file_paths, start, end, page_cache, ScanHint::None).unwrap();
+    let cursor = black_box(
+        Cursor::new(
+            black_box(file_paths),
+            black_box(start),
+            black_box(end),
+            black_box(page_cache),
+            black_box(ScanHint::None),
+        )
+        .unwrap(),
+    );
 
     let mut res = 0;
-    for (timestamp, value) in cursor {
-        res += timestamp + value;
+    for vector in cursor {
+        res += vector.timestamp + black_box(vector.value.get_uinteger64());
     }
     res
 }
 
 fn bench_read_voltage_dataset(page_cache: Rc<RefCell<PageCache>>) -> u128 {
     let file_paths = vec!["../tmp/bench_voltage_read.ty".into()];
-    let cursor = Cursor::new(file_paths, 0, u64::MAX, page_cache, ScanHint::None).unwrap();
+    let cursor = black_box(
+        Cursor::new(
+            black_box(file_paths),
+            black_box(0),
+            black_box(u64::MAX),
+            black_box(page_cache),
+            black_box(ScanHint::None),
+        )
+        .unwrap(),
+    );
 
-    let mut res: u128 = 0;
-    for (timestamp, value) in cursor {
-        res += (timestamp + value) as u128;
+    let mut res = 0u128;
+    for vector in cursor {
+        res += (vector.timestamp + black_box(vector.value.get_uinteger64())) as u128;
     }
     res
 }
@@ -53,9 +71,9 @@ fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
 
 fn sequential_benchmark(c: &mut Criterion) {
     // setup tachyon benchmark
-    let mut model = TimeDataFile::new();
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
     for i in 0..NUM_ITEMS {
-        model.write_data_to_file_in_mem(i, i + (i % 100));
+        model.write_data_to_file_in_mem(i, (i + (i % 100)).into());
     }
     model.write("../tmp/bench_sequential_read.ty".into());
     let page_cache = Rc::new(RefCell::new(PageCache::new(256)));
@@ -69,10 +87,10 @@ fn voltage_benchmark(c: &mut Criterion) {
     let page_cache = Rc::new(RefCell::new(PageCache::new(256)));
 
     // set up voltage benchmark
-    let (timestamps, values) = read_from_csv("./data/voltage_dataset.csv");
-    let mut model = TimeDataFile::new();
+    let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
+    let mut model = TimeDataFile::new(Version(0), StreamId(0), ValueType::UInteger64);
     for (ts, v) in zip(&timestamps, &values) {
-        model.write_data_to_file_in_mem(*ts, *v);
+        model.write_data_to_file_in_mem(*ts, (*v).into());
     }
     model.write("../tmp/bench_voltage_read.ty".into());
 
