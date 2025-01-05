@@ -1,8 +1,8 @@
-use super::compression::{
-    CompressionEngine, CompressionScheme, DecompressionEngine, DefaultScheme,
-};
+use super::compression::int::{IntCompressor, IntDecompressor};
+use super::compression::CompressionEngine;
 use super::page_cache::{FileId, PageCache, SeqPageRead};
 use super::{FileReaderUtils, MAX_NUM_ENTRIES};
+use crate::storage::compression::DecompressionEngine;
 use crate::storage::page_cache::page_cache_sequential_read;
 use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version};
 use std::cell::RefCell;
@@ -186,7 +186,7 @@ pub struct Cursor {
     file_paths: Vec<PathBuf>,
 
     page_cache: Rc<RefCell<PageCache>>,
-    decomp_engine: <DefaultScheme as CompressionScheme<SeqPageRead, File>>::Decompressor,
+    decomp_engine: IntDecompressor<SeqPageRead>,
 
     scan_hint: ScanHint,
 
@@ -212,11 +212,10 @@ impl Cursor {
 
         drop(page_cache_ref);
 
-        let decomp_engine =
-            <DefaultScheme as CompressionScheme<SeqPageRead, File>>::Decompressor::new(
-                page_cache_sequential_read(page_cache.clone(), file_id, MAGIC_SIZE + HEADER_SIZE),
-                &header,
-            );
+        let decomp_engine = IntDecompressor::new(
+            page_cache_sequential_read(page_cache.clone(), file_id, MAGIC_SIZE + HEADER_SIZE),
+            &header,
+        );
 
         let mut cursor = Self {
             file_id,
@@ -307,15 +306,14 @@ impl Cursor {
         self.current_timestamp = self.header.min_timestamp;
         self.value = self.header.first_value;
         self.values_read = 1;
-        self.decomp_engine =
-            <DefaultScheme as CompressionScheme<SeqPageRead, File>>::Decompressor::new(
-                page_cache_sequential_read(
-                    self.page_cache.clone(),
-                    self.file_id,
-                    MAGIC_SIZE + HEADER_SIZE,
-                ),
-                &self.header,
-            );
+        self.decomp_engine = IntDecompressor::new(
+            page_cache_sequential_read(
+                self.page_cache.clone(),
+                self.file_id,
+                MAGIC_SIZE + HEADER_SIZE,
+            ),
+            &self.header,
+        );
 
         // Use the query hint if applicable on the next file
         if self.scan_hint != ScanHint::None
@@ -442,18 +440,14 @@ impl TimeDataFile {
         let mut file = File::create(path).unwrap();
 
         let header_bytes = self.header.write(&mut file).unwrap();
-        let mut comp_engine =
-            <DefaultScheme as CompressionScheme<SeqPageRead, File>>::Compressor::new(
-                file,
-                &self.header,
-            );
+        let mut comp_engine = IntCompressor::new(file, &self.header);
 
         for i in 1usize..(self.header.count as usize) {
             comp_engine.consume(self.timestamps[i], self.values[i].get_uinteger64());
         }
 
-        comp_engine.flush_all();
-        header_bytes + comp_engine.bytes_compressed()
+        let compressed_bytes = comp_engine.flush_all();
+        header_bytes + compressed_bytes
     }
 
     /// Precondition: The ValueType of value must be the same as self.header.value_type
