@@ -185,7 +185,8 @@ fn handle_query_command(
 
             let f32_timeseries: Vec<(f32, f32)> = timeseries
                 .iter()
-                .map(|(timestamp, value)| (*timestamp as f32, *value as f32)).collect();
+                .map(|(timestamp, value)| (*timestamp as f32, *value as f32))
+                .collect();
 
             Chart::new(
                 180,
@@ -195,7 +196,6 @@ fn handle_query_command(
             )
             .lineplot(&Shape::Lines(&f32_timeseries))
             .display();
-
         }
     }
 }
