@@ -179,6 +179,10 @@ fn handle_query_command(
                 timeseries.push((timestamp, value));
             }
 
+            if let Some(path) = export_csv_path {
+                export_as_csv(path, &timeseries);
+            }
+
             let f32_timeseries: Vec<(f32, f32)> = timeseries
                 .iter()
                 .map(|(timestamp, value)| (*timestamp as f32, *value as f32)).collect();
@@ -192,9 +196,6 @@ fn handle_query_command(
             .lineplot(&Shape::Lines(&f32_timeseries))
             .display();
 
-            if let Some(path) = export_csv_path {
-                export_as_csv(path, &timeseries);
-            }
         }
     }
 }
