@@ -1,5 +1,5 @@
 [workspace]
-members = ["tachyon_core", "tachyon_cli"]
+members = ["tachyon_core", "tachyon_cli", "tachyon_gui/src-tauri"]
 resolver = "2"
 
 [profile.dev]
