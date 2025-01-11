@@ -129,7 +129,7 @@ fn handle_parse_headers_command(paths: Vec<PathBuf>) {
     }
 }
 
-fn export_as_csv(path: PathBuf, timeseries: &[(f32, f32)]) {
+fn export_as_csv(path: PathBuf, timeseries: &[(u64, f64)]) {
     let mut file = File::create(path).unwrap();
 
     file.write_all(b"Timestamp,Value\n").unwrap();
@@ -165,27 +165,37 @@ fn handle_query_command(
             }
         }
         tachyon_core::ReturnType::Vector => {
-            let mut timeseries = Vec::<(f32, f32)>::new();
+            let mut timeseries = Vec::<(u64, f64)>::new();
 
-            let mut max_value = f32::MIN;
-            let mut min_value = f32::MAX;
+            let mut max_value = f64::MIN;
+            let mut min_value = f64::MAX;
 
             while let Some(Vector { timestamp, value }) = query.next_vector() {
-                let value = value.convert_into_f64(query_value_type) as f32;
+                let value = value.convert_into_f64(query_value_type);
 
-                max_value = f32::max(max_value, value);
-                min_value = f32::min(min_value, value);
+                max_value = f64::max(max_value, value);
+                min_value = f64::min(min_value, value);
 
-                timeseries.push((timestamp as f32, value));
+                timeseries.push((timestamp, value));
             }
-
-            Chart::new(180, 60, timeseries[0].0, timeseries.last().unwrap().0)
-                .lineplot(&Shape::Lines(&timeseries))
-                .display();
 
             if let Some(path) = export_csv_path {
                 export_as_csv(path, &timeseries);
             }
+
+            let f32_timeseries: Vec<(f32, f32)> = timeseries
+                .iter()
+                .map(|(timestamp, value)| (*timestamp as f32, *value as f32))
+                .collect();
+
+            Chart::new(
+                180,
+                60,
+                f32_timeseries[0].0,
+                f32_timeseries.last().unwrap().0,
+            )
+            .lineplot(&Shape::Lines(&f32_timeseries))
+            .display();
         }
     }
 }
