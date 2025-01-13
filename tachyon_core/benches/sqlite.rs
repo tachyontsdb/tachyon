@@ -75,7 +75,7 @@ fn voltage_benchmark(c: &mut Criterion) {
     )
     .unwrap();
 
-    let (timestamps, values) = read_from_csv("./data/voltage_dataset.csv");
+    let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
 
     let transaction = conn.transaction().unwrap();
     let mut insert_stmt = transaction
