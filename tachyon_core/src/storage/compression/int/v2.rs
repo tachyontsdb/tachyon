@@ -3,9 +3,9 @@ use std::io::{Read, Write};
 use crate::{
     storage::{
         compression::{CompressionEngine, DecompressionEngine},
+        file::Header,
         FileReaderUtils,
     },
-    tachyon_benchmarks::Header,
     utils::static_assert,
     Timestamp,
 };

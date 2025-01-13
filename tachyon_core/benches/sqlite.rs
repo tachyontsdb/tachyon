@@ -1,4 +1,7 @@
+use std::iter::zip;
+
 use criterion::{criterion_group, criterion_main, Criterion};
+use csv::Reader;
 use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
@@ -13,6 +16,85 @@ const NUM_ITEMS: u64 = 100000;
 struct Item {
     timestamp: u64,
     value: u64,
+}
+
+fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
+    println!("Reading from: {}", path);
+    let mut rdr = Reader::from_path(path).unwrap();
+
+    let mut timestamps = Vec::new();
+    let mut values = Vec::new();
+    for (i, result) in rdr.records().enumerate() {
+        if i > 0 {
+            let record = result.unwrap();
+            timestamps.push(record[0].parse::<u64>().unwrap());
+            values.push(record[1].parse::<u64>().unwrap());
+        }
+    }
+    println!("Done reading from: {}\n", path);
+
+    (timestamps, values)
+}
+
+fn bench_voltage_dataset(query: &str, conn: &mut Connection) {
+    let mut stmt = conn.prepare(query).unwrap();
+    let mut item_iter = stmt
+        .query_map([], |row| {
+            Ok(Item {
+                timestamp: row.get(0).unwrap_or(0),
+                value: row.get(1).unwrap_or(0),
+            })
+        })
+        .unwrap();
+
+    loop {
+        let res = item_iter.next();
+        if res.is_none() {
+            break;
+        }
+    }
+}
+
+fn voltage_benchmark(c: &mut Criterion) {
+    let queries = vec![
+        r#"select timestamp, value from Item;"#,
+        r#"select sum(value) from Item;"#,
+        r#"select avg(value) from item;"#,
+    ];
+
+    let mut conn = Connection::open("./tmp/bench_voltage.sqlite").unwrap();
+
+    conn.execute(
+        "
+        CREATE TABLE if not exists Item (
+            timestamp INTEGER,
+            value INTEGER
+        )
+        ",
+        (),
+    )
+    .unwrap();
+
+    let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
+
+    let transaction = conn.transaction().unwrap();
+    let mut insert_stmt = transaction
+        .prepare("INSERT INTO Item (timestamp, value) VALUES (?, ?)")
+        .unwrap();
+
+    for (t, v) in zip(timestamps, values) {
+        insert_stmt.execute([&t, &v]).unwrap();
+    }
+    drop(insert_stmt);
+    transaction.commit().unwrap();
+
+    for query in queries {
+        c.bench_function(&format!("sqlite: query benchmark for: {}", query), |b| {
+            b.iter(|| bench_voltage_dataset(query, &mut conn))
+        });
+    }
+
+    std::fs::remove_file("./tmp/bench_voltage.sqlite").unwrap();
 }
 
 fn bench_read_sqlite(stmt: &mut Statement) -> u64 {
@@ -55,11 +137,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         .unwrap();
 
     for i in 0..NUM_ITEMS {
-        let item = Item {
-            timestamp: i,
-            value: i + (i % 100),
-        };
-        insert_stmt.execute([&item.timestamp, &item.value]).unwrap();
+        insert_stmt.execute([&i, &(i + (i % 100))]).unwrap();
     }
     drop(insert_stmt);
     transaction.commit().unwrap();
@@ -80,6 +158,6 @@ fn get_config() -> Criterion {
 criterion_group!(
     name = benches;
     config = get_config();
-    targets = criterion_benchmark
+    targets = criterion_benchmark,voltage_benchmark
 );
 criterion_main!(benches);

@@ -5,11 +5,11 @@ use clap::{
 use csv::Reader;
 use prettytable::{row, Table};
 use rustyline::{error::ReadlineError, DefaultEditor};
-use std::path::PathBuf;
 use std::{
     fs::{self, File},
     io::Write,
 };
+use std::{os::unix::fs::MetadataExt, path::PathBuf};
 use tachyon_core::tachyon_benchmarks::TimeDataFile;
 use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
@@ -76,6 +76,7 @@ pub enum Commands {
 fn handle_parse_headers_command(paths: Vec<PathBuf>) {
     fn output_header(path: PathBuf, file: TimeDataFile) {
         let mut table = Table::new();
+        let file_size = File::open(&path).unwrap().metadata().unwrap().size();
 
         table.add_row(row!["File", path.to_str().unwrap()]);
         table.add_row(row!["Version", file.header.version.0]);
@@ -103,6 +104,14 @@ fn handle_parse_headers_command(paths: Vec<PathBuf>) {
         table.add_row(row![
             "First Value",
             file.header.first_value.get_output(file.header.value_type)
+        ]);
+
+        table.add_row(row![
+            "Compression Ratio",
+            format!(
+                "{:.2}x",
+                ((file.header.count as f64 * 16_f64) / file_size as f64)
+            )
         ]);
 
         table.printstd();
