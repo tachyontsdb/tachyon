@@ -4,6 +4,7 @@ use crate::{storage::file::Header, Timestamp};
 
 use super::{CompressionEngine, DecompressionEngine};
 
+mod google;
 #[deprecated]
 mod v1;
 mod v2;
