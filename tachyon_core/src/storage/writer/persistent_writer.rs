@@ -1,4 +1,5 @@
 use super::super::MAX_NUM_ENTRIES;
+use super::Writer;
 use crate::query::indexer::Indexer;
 use super::super::file::PartiallyPersistentDataFile;
 use crate::{StreamId, Timestamp, Value, ValueType, Version, FILE_EXTENSION};
@@ -16,9 +17,19 @@ pub struct PersistentWriter {
     version: Version,
 }
 
-
 impl PersistentWriter {
-    pub fn new(root: impl AsRef<Path>, indexer: Rc<RefCell<Indexer>>, version: Version) -> Self {
+    fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, ts: Timestamp) -> PathBuf {
+        root.as_ref().join(format!(
+            "{}/{}.{}",
+            stream_id,
+            ts,
+            FILE_EXTENSION
+        ))
+    }
+}
+
+impl Writer for PersistentWriter {
+    fn new(root: impl AsRef<Path>, indexer: Rc<RefCell<Indexer>>, version: Version) -> Self {
         PersistentWriter {
             open_data_files: HashMap::new(),
             root: root.as_ref().to_path_buf(),
@@ -27,7 +38,7 @@ impl PersistentWriter {
         }
     }
 
-    pub fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value, value_type: ValueType) {
+    fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value, value_type: ValueType) {
         if let Some(file) = self.open_data_files.get_mut(&stream_id) {
             // Use the existing file if available
             file.write(ts, v).unwrap();
@@ -55,27 +66,18 @@ impl PersistentWriter {
         }
     }
 
-    pub fn flush_all(&mut self) {
+    fn flush_all(&mut self) {
         for (_, file) in self.open_data_files.iter_mut() {
             file.flush().unwrap();
         }
         self.open_data_files.clear();
     }
 
-    pub fn create_stream(&self, stream_id: Uuid) {
+    fn create_stream(&self, stream_id: Uuid) {
         let stream = self.root.join(stream_id.to_string());
         if !stream.exists() {
             fs::create_dir(stream).unwrap();
         }
-    }
-
-    fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, ts: Timestamp) -> PathBuf {
-        root.as_ref().join(format!(
-            "{}/{}.{}",
-            stream_id,
-            ts,
-            FILE_EXTENSION
-        ))
     }
 }
 
@@ -158,6 +160,9 @@ mod tests {
         for i in 0..values.len() {
             assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
         }
+        for i in 0..values.len() {
+            assert!(files[0].timestamps[i] == timestamps[i]);
+        }
     }
 
     #[test]
@@ -193,6 +198,9 @@ mod tests {
             assert_eq!(files[0].values.len(), values[0].len());
             for i in 0..values[0].len() {
                 assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[0][i]));
+            }
+            for i in 0..values.len() {
+                assert!(files[0].timestamps[i] == timestamps[0][i]);
             }
         }
     }
@@ -242,7 +250,6 @@ mod tests {
         writer.create_stream(stream_id);
 
         for _ in 0..2 {
-            println!("N: {}", n);
             create_and_write_batch(
                 n,
                 base,
