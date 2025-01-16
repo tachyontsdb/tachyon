@@ -9,35 +9,6 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use uuid::Uuid;
 
-
-// Current problems
-// 1. Users cannot read data that is currently in memory - MAIN ISSUE
-// 2. Concurrent writes are not supported. (Makes sense)
-
-// Solutions
-// 1. Every write goes directly to the file. For batch writes, it makes sense to write the file first in memory and then directly to disk
-// For individual writes we write directly to file every single time.
-// Can this be done with memory mapped files?\
-// Problem with this, COMPRESSION
-// for V2 compression we are writing in chunks to an results array. So it is particularly hard to memmap. 
-//    - for V2 we can memmap chunks once they are finished, this means that at least part of the file will be written
-
-// 2. Keep in memory access and extend the cursor to be able to add
-
-
-
-// SOLUTION
-// 1. We are going to use a memmapped file to handle writing data.
-// Each compression scheme needs a "Chunk" of data. Everytime it gets a chunk of data it then compresses it and flushes it out to some buffer.
-// We instead want to take this compressed chunk and write it to a file. Each time we do this we will update the header in that file
-// This allows the user to read this file
-
-// Logic, we will handle singular writes. We don't need to store a time data file? This is because the compression engine will store it for us.
-// The compression engine will also need to write the information to a file once it gets it's chunk. Will give the compression engine a struct that will handle this for us.
-
-// The writer needs to do the following: if there is a file that has some data written to it, but it is not full then still write to it? or do we just not care? For now lets not worry about this
-// We create a file. Lets make a new data structure. A mem-mapped time data file that is used only for WRITING data
-
 pub struct Writer {
     open_data_files: HashMap<Uuid, TimeDataFile>, // Stream ID to in-mem file
     root: PathBuf,
