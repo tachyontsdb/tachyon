@@ -5,6 +5,7 @@ use crate::{
         compression::{CompressionEngine, DecompressionEngine},
         file::Header,
         FileReaderUtils,
+        file::Header
     },
     utils::static_assert,
     Timestamp,
@@ -134,8 +135,7 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
     fn flush_all(&mut self) -> usize {
         self.flush();
         self.flush_chunk();
-        self.writer.write_all(&self.result).unwrap();
-        self.result.len()
+        self.writer.write(&self.result).unwrap()
     }
 }
 
@@ -203,8 +203,15 @@ impl<T: Write> CompressionEngineV2<T> {
         self.result
             .extend_from_slice(&self.cur_length.to_be_bytes()[1..]);
         self.result.append(&mut self.temp_buffer);
+        self.writer.write(&self.result).unwrap(); // we persist any data we have
+        self.clear()
+    }
+
+    fn clear(&mut self) {
         self.chunk_idx = 0;
         self.cur_length = 0;
+        self.result = Vec::new();
+        self.temp_buffer = Vec::new();
     }
 
     #[inline]

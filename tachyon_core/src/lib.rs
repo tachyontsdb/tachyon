@@ -4,7 +4,7 @@ use crate::execution::node::{ExecutorNode, TNode};
 use crate::query::indexer::Indexer;
 use crate::query::planner::QueryPlanner;
 use crate::storage::page_cache::PageCache;
-use crate::storage::writer::Writer;
+use crate::storage::writer::writer::Writer;
 use promql_parser::parser;
 use query::indexer::IndexerErr;
 use std::cell::RefCell;
@@ -59,6 +59,12 @@ pub fn print_error(err: &impl Error) {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(transparent)]
 pub struct StreamId(pub u128);
+
+impl StreamId {
+    pub fn to_uuid(self) -> Uuid {
+        Uuid::from_u128(self.0)
+    }
+}
 
 pub const CURRENT_VERSION: Version = Version(2);
 

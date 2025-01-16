@@ -31,6 +31,7 @@ trait IndexerStore {
         start: Timestamp,
         end: Timestamp,
     ) -> Result<(), IndexerErr>;
+    fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp);
 
     fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<Uuid>>;
     fn get_files_for_stream_id(
@@ -415,6 +416,26 @@ impl Indexer {
     ) -> Result<(), IndexerErr> {
         self.store.insert_new_file(id, file, start, end)?;
         Ok(())
+    }
+
+    fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
+        self.conn
+            .execute(
+                &format!(
+                    "INSERT OR REPLACE INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
+                    Self::SQLITE_ID_TO_FILENAME_TABLE
+                ),
+                (id, file.to_str(), start, end),
+            )
+            .unwrap();
+    }
+
+    pub fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
+        self.store.insert_or_replace_file(id, file, start, end);
+    }
+
+    pub fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
+        self.store.insert_or_replace_file(id, file, start, end);
     }
 
     pub fn get_all_streams(&self) -> Result<Vec<StreamSummaryType>, IndexerErr> {
