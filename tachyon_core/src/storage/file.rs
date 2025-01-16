@@ -2,13 +2,14 @@ use super::compression::int::{IntCompressor, IntDecompressor};
 use super::compression::CompressionEngine;
 use super::page_cache::{FileId, PageCache, SeqPageRead};
 use super::{FileReaderUtils, MAX_NUM_ENTRIES};
+use crate::query::indexer::Indexer;
 use crate::storage::compression::DecompressionEngine;
 use crate::storage::page_cache::page_cache_sequential_read;
 use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version};
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::{self, Seek, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -17,6 +18,7 @@ const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
 const HEADER_SIZE: usize = 71;
 
+#[derive(Clone)]
 pub struct Header {
     pub version: Version,
     pub stream_id: StreamId,
@@ -503,6 +505,125 @@ impl TimeDataFile {
         self.header.count as usize
     }
 }
+
+pub struct PartiallyPersistentDataFile{
+    pub header: Rc<RefCell<Header>>,
+    compressor: Option<IntCompressor<PartiallyPersistentDataFileWriter>>,
+    indexer: Rc<RefCell<Indexer>>,
+    path: PathBuf,
+}
+
+impl PartiallyPersistentDataFile {
+    pub fn new(version: Version, stream_id: StreamId, value_type: ValueType, indexer: Rc<RefCell<Indexer>>, path: PathBuf) -> Self {
+        let header = Rc::new(RefCell::new(Header::new(version, stream_id, value_type)));
+
+        Self {
+            header: header,
+            path: path,
+            compressor: None,
+            indexer: indexer,
+        }
+    }
+
+    pub fn lazy_init(mut self, ts: Timestamp, v: Value) -> Self {
+        self.update_header(ts, v);
+        let writer = PartiallyPersistentDataFileWriter::new(self.indexer.clone(), self.header.clone(), &(self.path));
+        self.compressor = Option::Some(IntCompressor::new(writer, &self.header.borrow().clone()));
+
+        self
+    }
+
+    fn update_header(&mut self, timestamp: Timestamp, value: Value) {
+        let mut header = self.header.borrow_mut(); // Borrow mutably once
+    
+        if header.count == 0 {
+            header.first_value = value;
+            header.min_timestamp = timestamp;
+            header.max_timestamp = timestamp;
+            header.min_value = value;
+            header.max_value = value;
+        }
+    
+        header.count += 1;
+    
+        // Update max and min timestamps
+        header.max_timestamp = Timestamp::max(header.max_timestamp, timestamp);
+        header.min_timestamp = Timestamp::min(header.min_timestamp, timestamp);
+    
+        // Update value_sum, max_value, and min_value
+        header.value_sum = header.value_sum.add_same(header.value_type, &value);
+        header.max_value = header.max_value.max_same(header.value_type, &value);
+        header.min_value = header.min_value.min_same(header.value_type, &value);
+    }
+
+    pub fn write(&mut self, ts: Timestamp, v: Value) -> Result<(), String> {
+        self.update_header(ts, v);
+        
+        match self.compressor {
+            Some(ref mut compressor) => {
+                compressor.consume(ts, v.get_uinteger64());
+                Ok(())
+            },
+            None => Err("Compressor not initialized".to_string()),
+        }
+    }
+
+    pub fn flush(&mut self) -> Result<(), String> {
+        match self.compressor {
+            Some(ref mut compressor) => {
+                compressor.flush_all();
+                self.indexer.borrow_mut().insert_or_replace_file(self.header.borrow().stream_id.to_uuid(), &self.path, self.header.borrow().min_timestamp, self.header.borrow().max_timestamp);
+                Ok(())
+            },
+            None => Err("Compressor not initialized".to_string()),
+        }
+    }
+
+    pub fn num_entries(&self) -> usize {
+        self.header.borrow().count as usize
+    }
+}
+
+
+struct PartiallyPersistentDataFileWriter {
+    indexer: Rc<RefCell<Indexer>>,
+    header: Rc<RefCell<Header>>,
+    file: File,
+    path: PathBuf,
+}
+
+impl PartiallyPersistentDataFileWriter {
+    pub fn new(indexer: Rc<RefCell<Indexer>>, header: Rc<RefCell<Header>>, path: &PathBuf) -> Self {
+        Self {
+            indexer: indexer,
+            header: header,
+            file: File::create(path).unwrap(),
+            path: path.clone()
+        }
+    }
+}
+
+impl Write for PartiallyPersistentDataFileWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.file.seek(io::SeekFrom::Start(0)).unwrap();
+        self.header.borrow().write(self.file.by_ref()).unwrap(); 
+        self.file.seek(io::SeekFrom::End(0)).unwrap();
+        let result = self.file.write(buf);
+
+        match result {
+            Ok(size) => {
+                self.indexer.borrow_mut().insert_or_replace_file(self.header.borrow().stream_id.to_uuid(), &self.path, self.header.borrow().min_timestamp, self.header.borrow().max_timestamp);
+                Ok(size)
+            }
+            Err(err) => Err(err)
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
