@@ -4,7 +4,8 @@ use crate::execution::node::{ExecutorNode, TNode};
 use crate::query::indexer::Indexer;
 use crate::query::planner::QueryPlanner;
 use crate::storage::page_cache::PageCache;
-use crate::storage::writer::writer::Writer;
+use crate::storage::writer::Writer;
+use crate::storage::writer::writer::InMemoryWriter;
 use promql_parser::parser;
 use query::indexer::IndexerErr;
 use std::cell::RefCell;
@@ -352,7 +353,7 @@ pub enum ConnectionErr {
 pub struct Connection {
     page_cache: Rc<RefCell<PageCache>>,
     indexer: Rc<RefCell<Indexer>>,
-    writer: Rc<RefCell<Writer>>,
+    writer: Rc<RefCell<InMemoryWriter>>,
 }
 
 impl Connection {
@@ -368,8 +369,8 @@ impl Connection {
         Ok(Self {
             page_cache: Rc::new(RefCell::new(PageCache::new(10))),
             indexer: indexer.clone(),
-            writer: Rc::new(RefCell::new(Writer::new(db_dir, indexer, CURRENT_VERSION))),
-        })
+            writer: Rc::new(RefCell::new(InMemoryWriter::new(db_dir, indexer, CURRENT_VERSION))),
+        }
     }
 
     fn parse_stream(&self, stream: impl AsRef<str>) -> parser::VectorSelector {
@@ -474,7 +475,7 @@ impl Connection {
 pub struct Inserter {
     value_type: ValueType,
     stream_id: Uuid,
-    writer: Rc<RefCell<Writer>>,
+    writer: Rc<RefCell<InMemoryWriter>>,
 }
 
 macro_rules! create_inserter_insert {
