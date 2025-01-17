@@ -107,8 +107,9 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
         }
     }
 
-    fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) {
+    fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) -> usize {
         // TODO: Check wrapping logic here
+        let mut  bytes_written = 0;
         let curr_deltas = (
             (timestamp.wrapping_sub(self.last_timestamp)) as i64,
             (value.wrapping_sub(self.last_value)) as i64,
@@ -122,13 +123,14 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
 
         self.buffer_idx += 1;
         if self.buffer_idx >= V2_CHUNK_SIZE {
-            self.flush();
+            bytes_written += self.flush();
         }
 
         self.entries_written += 1;
         self.last_timestamp = timestamp;
         self.last_value = value;
         self.last_deltas = curr_deltas;
+        bytes_written
     }
 
     fn flush_all(&mut self) -> usize {
@@ -140,10 +142,12 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
 
 impl<T: Write> CompressionEngineV2<T> {
     // Called when the local buffer can be written along with length byte
-    fn flush(&mut self) {
+    fn flush(&mut self) -> usize {
         if self.buffer_idx == 0 {
-            return;
+            return 0;
         }
+
+        let mut bytes_written = 0;
 
         // Handle partially-filled buffers
         for i in self.buffer_idx..self.ts_d_deltas.len() {
@@ -188,22 +192,25 @@ impl<T: Write> CompressionEngineV2<T> {
         }
 
         if self.chunk_idx >= V2_NUM_CHUNKS_PER_LENGTH {
-            self.flush_chunk();
+            bytes_written += self.flush_chunk();
         }
 
         self.buffer_idx = 0;
+        bytes_written
+
     }
 
-    fn flush_chunk(&mut self) {
+    fn flush_chunk(&mut self) -> usize {
         if self.chunk_idx == 0 {
-            return;
+            return 0;
         }
 
         self.result
             .extend_from_slice(&self.cur_length.to_be_bytes()[1..]);
         self.result.append(&mut self.temp_buffer);
-        self.writer.write(&self.result).unwrap(); // we persist any data we have
-        self.clear()
+        let bytes_written = self.writer.write(&self.result).unwrap(); // we persist any data we have
+        self.clear();
+        bytes_written
     }
 
     fn clear(&mut self) {
@@ -439,7 +446,7 @@ mod tests {
         let mut res: Vec<u8> = Vec::new();
         let mut engine = CompressionEngineV2::<&mut Vec<u8>>::new(&mut res, &header);
         for i in 0..timestamps.len() {
-            engine.consume(timestamps[i], values[i])
+            engine.consume(timestamps[i], values[i]);
         }
         engine.flush_all();
 
@@ -462,7 +469,7 @@ mod tests {
         let mut res: Vec<u8> = Vec::new();
         let mut engine = CompressionEngineV2::<&mut Vec<u8>>::new(&mut res, &header);
         for i in 0..timestamps.len() {
-            engine.consume(timestamps[i], values[i])
+            engine.consume(timestamps[i], values[i]);
         }
         engine.flush_all();
 

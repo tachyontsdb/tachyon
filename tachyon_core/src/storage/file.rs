@@ -397,6 +397,9 @@ pub struct TimeDataFile {
     pub values: Vec<Value>,
 }
 
+// ideas
+// right now we are returning the number of bytes that are compressed in the consume and other functions... this is kinda messy
+
 impl TimeDataFile {
     pub fn new(version: Version, stream_id: StreamId, value_type: ValueType) -> Self {
         Self {
@@ -444,11 +447,13 @@ impl TimeDataFile {
         let header_bytes = self.header.write(&mut file).unwrap();
         let mut comp_engine = IntCompressor::new(file, &self.header);
 
+        let mut compressed_bytes = 0;
+
         for i in 1usize..(self.header.count as usize) {
-            comp_engine.consume(self.timestamps[i], self.values[i].get_uinteger64());
+            compressed_bytes += comp_engine.consume(self.timestamps[i], self.values[i].get_uinteger64());
         }
 
-        let compressed_bytes = comp_engine.flush_all();
+        compressed_bytes += comp_engine.flush_all();
         header_bytes + compressed_bytes
     }
 
@@ -583,7 +588,6 @@ impl PartiallyPersistentDataFile {
         self.header.borrow().count as usize
     }
 }
-
 
 struct PartiallyPersistentDataFileWriter {
     indexer: Rc<RefCell<Indexer>>,
