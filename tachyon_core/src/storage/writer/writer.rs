@@ -84,7 +84,7 @@ impl Writer for InMemoryWriter {
                 stream_id,
                 &file_path,
                 file.header.min_timestamp,
-                file.header.max_timestamp,
+                Some(file.header.max_timestamp),
             );
             self.open_data_files.remove_entry(&stream_id);
         }
@@ -105,7 +105,7 @@ impl Writer for InMemoryWriter {
                 *stream_id,
                 &file_path,
                 file.header.min_timestamp,
-                file.header.max_timestamp,
+                Some(file.header.max_timestamp),
             )
         }
         self.open_data_files.clear();
