@@ -2,7 +2,6 @@ use super::compression::int::{IntCompressor, IntDecompressor};
 use super::compression::CompressionEngine;
 use super::page_cache::{FileId, PageCache, SeqPageRead};
 use super::{FileReaderUtils, MAX_NUM_ENTRIES};
-use crate::query::indexer::Indexer;
 use crate::storage::compression::DecompressionEngine;
 use crate::storage::page_cache::page_cache_sequential_read;
 use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version};
@@ -513,26 +512,24 @@ impl TimeDataFile {
 
 pub struct PartiallyPersistentDataFile{
     pub header: Rc<RefCell<Header>>,
+    pub path: PathBuf,
     compressor: Option<IntCompressor<PartiallyPersistentDataFileWriter>>,
-    indexer: Rc<RefCell<Indexer>>,
-    path: PathBuf,
 }
 
 impl PartiallyPersistentDataFile {
-    pub fn new(version: Version, stream_id: StreamId, value_type: ValueType, indexer: Rc<RefCell<Indexer>>, path: PathBuf) -> Self {
+    pub fn new(version: Version, stream_id: StreamId, value_type: ValueType, path: PathBuf) -> Self {
         let header = Rc::new(RefCell::new(Header::new(version, stream_id, value_type)));
 
         Self {
             header: header,
             path: path,
             compressor: None,
-            indexer: indexer,
         }
     }
 
     pub fn lazy_init(mut self, ts: Timestamp, v: Value) -> Self {
         self.update_header(ts, v);
-        let writer = PartiallyPersistentDataFileWriter::new(self.indexer.clone(), self.header.clone(), &(self.path));
+        let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
         self.compressor = Option::Some(IntCompressor::new(writer, &self.header.borrow().clone()));
 
         self
@@ -577,7 +574,6 @@ impl PartiallyPersistentDataFile {
         match self.compressor {
             Some(ref mut compressor) => {
                 compressor.flush_all();
-                self.indexer.borrow_mut().insert_or_replace_file(self.header.borrow().stream_id.to_uuid(), &self.path, self.header.borrow().min_timestamp, self.header.borrow().max_timestamp);
                 Ok(())
             },
             None => Err("Compressor not initialized".to_string()),
@@ -590,16 +586,14 @@ impl PartiallyPersistentDataFile {
 }
 
 struct PartiallyPersistentDataFileWriter {
-    indexer: Rc<RefCell<Indexer>>,
     header: Rc<RefCell<Header>>,
     file: File,
     path: PathBuf,
 }
 
 impl PartiallyPersistentDataFileWriter {
-    pub fn new(indexer: Rc<RefCell<Indexer>>, header: Rc<RefCell<Header>>, path: &PathBuf) -> Self {
+    pub fn new(header: Rc<RefCell<Header>>, path: &PathBuf) -> Self {
         Self {
-            indexer: indexer,
             header: header,
             file: File::create(path).unwrap(),
             path: path.clone()
@@ -612,15 +606,7 @@ impl Write for PartiallyPersistentDataFileWriter {
         self.file.seek(io::SeekFrom::Start(0)).unwrap();
         self.header.borrow().write(self.file.by_ref()).unwrap(); 
         self.file.seek(io::SeekFrom::End(0)).unwrap();
-        let result = self.file.write(buf);
-
-        match result {
-            Ok(size) => {
-                self.indexer.borrow_mut().insert_or_replace_file(self.header.borrow().stream_id.to_uuid(), &self.path, self.header.borrow().min_timestamp, self.header.borrow().max_timestamp);
-                Ok(size)
-            }
-            Err(err) => Err(err)
-        }
+        self.file.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {

@@ -43,32 +43,32 @@ impl Writer for PersistentWriter {
             // Use the existing file if available
             file.write(ts, v).unwrap();
             if file.num_entries() >= MAX_NUM_ENTRIES {
-                // persist any un
                 file.flush().unwrap();
+                self.indexer.borrow_mut().insert_or_replace_file(stream_id, &file.path, file.header.borrow().min_timestamp, file.header.borrow().max_timestamp);
                 self.open_data_files.remove_entry(&stream_id);
             }
-
         } else {
-            // Derive the file path and create a new file if it doesn't exist
             let file_path = PersistentWriter::derive_file_path(&self.root, stream_id, ts);
         
             let new_file = PartiallyPersistentDataFile::new(
                 self.version,
                 StreamId(stream_id.as_u128()),
                 value_type,
-                self.indexer.clone(),
                 file_path.clone(),
             )
             .lazy_init(ts, v);
                 
-            // Insert the new file into open_data_files
             self.open_data_files.insert(stream_id, new_file);
+            self.indexer.borrow_mut().insert_new_file(stream_id, &file_path, ts, None);
         }
     }
 
     fn flush_all(&mut self) {
-        for (_, file) in self.open_data_files.iter_mut() {
+        for (stream_id, file) in self.open_data_files.iter_mut() {
             file.flush().unwrap();
+            // TODO: we can have files that aren't the max number of entries
+            // We need to decompress the partial file and then do some logic to complete any unfinished chunk at the end of the file
+            self.indexer.borrow_mut().insert_or_replace_file(*stream_id, &file.path, file.header.borrow().min_timestamp, file.header.borrow().max_timestamp);
         }
         self.open_data_files.clear();
     }
