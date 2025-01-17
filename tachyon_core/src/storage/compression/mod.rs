@@ -11,7 +11,7 @@ pub trait CompressionEngine<W: Write> {
     fn new(writer: W, header: &Header) -> Self
     where
         Self: Sized;
-    fn consume(&mut self, timestamp: Timestamp, value: Self::PhysicalType);
+    fn consume(&mut self, timestamp: Timestamp, value: Self::PhysicalType) -> usize;
     fn flush_all(&mut self) -> usize;
 }
 

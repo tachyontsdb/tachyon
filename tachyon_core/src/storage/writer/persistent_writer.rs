@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_single_complete_file() {
+    fn test_write_single_complete_file_persistent() {
         set_up_dirs!(dirs, "db");
         let stream_id = Uuid::new_v4();
 
@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_multiple_streams_single_complete_files() {
+    fn test_write_multiple_streams_single_complete_files_persistent() {
         set_up_dirs!(dirs, "db");
         let stream_ids = [Uuid::new_v4(), Uuid::new_v4()];
 
@@ -206,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn test_batch_write_single_batch_in_three_files() {
+    fn test_batch_write_single_batch_in_three_files_persistent() {
         let stream_id = Uuid::new_v4();
         set_up_dirs!(dirs, "db");
 

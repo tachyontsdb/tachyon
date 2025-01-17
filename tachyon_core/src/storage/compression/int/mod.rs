@@ -59,7 +59,7 @@ impl<W: Write> CompressionEngine<W> for IntCompressor<W> {
         Self::V2(v2::CompressionEngineV2::new(writer, header))
     }
 
-    fn consume(&mut self, timestamp: Timestamp, value: Self::PhysicalType) {
+    fn consume(&mut self, timestamp: Timestamp, value: Self::PhysicalType) -> usize {
         match self {
             Self::V1(engine) => engine.consume(timestamp, value),
             Self::V2(engine) => engine.consume(timestamp, value),
