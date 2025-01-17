@@ -193,8 +193,8 @@ mod tests {
         for i in 0..values.len() {
             assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
         }
-        for i in 0..values.len() {
-            assert!(files[0].timestamps[i] == timestamps[i]);
+        for (i, timestamp) in timestamps.iter().enumerate() {
+            assert!(files[0].timestamps[i] == *timestamp);
         }
     }
 
@@ -215,7 +215,7 @@ mod tests {
             let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
             writer.create_stream(stream_id);
 
-            for i in 0..batch_size as u64 {
+            for i in 0..batch_size {
                 let ts = i as Timestamp;
                 let v = (i * 1000).into();
                 writer.write(stream_id, ts, v, ValueType::UInteger64);
@@ -246,8 +246,8 @@ mod tests {
         for i in 0..values.len() {
             assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
         }
-        for i in 0..values.len() {
-            assert!(files[0].timestamps[i] == timestamps[i]);
+        for (i, timestamp) in timestamps.iter().enumerate() {
+            assert!(files[0].timestamps[i] == *timestamp);
         }
     }
 
