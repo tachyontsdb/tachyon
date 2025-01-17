@@ -29,7 +29,7 @@ trait IndexerStore {
         id: Uuid,
         file: &Path,
         start: Timestamp,
-        end: Timestamp,
+        end: Option<Timestamp>,
     ) -> Result<(), IndexerErr>;
     fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp);
 
@@ -273,7 +273,7 @@ mod sqlite {
             id: Uuid,
             file: &Path,
             start: Timestamp,
-            end: Timestamp,
+            end: Option<Timestamp>,
         ) -> Result<(), IndexerErr> {
             self.conn.execute(
                 &format!(
@@ -308,7 +308,7 @@ mod sqlite {
             end: Timestamp,
         ) -> Result<Vec<PathBuf>, IndexerErr> {
             let mut stmt = self.conn.prepare_cached(&format!(
-                "SELECT filename FROM {} WHERE id = ? AND ? <= end AND ? >= start",
+                "SELECT filename FROM {} WHERE id = ? AND (? <= end OR end IS NULL) AND ? >= start ORDER BY start ASC",
                 Self::SQLITE_ID_TO_FILENAME_TABLE
             ))?;
 
@@ -428,6 +428,10 @@ impl Indexer {
                 (id, file.to_str(), start, end),
             )
             .unwrap();
+    }
+
+    pub fn insert_new_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Option<Timestamp>) {
+        self.store.insert_new_file(id, file, start, end);
     }
 
     pub fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
