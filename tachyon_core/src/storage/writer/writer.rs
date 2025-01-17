@@ -80,6 +80,7 @@ impl Writer for InMemoryWriter {
         if file.num_entries() >= MAX_NUM_ENTRIES {
             let file_path = InMemoryWriter::derive_file_path(&self.root, stream_id, file);
             file.write(file_path.clone());
+<<<<<<< HEAD
             // TODO: remove unwrap
             self.indexer
                 .borrow_mut()
@@ -90,6 +91,14 @@ impl Writer for InMemoryWriter {
                     file.header.max_timestamp,
                 )
                 .unwrap();
+=======
+            self.indexer.borrow_mut().insert_new_file(
+                stream_id,
+                &file_path,
+                file.header.min_timestamp,
+                Some(file.header.max_timestamp),
+            );
+>>>>>>> add writer
             self.open_data_files.remove_entry(&stream_id);
         }
     }
@@ -105,6 +114,7 @@ impl Writer for InMemoryWriter {
         for (stream_id, file) in self.open_data_files.iter_mut() {
             let file_path = InMemoryWriter::derive_file_path(&self.root, *stream_id, file);
             file.write(file_path.clone());
+<<<<<<< HEAD
             // TODO: remove unwrap
             self.indexer
                 .borrow_mut()
@@ -115,6 +125,14 @@ impl Writer for InMemoryWriter {
                     file.header.max_timestamp,
                 )
                 .unwrap()
+=======
+            self.indexer.borrow_mut().insert_new_file(
+                *stream_id,
+                &file_path,
+                file.header.min_timestamp,
+                Some(file.header.max_timestamp),
+            )
+>>>>>>> add writer
         }
         self.open_data_files.clear();
     }
