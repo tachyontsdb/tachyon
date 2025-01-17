@@ -527,8 +527,8 @@ impl PartiallyPersistentDataFile {
         let header = Rc::new(RefCell::new(Header::new(version, stream_id, value_type)));
 
         Self {
-            header: header,
-            path: path,
+            header,
+            path,
             compressor: None,
         }
     }
@@ -611,9 +611,10 @@ struct PartiallyPersistentDataFileWriter {
 impl PartiallyPersistentDataFileWriter {
     pub fn new(header: Rc<RefCell<Header>>, path: &PathBuf) -> Self {
         Self {
-            header: header,
+            header,
             file: OpenOptions::new()
                 .create(true)
+                .truncate(false)
                 .write(true)
                 .open(path)
                 .unwrap(),

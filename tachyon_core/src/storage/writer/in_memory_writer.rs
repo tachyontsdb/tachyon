@@ -225,8 +225,8 @@ mod tests {
         for i in 0..values.len() {
             assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
         }
-        for i in 0..values.len() {
-            assert!(files[0].timestamps[i] == timestamps[i]);
+        for (i, timestamp) in timestamps.iter().enumerate() {
+            assert!(files[0].timestamps[i] == *timestamp);
         }
     }
 
