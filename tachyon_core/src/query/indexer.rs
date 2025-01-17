@@ -22,6 +22,7 @@ trait IndexerStore {
         start: Timestamp,
         end: Timestamp,
     ) -> Vec<PathBuf>;
+    fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Vec<PathBuf>;
 }
 
 mod sqlite {
@@ -246,7 +247,13 @@ mod sqlite {
             new_id
         }
 
-        fn insert_new_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Option<Timestamp>) {
+        fn insert_new_file(
+            &mut self,
+            id: Uuid,
+            file: &Path,
+            start: Timestamp,
+            end: Option<Timestamp>,
+        ) {
             self.conn
                 .execute(
                     &format!(
@@ -258,7 +265,13 @@ mod sqlite {
                 .unwrap();
         }
 
-        fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
+        fn insert_or_replace_file(
+            &mut self,
+            id: Uuid,
+            file: &Path,
+            start: Timestamp,
+            end: Timestamp,
+        ) {
             self.conn
                 .execute(
                     &format!(
@@ -345,6 +358,25 @@ mod sqlite {
             })
             .collect()
         }
+
+        fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Vec<PathBuf> {
+            let mut stmt = self
+                .conn
+                .prepare_cached(&format!(
+                    "SELECT filename FROM {} WHERE id = ? AND end IS NULL",
+                    Self::SQLITE_ID_TO_FILENAME_TABLE
+                ))
+                .unwrap();
+
+            let file_paths: Vec<PathBuf> = stmt
+                .query_map((stream_id,), |row| row.get::<usize, String>(0))
+                .unwrap()
+                .map(|item| item.unwrap().into())
+                .collect();
+            assert!(file_paths.len() <= 1);
+
+            file_paths
+        }
     }
 }
 
@@ -380,11 +412,23 @@ impl Indexer {
         self.store.get_value_type_for_stream_id(id)
     }
 
-    pub fn insert_new_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Option<Timestamp>) {
+    pub fn insert_new_file(
+        &mut self,
+        id: Uuid,
+        file: &Path,
+        start: Timestamp,
+        end: Option<Timestamp>,
+    ) {
         self.store.insert_new_file(id, file, start, end);
     }
 
-    pub fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
+    pub fn insert_or_replace_file(
+        &mut self,
+        id: Uuid,
+        file: &Path,
+        start: Timestamp,
+        end: Timestamp,
+    ) {
         self.store.insert_or_replace_file(id, file, start, end);
     }
 
@@ -424,6 +468,10 @@ impl Indexer {
         end: Timestamp,
     ) -> Vec<PathBuf> {
         self.store.get_files_for_stream_id(stream_id, start, end)
+    }
+
+    pub fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Vec<PathBuf> {
+        self.store.get_open_files_for_stream_id(stream_id)
     }
 }
 

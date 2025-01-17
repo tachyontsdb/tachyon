@@ -119,6 +119,10 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
         self.writer.write_all(&self.result).unwrap();
         self.result.len()
     }
+
+    fn new_from_partial(_: T, _: TimeDataFile) -> Self {
+        todo!()
+    }
 }
 
 impl<T: Write> CompressionEngineV1<T> {

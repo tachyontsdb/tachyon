@@ -4,8 +4,8 @@ use uuid::Uuid;
 
 use crate::{query::indexer::Indexer, Timestamp, Value, ValueType, Version};
 
-pub mod writer;
 pub mod persistent_writer;
+pub mod writer;
 
 pub trait Writer {
     fn new(root: impl AsRef<Path>, indexer: Rc<RefCell<Indexer>>, version: Version) -> Self

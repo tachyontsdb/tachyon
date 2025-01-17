@@ -40,7 +40,11 @@ impl InMemoryWriter {
             entries_written += file.write_batch_data_to_file_in_mem(&batch[entries_written..]);
 
             if file.num_entries() >= MAX_NUM_ENTRIES {
-                file.write(InMemoryWriter::derive_file_path(&(self.root), stream_id, file));
+                file.write(InMemoryWriter::derive_file_path(
+                    &(self.root),
+                    stream_id,
+                    file,
+                ));
                 self.open_data_files.remove_entry(&stream_id);
             }
         }

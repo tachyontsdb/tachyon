@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use crate::{storage::file::Header, Timestamp};
 
-use super::{CompressionEngine, DecompressionEngine};
+use super::{CompressionEngine, DecompressionEngine, TimeDataFile};
 
 #[deprecated]
 mod v1;
@@ -56,6 +56,10 @@ impl<W: Write> CompressionEngine<W> for IntCompressor<W> {
 
     fn new(writer: W, header: &Header) -> Self {
         Self::V2(v2::CompressionEngineV2::new(writer, header))
+    }
+
+    fn new_from_partial(writer: W, data_file: TimeDataFile) -> Self {
+        Self::V2(v2::CompressionEngineV2::new_from_partial(writer, data_file))
     }
 
     fn consume(&mut self, timestamp: Timestamp, value: Self::PhysicalType) -> usize {
