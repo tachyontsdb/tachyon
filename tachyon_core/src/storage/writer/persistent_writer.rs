@@ -1,7 +1,7 @@
+use super::super::file::PartiallyPersistentDataFile;
 use super::super::MAX_NUM_ENTRIES;
 use super::Writer;
 use crate::query::indexer::Indexer;
-use super::super::file::PartiallyPersistentDataFile;
 use crate::{StreamId, Timestamp, Value, ValueType, Version, FILE_EXTENSION};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -19,12 +19,45 @@ pub struct PersistentWriter {
 
 impl PersistentWriter {
     fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, ts: Timestamp) -> PathBuf {
-        root.as_ref().join(format!(
-            "{}/{}.{}",
-            stream_id,
-            ts,
-            FILE_EXTENSION
-        ))
+        root.as_ref()
+            .join(format!("{}/{}.{}", stream_id, ts, FILE_EXTENSION))
+    }
+
+    fn create_or_open_file(
+        &self,
+        stream_id: Uuid,
+        ts: Timestamp,
+        v: Value,
+        value_type: ValueType,
+    ) -> PartiallyPersistentDataFile {
+        let open_file = self
+            .indexer
+            .borrow()
+            .get_open_files_for_stream_id(stream_id);
+
+        if open_file.len() == 1 {
+            let file_path = &open_file[0];
+            PartiallyPersistentDataFile::new(
+                self.version,
+                StreamId(stream_id.as_u128()),
+                value_type,
+                file_path.clone(),
+            )
+            .partial_init(ts, v)
+        } else {
+            let file_path = PersistentWriter::derive_file_path(&self.root, stream_id, ts);
+            self.indexer
+                .borrow_mut()
+                .insert_new_file(stream_id, &file_path, ts, None);
+
+            PartiallyPersistentDataFile::new(
+                self.version,
+                StreamId(stream_id.as_u128()),
+                value_type,
+                file_path.clone(),
+            )
+            .lazy_init(ts, v)
+        }
     }
 }
 
@@ -44,22 +77,18 @@ impl Writer for PersistentWriter {
             file.write(ts, v).unwrap();
             if file.num_entries() >= MAX_NUM_ENTRIES {
                 file.flush().unwrap();
-                self.indexer.borrow_mut().insert_or_replace_file(stream_id, &file.path, file.header.borrow().min_timestamp, file.header.borrow().max_timestamp);
+                self.indexer.borrow_mut().insert_or_replace_file(
+                    stream_id,
+                    &file.path,
+                    file.header.borrow().min_timestamp,
+                    file.header.borrow().max_timestamp,
+                );
                 self.open_data_files.remove_entry(&stream_id);
             }
         } else {
-            let file_path = PersistentWriter::derive_file_path(&self.root, stream_id, ts);
-        
-            let new_file = PartiallyPersistentDataFile::new(
-                self.version,
-                StreamId(stream_id.as_u128()),
-                value_type,
-                file_path.clone(),
-            )
-            .lazy_init(ts, v);
-                
-            self.open_data_files.insert(stream_id, new_file);
-            self.indexer.borrow_mut().insert_new_file(stream_id, &file_path, ts, None);
+            let file: PartiallyPersistentDataFile =
+                self.create_or_open_file(stream_id, ts, v, value_type);
+            self.open_data_files.insert(stream_id, file);
         }
     }
 
@@ -68,7 +97,12 @@ impl Writer for PersistentWriter {
             file.flush().unwrap();
             // TODO: we can have files that aren't the max number of entries
             // We need to decompress the partial file and then do some logic to complete any unfinished chunk at the end of the file
-            self.indexer.borrow_mut().insert_or_replace_file(*stream_id, &file.path, file.header.borrow().min_timestamp, file.header.borrow().max_timestamp);
+            self.indexer.borrow_mut().insert_or_replace_file(
+                *stream_id,
+                &file.path,
+                file.header.borrow().min_timestamp,
+                file.header.borrow().max_timestamp,
+            );
         }
         self.open_data_files.clear();
     }
@@ -81,13 +115,12 @@ impl Writer for PersistentWriter {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
+    use super::super::super::file::TimeDataFile;
     use super::*;
     use crate::utils::test::*;
     use std::fs;
-    use super::super::super::file::TimeDataFile;
 
     // Gets all files from directory sorted from smallest to highest file name suffix
     fn get_files(dir: &Path) -> Vec<TimeDataFile> {
@@ -150,6 +183,59 @@ mod tests {
             timestamps.push(ts);
             values.push(v);
         }
+
+        let files = get_files(&dirs[0].join(stream_id.to_string()));
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].timestamps, timestamps);
+        assert_eq!(files[0].values.len(), values.len());
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..values.len() {
+            assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
+        }
+        for i in 0..values.len() {
+            assert!(files[0].timestamps[i] == timestamps[i]);
+        }
+    }
+
+    #[test]
+    fn test_write_single_complete_file_persistent_in_steps() {
+        set_up_dirs!(dirs, "db");
+        let stream_id = Uuid::new_v4();
+
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
+        indexer.borrow_mut().create_store();
+
+        let mut timestamps = Vec::<Timestamp>::new();
+        let mut values = Vec::<Value>::new();
+
+        let batch_size = 12801; // a multiple 128 + 1 to match the compression engine.
+
+        {
+            let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
+            writer.create_stream(stream_id);
+
+            for i in 0..batch_size as u64 {
+                let ts = i as Timestamp;
+                let v = (i * 1000).into();
+                writer.write(stream_id, ts, v, ValueType::UInteger64);
+                timestamps.push(ts);
+                values.push(v);
+            }
+        } // writer drops
+
+        {
+            let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
+            writer.create_stream(stream_id);
+
+            for i in batch_size..MAX_NUM_ENTRIES as u64 {
+                let ts = i as Timestamp;
+                let v = (i * 1000).into();
+                writer.write(stream_id, ts, v, ValueType::UInteger64);
+                timestamps.push(ts);
+                values.push(v);
+            }
+        } // writer drops
 
         let files = get_files(&dirs[0].join(stream_id.to_string()));
 

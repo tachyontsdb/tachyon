@@ -7,7 +7,6 @@ use crate::storage::page_cache::PageCache;
 use crate::storage::writer::Writer;
 use promql_parser::parser;
 use query::indexer::IndexerErr;
-use storage::writer::persistent_writer::PersistentWriter;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -17,7 +16,7 @@ use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use thiserror::Error;
+use storage::writer::persistent_writer::PersistentWriter;
 use uuid::Uuid;
 
 mod ffi;
@@ -369,7 +368,11 @@ impl Connection {
         Ok(Self {
             page_cache: Rc::new(RefCell::new(PageCache::new(10))),
             indexer: indexer.clone(),
-            writer: Rc::new(RefCell::new(PersistentWriter::new(db_dir, indexer, CURRENT_VERSION))),
+            writer: Rc::new(RefCell::new(PersistentWriter::new(
+                db_dir,
+                indexer,
+                CURRENT_VERSION,
+            ))),
         }
     }
 
@@ -612,9 +615,7 @@ mod tests {
         assert_eq!(count, expected_count);
     }
 
-    fn e2e_large_vector_test(
-        root_dir: PathBuf,
-    ) {
+    fn e2e_large_vector_test(root_dir: PathBuf) {
         let mut conn = Connection::new(root_dir);
 
         let mut inserter = create_stream_helper(
@@ -625,7 +626,6 @@ mod tests {
 
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
-
 
         for i in 0..100000u64 {
             timestamps.push(i);

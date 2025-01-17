@@ -5,13 +5,13 @@ use crate::{
         compression::{CompressionEngine, DecompressionEngine},
         file::Header,
         FileReaderUtils,
-        file::Header
     },
     utils::static_assert,
     Timestamp,
 };
 
 use super::IntCompressionUtils;
+use super::TimeDataFile;
 
 /*
     Compression Scheme V2:
@@ -108,9 +108,37 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
         }
     }
 
+    fn new_from_partial(writer: T, data_file: TimeDataFile) -> Self {
+        Self {
+            writer,
+            last_timestamp: *data_file.timestamps.last().unwrap(),
+            last_value: data_file.values.last().unwrap().get_uinteger64(),
+            last_deltas: if data_file.num_entries() < 2 {
+                (0, 0)
+            } else {
+                (
+                    data_file.timestamps[data_file.num_entries() - 1] as i64
+                        - data_file.timestamps[data_file.num_entries() - 2] as i64,
+                    data_file.values[data_file.num_entries() - 1].get_integer64()
+                        - data_file.values[data_file.num_entries() - 2].get_integer64(),
+                )
+            },
+            entries_written: 0,
+
+            ts_d_deltas: [0; V2_CHUNK_SIZE],
+            v_d_deltas: [0; V2_CHUNK_SIZE],
+            buffer_idx: 0,
+            chunk_idx: 0,
+            cur_length: 0,
+
+            result: Vec::new(),
+            temp_buffer: Vec::new(),
+        }
+    }
+
     fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) -> usize {
         // TODO: Check wrapping logic here
-        let mut  bytes_written = 0;
+        let mut bytes_written = 0;
         let curr_deltas = (
             (timestamp.wrapping_sub(self.last_timestamp)) as i64,
             (value.wrapping_sub(self.last_value)) as i64,
@@ -198,7 +226,6 @@ impl<T: Write> CompressionEngineV2<T> {
 
         self.buffer_idx = 0;
         bytes_written
-
     }
 
     fn flush_chunk(&mut self) -> usize {

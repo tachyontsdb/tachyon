@@ -285,6 +285,24 @@ mod sqlite {
 
             Ok(())
         }
+        
+        fn insert_or_replace_file(
+            &mut self,
+            id: Uuid,
+            file: &Path,
+            start: Timestamp,
+            end: Timestamp,
+        ) {
+            self.conn
+                .execute(
+                    &format!(
+                        "INSERT OR REPLACE INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
+                        Self::SQLITE_ID_TO_FILENAME_TABLE
+                    ),
+                    (id, file.to_str(), start, end),
+                )
+                .unwrap();
+        }
 
         fn get_stream_and_matcher_ids(
             &self,
@@ -372,6 +390,64 @@ mod sqlite {
 
             Ok(streams)
         }
+
+        fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Vec<PathBuf> {
+            let mut stmt = self
+                .conn
+                .prepare_cached(&format!(
+                    "SELECT filename FROM {} WHERE id = ? AND end IS NULL",
+                    Self::SQLITE_ID_TO_FILENAME_TABLE
+                ))
+                .unwrap();
+
+            stmt.query_map((), |row| {
+                Ok((
+                    row.get::<usize, String>(0)
+                        .expect("ID to Value Type: row not valid at idx 0."),
+                    row.get::<usize, u8>(1)
+                        .expect("ID to Value Type: row not valid at idx 1."),
+                ))
+            })?;
+
+            let mut streams = vec![];
+            for row in rows {
+                // SAFETY: this will always be Ok based on implementation of .query_map above
+                let (stream_id_str, value_type_u8) = row.unwrap();
+
+                // SAFETY: this will only fail if the Uuid in the db is malformed
+                let stream_id =
+                    serde_json::from_str(&stream_id_str).expect("ID to Value Type: ID malformed.");
+
+                let stream_summary = (
+                    stream_id,
+                    self.get_stream_and_matchers_for_stream_id(stream_id)?,
+                    value_type_u8.try_into().unwrap(),
+                );
+
+                streams.push(stream_summary);
+            }
+
+            Ok(streams)
+        }
+
+        fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Vec<PathBuf> {
+            let mut stmt = self
+                .conn
+                .prepare_cached(&format!(
+                    "SELECT filename FROM {} WHERE id = ? AND end IS NULL",
+                    Self::SQLITE_ID_TO_FILENAME_TABLE
+                ))
+                .unwrap();
+
+            let file_paths: Vec<PathBuf> = stmt
+                .query_map((stream_id,), |row| row.get::<usize, String>(0))
+                .unwrap()
+                .map(|item| item.unwrap().into())
+                .collect();
+            assert!(file_paths.len() <= 1);
+
+            file_paths
+        }
     }
 }
 
@@ -418,27 +494,13 @@ impl Indexer {
         Ok(())
     }
 
-    fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
-        self.conn
-            .execute(
-                &format!(
-                    "INSERT OR REPLACE INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
-                    Self::SQLITE_ID_TO_FILENAME_TABLE
-                ),
-                (id, file.to_str(), start, end),
-            )
-            .unwrap();
-    }
-
-    pub fn insert_new_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Option<Timestamp>) {
-        self.store.insert_new_file(id, file, start, end);
-    }
-
-    pub fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
-        self.store.insert_or_replace_file(id, file, start, end);
-    }
-
-    pub fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
+    pub fn insert_or_replace_file(
+        &mut self,
+        id: Uuid,
+        file: &Path,
+        start: Timestamp,
+        end: Timestamp,
+    ) {
         self.store.insert_or_replace_file(id, file, start, end);
     }
 
@@ -478,6 +540,10 @@ impl Indexer {
         end: Timestamp,
     ) -> Result<Vec<PathBuf>, IndexerErr> {
         self.store.get_files_for_stream_id(stream_id, start, end)
+    }
+
+    pub fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Vec<PathBuf> {
+        self.store.get_open_files_for_stream_id(stream_id)
     }
 }
 
