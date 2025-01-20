@@ -9,6 +9,7 @@ use promql_parser::parser;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
@@ -26,6 +27,10 @@ mod utils;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[repr(transparent)]
 pub struct Version(pub u16);
+
+pub fn print_err(err: &impl Error) {
+    println!("Encountered error: {}", err)
+}
 
 /// Encoded as a 128-bit UUID
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
