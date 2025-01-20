@@ -53,8 +53,6 @@ pub enum CLIErr {
     CSVError(#[from] csv::Error),
     #[error("IO Error.")]
     FileIOError(#[from] std::io::Error),
-    #[error("")]
-    InvalidFilename(),
 }
 
 #[derive(Parser)]
@@ -108,10 +106,9 @@ fn handle_parse_headers_command(paths: Vec<PathBuf>) -> Result<(), CLIErr> {
         let mut table = Table::new();
         let file_size = File::open(&path)?.metadata()?.size();
 
-        table.add_row(row![
-            "File",
-            path.to_str().ok_or_else(|| CLIErr::InvalidFilename())?
-        ]);
+        // these paths are always our .ty files; assume it can be converted to str
+        table.add_row(row!["File", path.to_str().unwrap()]);
+
         table.add_row(row!["Version", file.header.version.0]);
         table.add_row(row!["Stream ID", file.header.stream_id.0]);
 
@@ -255,7 +252,9 @@ fn handle_import_csv_command(
     fn read_from_csv(path: &PathBuf, value_type: ValueType) -> Result<Vec<Vector>, CLIErr> {
         let mut rdr = Reader::from_path(path)?;
         let mut vectors = Vec::new();
-        for (line_num, result) in rdr.records().enumerate() {
+        for (idx, result) in rdr.records().enumerate() {
+            // +2 because idx starts at 0 and the first line in the csv is a header
+            let line_num = idx + 2;
             let record = result?;
             vectors.push(Vector {
                 timestamp: record[0].parse::<u64>().map_err(|_| CLIErr::CSVType {
