@@ -2,7 +2,7 @@ use crate::{Connection, ReturnType, Timestamp, Value, ValueType, Vector};
 
 use std::collections::VecDeque;
 
-use super::{BinaryOp, BinaryOpType, ExecutorNode, TNode};
+use super::{BinaryOp, ExecutorNode, TNode};
 
 pub struct VectorToVectorNode {
     op: BinaryOp,
@@ -106,8 +106,8 @@ impl ExecutorNode for VectorToVectorNode {
     }
 
     fn next_vector(&mut self, conn: &mut Connection) -> Option<Vector> {
-        match self.op.op_type() {
-            BinaryOpType::Arithmetic => {
+        match self.op {
+            BinaryOp::Arithmetic(_) => {
                 // Initial case
                 if self.lhs_range.is_empty()
                     && self.rhs_range.is_empty()
@@ -416,7 +416,7 @@ impl ExecutorNode for VectorToVectorNode {
                     }
                 }
             }
-            BinaryOpType::Comparison => {
+            BinaryOp::Comparison(_) => {
                 panic!("Comparison operator not allowed between scalar and scalar!")
             }
         }

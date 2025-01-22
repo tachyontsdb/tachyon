@@ -1,6 +1,6 @@
 use crate::{Connection, ReturnType, Value, ValueType, Vector};
 
-use super::{BinaryOp, BinaryOpType, ExecutorNode, TNode};
+use super::{BinaryOp, ExecutorNode, TNode};
 
 pub struct VectorToScalarNode {
     op: BinaryOp,
@@ -44,8 +44,8 @@ impl ExecutorNode for VectorToScalarNode {
             }
         };
 
-        match self.op.op_type() {
-            BinaryOpType::Arithmetic => {
+        match self.op {
+            BinaryOp::Arithmetic(_) => {
                 let vector_opt = self.vector_node.next_vector(conn);
 
                 if let Some(Vector { timestamp, value }) = vector_opt {
@@ -62,7 +62,7 @@ impl ExecutorNode for VectorToScalarNode {
                     None
                 }
             }
-            BinaryOpType::Comparison => loop {
+            BinaryOp::Comparison(_) => loop {
                 let vector_opt = self.vector_node.next_vector(conn);
 
                 if let Some(Vector { timestamp, value }) = vector_opt {

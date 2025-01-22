@@ -1,6 +1,6 @@
 use crate::{Connection, ReturnType, Value, ValueType};
 
-use super::{BinaryOp, BinaryOpType, ExecutorNode, TNode};
+use super::{BinaryOp, ExecutorNode, TNode};
 
 pub struct ScalarToScalarNode {
     op: BinaryOp,
@@ -30,8 +30,8 @@ impl ExecutorNode for ScalarToScalarNode {
     }
 
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        match self.op.op_type() {
-            BinaryOpType::Arithmetic => {
+        match self.op {
+            BinaryOp::Arithmetic(_) => {
                 let lhs_opt = self.lhs.next_scalar(conn);
                 let rhs_opt = self.rhs.next_scalar(conn);
 
@@ -45,7 +45,7 @@ impl ExecutorNode for ScalarToScalarNode {
                     _ => None,
                 }
             }
-            BinaryOpType::Comparison => {
+            BinaryOp::Comparison(_) => {
                 panic!("Comparison operator not allowed between scalar and scalar!")
             }
         }
