@@ -15,15 +15,6 @@ cargo build --locked --release
 
 > Note: Generated C/C++ headers will be placed in the output (`./target/include`) directory.
 
-## Running the GUI
-
-From the `./tachyon_gui` directory:
-```
-npm run tauri dev
-```
-
-> Note: You must have all [Tauri prerequisites](https://tauri.app/start/prerequisites/) installed.
-
 ## Running Lints
 
 ### Cargo Format

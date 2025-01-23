@@ -1,0 +1,9 @@
+[package]
+name = "tachyon_web_backend"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.8.1"
+tachyon_core = { path = "../tachyon_core", features = ["tachyon_benchmarks"] }
+tokio = { version = "1.43.0", features = ["full"] }

@@ -42,7 +42,7 @@ promql-parser = "0.4.3"
 rusqlite = { version = "0.32.1", features = ["serde_json", "bundled", "uuid"] }
 rustc-hash = "2.1.0"
 serde = "1.0.217"
-serde_json = "1.0.135"
+serde_json = "1.0.137"
 thiserror = "2.0.11"
 uuid = { version = "1.11.1", features = ["v4", "fast-rng", "serde"] }
 
@@ -53,8 +53,8 @@ postgres = "0.19.9"
 pprof = { version = "0.14.0", features = ["cpp", "flamegraph", "criterion"] }
 rusqlite = { version = "0.32.1", features = ["serde_json", "bundled", "uuid"] }
 serde = "1.0.217"
-serde_json = "1.0.135"
+serde_json = "1.0.137"
 uuid = { version = "1.11.1", features = ["v4", "fast-rng", "serde"] }
 
 [build-dependencies]
-cbindgen = "0.27.0"
+cbindgen = "0.28.0"
