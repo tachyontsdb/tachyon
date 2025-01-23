@@ -35,13 +35,21 @@ impl BinaryOp {
         rhs_value_type: ValueType,
     ) -> Value {
         match self {
-            BinaryOp::Arithmetic(op) => match op {
-                ArithmeticOp::Add => lhs.add(lhs_value_type, &rhs, rhs_value_type),
-                ArithmeticOp::Subtract => lhs.sub(lhs_value_type, &rhs, rhs_value_type),
-                ArithmeticOp::Multiply => lhs.mul(lhs_value_type, &rhs, rhs_value_type),
-                ArithmeticOp::Divide => lhs.div(lhs_value_type, &rhs, rhs_value_type),
-                ArithmeticOp::Modulo => lhs.mdl(lhs_value_type, &rhs, rhs_value_type),
-            },
+            BinaryOp::Arithmetic(ArithmeticOp::Add) => {
+                lhs.add(lhs_value_type, &rhs, rhs_value_type)
+            }
+            BinaryOp::Arithmetic(ArithmeticOp::Subtract) => {
+                lhs.sub(lhs_value_type, &rhs, rhs_value_type)
+            }
+            BinaryOp::Arithmetic(ArithmeticOp::Multiply) => {
+                lhs.mul(lhs_value_type, &rhs, rhs_value_type)
+            }
+            BinaryOp::Arithmetic(ArithmeticOp::Divide) => {
+                lhs.div(lhs_value_type, &rhs, rhs_value_type)
+            }
+            BinaryOp::Arithmetic(ArithmeticOp::Modulo) => {
+                lhs.mdl(lhs_value_type, &rhs, rhs_value_type)
+            }
             _ => panic!("apply not implemented for this binary operator!"),
         }
     }
@@ -54,24 +62,26 @@ impl BinaryOp {
         rhs_value_type: ValueType,
     ) -> bool {
         match self {
-            BinaryOp::Comparison(op) => match op {
-                ComparisonOp::Equal => lhs.eq(lhs_value_type, &rhs, rhs_value_type),
-                ComparisonOp::NotEqual => !lhs.eq(lhs_value_type, &rhs, rhs_value_type),
-                ComparisonOp::Greater => {
-                    lhs.partial_cmp(lhs_value_type, &rhs, rhs_value_type) == Some(Ordering::Greater)
-                }
-                ComparisonOp::Less => {
-                    lhs.partial_cmp(lhs_value_type, &rhs, rhs_value_type) == Some(Ordering::Less)
-                }
-                ComparisonOp::GreaterEqual => {
-                    let ordering = lhs.partial_cmp(lhs_value_type, &rhs, rhs_value_type);
-                    ordering == Some(Ordering::Greater) || ordering == Some(Ordering::Equal)
-                }
-                ComparisonOp::LessEqual => {
-                    let ordering = lhs.partial_cmp(lhs_value_type, &rhs, rhs_value_type);
-                    ordering == Some(Ordering::Less) || ordering == Some(Ordering::Equal)
-                }
-            },
+            BinaryOp::Comparison(ComparisonOp::Equal) => {
+                lhs.eq(lhs_value_type, &rhs, rhs_value_type)
+            }
+            BinaryOp::Comparison(ComparisonOp::NotEqual) => {
+                !lhs.eq(lhs_value_type, &rhs, rhs_value_type)
+            }
+            BinaryOp::Comparison(ComparisonOp::Greater) => {
+                lhs.partial_cmp(lhs_value_type, &rhs, rhs_value_type) == Some(Ordering::Greater)
+            }
+            BinaryOp::Comparison(ComparisonOp::Less) => {
+                lhs.partial_cmp(lhs_value_type, &rhs, rhs_value_type) == Some(Ordering::Less)
+            }
+            BinaryOp::Comparison(ComparisonOp::GreaterEqual) => {
+                let ordering = lhs.partial_cmp(lhs_value_type, &rhs, rhs_value_type);
+                ordering == Some(Ordering::Greater) || ordering == Some(Ordering::Equal)
+            }
+            BinaryOp::Comparison(ComparisonOp::LessEqual) => {
+                let ordering = lhs.partial_cmp(lhs_value_type, &rhs, rhs_value_type);
+                ordering == Some(Ordering::Less) || ordering == Some(Ordering::Equal)
+            }
             _ => panic!("compare not implemented for this binary operator!"),
         }
     }
