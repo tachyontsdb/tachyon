@@ -10,9 +10,10 @@ use std::{
     io::Write,
 };
 use std::{os::unix::fs::MetadataExt, path::PathBuf};
-use tachyon_core::tachyon_benchmarks::TimeDataFile;
+use tachyon_core::{print_err, tachyon_benchmarks::TimeDataFile};
 use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
+use thiserror::Error;
 
 const TACHYON_CLI_HEADER: &str = r"
  ______                 __                              ____    ____      
@@ -26,6 +27,28 @@ const TACHYON_CLI_HEADER: &str = r"
                                       \/__/                               
 ";
 const PROMPT: &str = "> ";
+const REPL_EXIT_MSG: &str = "Exiting...";
+
+#[derive(Error, Debug)]
+pub enum CLIErr {
+    #[error("Input '{input}' could not be converted to stream type = {value_type}.")]
+    InputValueType {
+        input: String,
+        value_type: ValueType,
+    },
+    #[error("Line #{line_num} in CSV failed to parse {value}; expected type {value_type}")]
+    CSVType {
+        line_num: usize,
+        value: String,
+        value_type: ValueType,
+    },
+    #[error("Failed to read line.")]
+    ReadLineError(#[from] ReadlineError),
+    #[error("Unable to read from CSV.")]
+    CSVError(#[from] csv::Error),
+    #[error("IO Error.")]
+    FileIOError(#[from] std::io::Error),
+}
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -73,12 +96,14 @@ pub enum Commands {
     },
 }
 
-fn handle_parse_headers_command(paths: Vec<PathBuf>) {
-    fn output_header(path: PathBuf, file: TimeDataFile) {
+fn handle_parse_headers_command(paths: Vec<PathBuf>) -> Result<(), CLIErr> {
+    fn output_header(path: PathBuf, file: TimeDataFile) -> Result<(), CLIErr> {
         let mut table = Table::new();
-        let file_size = File::open(&path).unwrap().metadata().unwrap().size();
+        let file_size = File::open(&path)?.metadata()?.size();
 
+        // SAFETY: these paths are always our .ty files; assume it can be converted to str
         table.add_row(row!["File", path.to_str().unwrap()]);
+
         table.add_row(row!["Version", file.header.version.0]);
         table.add_row(row!["Stream ID", file.header.stream_id.0]);
 
@@ -115,38 +140,44 @@ fn handle_parse_headers_command(paths: Vec<PathBuf>) {
         ]);
 
         table.printstd();
+
+        Ok(())
     }
 
-    fn recurse_subdirs_and_output_headers(path: PathBuf) {
+    fn recurse_subdirs_and_output_headers(path: PathBuf) -> Result<(), CLIErr> {
         if path.is_dir() {
-            let files = fs::read_dir(path).unwrap();
+            let files = fs::read_dir(path)?;
             for file in files {
-                recurse_subdirs_and_output_headers(file.unwrap().path());
+                recurse_subdirs_and_output_headers(file?.path())?;
             }
         } else if path
             .extension()
             .is_some_and(|extension| extension == FILE_EXTENSION)
         {
             let file = TimeDataFile::read_data_file(path.clone());
-            output_header(path, file);
+            output_header(path, file)?;
             println!();
         }
+
+        Ok(())
     }
 
     for path in paths {
-        recurse_subdirs_and_output_headers(path);
+        recurse_subdirs_and_output_headers(path)?;
     }
+
+    Ok(())
 }
 
-fn export_as_csv(path: PathBuf, timeseries: &[(u64, f64)]) {
-    let mut file = File::create(path).unwrap();
-
-    file.write_all(b"Timestamp,Value\n").unwrap();
+fn export_as_csv(path: PathBuf, timeseries: &[(u64, f64)]) -> Result<(), CLIErr> {
+    let mut file = File::create(path)?;
+    file.write_all(b"Timestamp,Value\n")?;
 
     for (timestamp, value) in timeseries {
-        file.write_all(format!("{},{}\n", timestamp, value).as_bytes())
-            .unwrap();
+        file.write_all(format!("{},{}\n", timestamp, value).as_bytes())?;
     }
+
+    Ok(())
 }
 
 fn handle_query_command(
@@ -155,7 +186,7 @@ fn handle_query_command(
     start: Option<Timestamp>,
     end: Option<Timestamp>,
     export_csv_path: Option<PathBuf>,
-) {
+) -> Result<(), CLIErr> {
     // TODO: Fix temporary start and end hack
     const HACK_TIME_START: u64 = 0;
     const HACK_TIME_END: u64 = 1719776339748;
@@ -189,7 +220,7 @@ fn handle_query_command(
             }
 
             if let Some(path) = export_csv_path {
-                export_as_csv(path, &timeseries);
+                export_as_csv(path, &timeseries)?;
             }
 
             let f32_timeseries: Vec<(f32, f32)> = timeseries
@@ -197,39 +228,56 @@ fn handle_query_command(
                 .map(|(timestamp, value)| (*timestamp as f32, *value as f32))
                 .collect();
 
-            Chart::new(
-                180,
-                60,
-                f32_timeseries[0].0,
-                f32_timeseries.last().unwrap().0,
-            )
-            .lineplot(&Shape::Lines(&f32_timeseries))
-            .display();
+            if let Some((last_timestamp, _)) = f32_timeseries.last() {
+                Chart::new(180, 60, f32_timeseries[0].0, *last_timestamp)
+                    .lineplot(&Shape::Lines(&f32_timeseries))
+                    .display();
+            }
         }
     }
+
+    Ok(())
 }
 
-fn handle_import_csv_command(mut connection: Connection, stream: String, csv_file: PathBuf) {
-    fn read_from_csv(path: &PathBuf, value_type: ValueType) -> Vec<Vector> {
-        let mut rdr = Reader::from_path(path).unwrap();
+fn handle_import_csv_command(
+    mut connection: Connection,
+    stream: String,
+    csv_file: PathBuf,
+) -> Result<(), CLIErr> {
+    fn read_from_csv(path: &PathBuf, value_type: ValueType) -> Result<Vec<Vector>, CLIErr> {
+        let mut rdr = Reader::from_path(path)?;
         let mut vectors = Vec::new();
-        for result in rdr.records() {
-            let record = result.unwrap();
+        for (idx, result) in rdr.records().enumerate() {
+            // +2 because idx starts at 0 and the first line in the csv is a header
+            let line_num = idx + 2;
+            let record = result?;
+
+            let csv_err = CLIErr::CSVType {
+                line_num,
+                value: record[1].to_string(),
+                value_type,
+            };
+
             vectors.push(Vector {
-                timestamp: record[0].parse::<u64>().unwrap(),
+                timestamp: record[0].parse::<u64>().map_err(|_| CLIErr::CSVType {
+                    line_num,
+                    value: record[0].to_string(),
+                    value_type: ValueType::UInteger64,
+                })?,
                 value: match value_type {
-                    ValueType::Integer64 => record[1].parse::<i64>().unwrap().into(),
-                    ValueType::UInteger64 => record[1].parse::<u64>().unwrap().into(),
-                    ValueType::Float64 => record[1].parse::<f64>().unwrap().into(),
+                    ValueType::Integer64 => record[1].parse::<i64>().map_err(|_| csv_err)?.into(),
+                    ValueType::UInteger64 => record[1].parse::<u64>().map_err(|_| csv_err)?.into(),
+                    ValueType::Float64 => record[1].parse::<f64>().map_err(|_| csv_err)?.into(),
                 },
             });
         }
-        vectors
+        Ok(vectors)
     }
 
     let mut inserter = connection.prepare_insert(stream);
     println!("Reading from: {:?}", &csv_file);
-    let vectors = read_from_csv(&csv_file, inserter.value_type());
+
+    let vectors = read_from_csv(&csv_file, inserter.value_type())?;
     println!("Done reading from: {:?}", &csv_file);
     for Vector { timestamp, value } in vectors {
         match inserter.value_type() {
@@ -239,25 +287,30 @@ fn handle_import_csv_command(mut connection: Connection, stream: String, csv_fil
         }
     }
     inserter.flush();
+    Ok(())
 }
 
-pub fn repl(mut connection: Connection) {
+pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
     println!("{}", TACHYON_CLI_HEADER);
 
-    let mut rl = DefaultEditor::new().unwrap();
+    let mut rl = DefaultEditor::new()?;
     loop {
         let input = rl.readline(PROMPT);
-        match &input {
+        match input {
             Ok(line) => {
-                rl.add_history_entry(line).unwrap();
-                handle_query_command(&mut connection, line, None, None, None);
+                let add_history_res = rl.add_history_entry(&line);
+                if add_history_res.is_err() {
+                    println!("Warning: Failed to add line to history.");
+                }
+
+                handle_query_command(&mut connection, &line, None, None, None)?;
             }
             Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
-                println!("EXITING");
-                break;
+                println!("{}", REPL_EXIT_MSG);
+                return Ok(());
             }
             Err(e) => {
-                panic!("{:?}", e);
+                return Err(CLIErr::ReadLineError(e));
             }
         }
     }
@@ -285,7 +338,9 @@ pub fn main() {
             table.printstd();
         }
         Some(Commands::ParseHeaders { paths }) => {
-            handle_parse_headers_command(paths);
+            if let Err(e) = handle_parse_headers_command(paths) {
+                print_err(&e);
+            }
         }
         Some(Commands::Query {
             query,
@@ -293,7 +348,11 @@ pub fn main() {
             end,
             export_csv_path,
         }) => {
-            handle_query_command(&mut connection, query, start, end, export_csv_path);
+            if let Err(e) =
+                handle_query_command(&mut connection, query, start, end, export_csv_path)
+            {
+                print_err(&e);
+            }
         }
         Some(Commands::CreateStream { stream, value_type }) => {
             connection.create_stream(stream, value_type);
@@ -304,22 +363,49 @@ pub fn main() {
             value,
         }) => {
             let mut inserter = connection.prepare_insert(stream);
+            let input_vt_err = CLIErr::InputValueType {
+                input: value.clone(),
+                value_type: inserter.value_type(),
+            };
 
             match inserter.value_type() {
                 ValueType::Integer64 => {
-                    inserter.insert_integer64(timestamp, value.parse().unwrap())
+                    let value_res = value.parse();
+                    if let Ok(value_i64) = value_res {
+                        inserter.insert_integer64(timestamp, value_i64)
+                    } else {
+                        print_err(&input_vt_err);
+                    }
                 }
                 ValueType::UInteger64 => {
-                    inserter.insert_uinteger64(timestamp, value.parse().unwrap())
+                    let value_res = value.parse();
+                    if let Ok(value_u64) = value_res {
+                        inserter.insert_uinteger64(timestamp, value_u64);
+                    } else {
+                        print_err(&input_vt_err);
+                    }
                 }
-                ValueType::Float64 => inserter.insert_float64(timestamp, value.parse().unwrap()),
+                ValueType::Float64 => {
+                    let value_res = value.parse();
+                    if let Ok(value_f) = value_res {
+                        inserter.insert_float64(timestamp, value_f)
+                    } else {
+                        print_err(&input_vt_err);
+                    }
+                }
             }
 
             inserter.flush();
         }
         Some(Commands::ImportCSV { stream, csv_file }) => {
-            handle_import_csv_command(connection, stream, csv_file);
+            if let Err(e) = handle_import_csv_command(connection, stream, csv_file) {
+                print_err(&e);
+            }
         }
-        None => repl(connection),
+        None => {
+            if let Err(e) = repl(connection) {
+                print_err(&e);
+            }
+        }
     }
 }

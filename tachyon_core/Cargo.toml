@@ -43,6 +43,7 @@ rusqlite = { version = "0.32.1", features = ["serde_json", "bundled", "uuid"] }
 rustc-hash = "2.1.0"
 serde = "1.0.216"
 serde_json = "1.0.134"
+thiserror = "2.0.11"
 uuid = { version = "1.11.0", features = ["v4", "fast-rng", "serde"] }
 
 [dev-dependencies]

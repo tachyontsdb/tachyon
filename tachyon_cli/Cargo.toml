@@ -10,3 +10,4 @@ prettytable-rs = "0.10.0"
 rustyline = "15.0.0"
 tachyon_core = { path = "../tachyon_core", features = ["tachyon_benchmarks"] }
 textplots = "0.8.6"
+thiserror = "2.0.11"
