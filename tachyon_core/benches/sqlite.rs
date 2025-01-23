@@ -62,7 +62,7 @@ fn voltage_benchmark(c: &mut Criterion) {
         r#"select avg(value) from item;"#,
     ];
 
-    let mut conn = Connection::open("./tmp/bench_voltage.sqlite").unwrap();
+    let mut conn = Connection::open("../tmp/bench_voltage.sqlite").unwrap();
 
     conn.execute(
         "
@@ -94,7 +94,7 @@ fn voltage_benchmark(c: &mut Criterion) {
         });
     }
 
-    std::fs::remove_file("./tmp/bench_voltage.sqlite").unwrap();
+    std::fs::remove_file("../tmp/bench_voltage.sqlite").unwrap();
 }
 
 fn bench_read_sqlite(stmt: &mut Statement) -> u64 {
