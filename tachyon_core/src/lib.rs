@@ -498,7 +498,7 @@ mod tests {
         conn.prepare_insert(stream.as_ref())
     }
 
-    fn e2e_vector_test(
+    fn vector_test_helper(
         root_dir: PathBuf,
         start: u64,
         end: u64,
@@ -551,14 +551,14 @@ mod tests {
     fn test_e2e_vector_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_vector_test(root_dir, 23, 51, 0, 4);
+        vector_test_helper(root_dir, 23, 51, 0, 4);
     }
 
     #[test]
     fn test_e2e_vector_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_vector_test(root_dir, 29, 40, 1, 2);
+        vector_test_helper(root_dir, 29, 40, 1, 2);
     }
 
     #[test]
@@ -640,12 +640,298 @@ mod tests {
         assert_eq!(i, 4);
     }
 
-    fn e2e_scalar_aggregate_test(
+    fn binary_op_vector_to_vector_test_helper(
+        root_dir: PathBuf,
+        operation: &str,
+        values_a: &[i64],
+        values_b: &[i64],
+        expected: &[i64],
+    ) {
+        let mut conn = Connection::new(root_dir);
+
+        // Insert dummy values
+        let mut t: Timestamp = 0;
+        let mut inserter_a = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::Integer64,
+        );
+        let mut inserter_b = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "mobile"}"#,
+            ValueType::Integer64,
+        );
+        for (v_a, v_b) in zip(values_a, values_b) {
+            inserter_a.insert(t, (*v_a).into());
+            inserter_b.insert(t, (*v_b).into());
+            t += 1;
+        }
+        inserter_a.flush();
+        inserter_b.flush();
+
+        // Prepare test query
+        let query = format!(
+            r#"http_requests_total{{service = "web"}} {} http_requests_total{{service = "mobile"}}"#,
+            operation
+        );
+        let mut stmt = conn.prepare_query(query, Some(0), Some(t));
+
+        // Process results
+        let mut i: usize = 0;
+        loop {
+            let res = stmt.next_vector();
+            if res.is_none() {
+                break;
+            }
+            let res = res.unwrap();
+            assert_eq!(expected[i], res.value.get_integer64());
+            i += 1;
+        }
+    }
+
+    #[test]
+    fn test_e2e_add_vector_to_vector() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_vector_test_helper(root_dir, "+", &[3, 1, -2], &[4, -6, 5], &[7, -5, 3])
+    }
+
+    #[test]
+    fn test_e2e_subtract_vector_to_vector() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_vector_test_helper(
+            root_dir,
+            "-",
+            &[3, 1, -2],
+            &[4, -6, 5],
+            &[-1, 7, -7],
+        )
+    }
+
+    #[test]
+    fn test_e2e_multiply_vector_to_vector() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_vector_test_helper(
+            root_dir,
+            "*",
+            &[3, 1, -2],
+            &[4, -6, 5],
+            &[12, -6, -10],
+        )
+    }
+
+    fn binary_op_vector_to_scalar_test_helper(
+        root_dir: PathBuf,
+        operation: &str,
+        values_a: &[f64],
+        value_b: f64,
+        expected: &[f64],
+    ) {
+        let mut conn = Connection::new(root_dir);
+
+        // Insert dummy values
+        let mut t: Timestamp = 0;
+        let mut inserter_a = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::Float64,
+        );
+        for v_a in values_a {
+            inserter_a.insert(t, (*v_a).into());
+            t += 1;
+        }
+        inserter_a.flush();
+
+        // Prepare test query
+        let query = format!(
+            r#"http_requests_total{{service = "web"}} {} {}"#,
+            operation, value_b
+        );
+        let mut stmt = conn.prepare_query(query, Some(0), Some(t));
+
+        // Process results
+        let mut i: usize = 0;
+        loop {
+            let res = stmt.next_vector();
+            if res.is_none() {
+                break;
+            }
+            let res = res.unwrap();
+            assert_eq!(expected[i], res.value.get_float64());
+            i += 1;
+        }
+    }
+
+    #[test]
+    fn test_e2e_add_vector_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_scalar_test_helper(
+            root_dir,
+            "+",
+            &[6.0, 2.0, -4.0],
+            -3.0,
+            &[3.0, -1.0, -7.0],
+        )
+    }
+
+    #[test]
+    fn test_e2e_subtract_vector_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_scalar_test_helper(
+            root_dir,
+            "-",
+            &[6.0, 2.0, -4.0],
+            -3.0,
+            &[9.0, 5.0, -1.0],
+        )
+    }
+
+    #[test]
+    fn test_e2e_multiply_vector_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_scalar_test_helper(
+            root_dir,
+            "*",
+            &[6.0, 2.0, -4.0],
+            -3.0,
+            &[-18.0, -6.0, 12.0],
+        )
+    }
+
+    #[test]
+    fn test_e2e_equal_vector_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_scalar_test_helper(
+            root_dir,
+            "==",
+            &[1.0, 2.0, 1.0, 3.0, 1.0],
+            1.0,
+            &[1.0, 1.0, 1.0],
+        )
+    }
+
+    #[test]
+    fn test_e2e_notequal_vector_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_scalar_test_helper(
+            root_dir,
+            "!=",
+            &[1.0, 2.0, 1.0, 3.0, 1.0],
+            1.0,
+            &[2.0, 3.0],
+        )
+    }
+
+    #[test]
+    fn test_e2e_greater_vector_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_scalar_test_helper(
+            root_dir,
+            ">",
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            3.0,
+            &[4.0, 5.0],
+        )
+    }
+
+    #[test]
+    fn test_e2e_less_vector_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_scalar_test_helper(
+            root_dir,
+            "<",
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            3.0,
+            &[1.0, 2.0],
+        )
+    }
+
+    #[test]
+    fn test_e2e_greaterequal_vector_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_scalar_test_helper(
+            root_dir,
+            ">=",
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            3.0,
+            &[3.0, 4.0, 5.0],
+        )
+    }
+
+    #[test]
+    fn test_e2e_lessequal_vector_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_vector_to_scalar_test_helper(
+            root_dir,
+            "<=",
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            3.0,
+            &[1.0, 2.0, 3.0],
+        )
+    }
+
+    fn binary_op_scalar_to_scalar_test_helper(
+        root_dir: PathBuf,
+        operation: &str,
+        value_a: i64,
+        value_b: i64,
+        expected: f64,
+    ) {
+        let mut conn = Connection::new(root_dir);
+
+        // Prepare test query
+        let query = format!(r#"{} {} {}"#, value_a, operation, value_b);
+        let mut stmt = conn.prepare_query(query, Some(0), Some(100));
+
+        // Process results
+        loop {
+            let res = stmt.next_scalar();
+            if res.is_none() {
+                break;
+            }
+            let res = res.unwrap();
+            assert_eq!(expected, res.get_float64());
+        }
+    }
+
+    #[test]
+    fn test_e2e_add_scalar_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_scalar_to_scalar_test_helper(root_dir, "+", 6, -3, 3.0);
+    }
+
+    #[test]
+    fn test_e2e_subtract_scalar_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_scalar_to_scalar_test_helper(root_dir, "-", 6, -3, 9.0);
+    }
+
+    #[test]
+    fn test_e2e_multiply_scalar_to_scalar() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        binary_op_scalar_to_scalar_test_helper(root_dir, "*", 6, -3, -18.0);
+    }
+
+    fn aggregate_test_helper(
         root_dir: PathBuf,
         operation: &str,
         start: u64,
         end: u64,
-        expected_val: Value,
+        expected: Value,
     ) {
         let mut conn = Connection::new(root_dir);
 
@@ -672,7 +958,7 @@ mod tests {
         // Process results
         let actual_val = stmt.next_scalar().unwrap();
 
-        assert!(actual_val.eq_same(stmt.value_type(), &expected_val));
+        assert!(actual_val.eq_same(stmt.value_type(), &expected));
         assert!(stmt.next_scalar().is_none());
     }
 
@@ -680,73 +966,73 @@ mod tests {
     fn test_e2e_sum_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "sum", 23, 51, 163u64.into())
+        aggregate_test_helper(root_dir, "sum", 23, 51, 163u64.into())
     }
 
     #[test]
     fn test_e2e_sum_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "sum", 29, 40, 70u64.into())
+        aggregate_test_helper(root_dir, "sum", 29, 40, 70u64.into())
     }
 
     #[test]
     fn test_e2e_count_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "count", 23, 51, 4u64.into())
+        aggregate_test_helper(root_dir, "count", 23, 51, 4u64.into())
     }
 
     #[test]
     fn test_e2e_count_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "count", 29, 40, 2u64.into())
+        aggregate_test_helper(root_dir, "count", 29, 40, 2u64.into())
     }
 
     #[test]
     fn test_e2e_avg_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "avg", 23, 51, 40.75f64.into())
+        aggregate_test_helper(root_dir, "avg", 23, 51, 40.75f64.into())
     }
 
     #[test]
     fn test_e2e_avg_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "avg", 29, 40, 35.0f64.into())
+        aggregate_test_helper(root_dir, "avg", 29, 40, 35.0f64.into())
     }
 
     #[test]
     fn test_e2e_min_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "min", 23, 51, 23u64.into())
+        aggregate_test_helper(root_dir, "min", 23, 51, 23u64.into())
     }
 
     #[test]
     fn test_e2e_min_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "min", 29, 40, 23u64.into())
+        aggregate_test_helper(root_dir, "min", 29, 40, 23u64.into())
     }
 
     #[test]
     fn test_e2e_max_full_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "max", 23, 51, 48u64.into())
+        aggregate_test_helper(root_dir, "max", 23, 51, 48u64.into())
     }
 
     #[test]
     fn test_e2e_max_partial_file() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalar_aggregate_test(root_dir, "max", 29, 40, 47u64.into())
+        aggregate_test_helper(root_dir, "max", 29, 40, 47u64.into())
     }
 
-    fn e2e_scalars_aggregate_test(
+    fn aggregatek_test_helper(
         root_dir: PathBuf,
         operation: &str,
         param: u64,
@@ -800,7 +1086,7 @@ mod tests {
     fn test_e2e_bottomk() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalars_aggregate_test(
+        aggregatek_test_helper(
             root_dir,
             "bottomk",
             2,
@@ -814,14 +1100,14 @@ mod tests {
     fn test_e2e_bottomk_zero_k() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalars_aggregate_test(root_dir, "bottomk", 0, 23, 51, [].to_vec())
+        aggregatek_test_helper(root_dir, "bottomk", 0, 23, 51, [].to_vec())
     }
 
     #[test]
     fn test_e2e_bottomk_large_k() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalars_aggregate_test(
+        aggregatek_test_helper(
             root_dir,
             "bottomk",
             10000,
@@ -843,7 +1129,7 @@ mod tests {
     fn test_e2e_topk() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalars_aggregate_test(
+        aggregatek_test_helper(
             root_dir,
             "topk",
             2,
@@ -857,14 +1143,14 @@ mod tests {
     fn test_e2e_topk_zero_k() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalars_aggregate_test(root_dir, "topk", 0, 23, 51, [].to_vec())
+        aggregatek_test_helper(root_dir, "topk", 0, 23, 51, [].to_vec())
     }
 
     #[test]
     fn test_e2e_topk_large_k() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        e2e_scalars_aggregate_test(
+        aggregatek_test_helper(
             root_dir,
             "topk",
             10000,
@@ -883,7 +1169,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vector_to_vector_no_interpolation() {
+    fn test_e2e_vector_to_vector_no_interpolation() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
 
@@ -956,7 +1242,7 @@ mod tests {
         vec
     }
 
-    fn e2e_vector_to_vector_test(
+    fn vector_to_vector_interpolation_test_helper(
         root_dir: PathBuf,
         timestamps_a: Vec<Timestamp>,
         values_a: Vec<u64>,
@@ -1020,7 +1306,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vector_to_vector_basic_interpolation_1() {
+    fn test_e2e_vector_to_vector_basic_interpolation_1() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
 
@@ -1033,7 +1319,7 @@ mod tests {
         let expected_values = vec![10, 10, 20, 30, 20, 10, 20, 30, 30];
         let expected_timestamps = vec_union(timestamps_a.borrow(), timestamps_b.borrow());
 
-        e2e_vector_to_vector_test(
+        vector_to_vector_interpolation_test_helper(
             root_dir,
             timestamps_a,
             values_a,
@@ -1045,7 +1331,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vector_to_vector_basic_interpolation_2() {
+    fn test_e2e_vector_to_vector_basic_interpolation_2() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
 
@@ -1058,7 +1344,7 @@ mod tests {
         let expected_values = vec![10, 10, 20, 30, 20, 10, 20, 30, 30];
         let expected_timestamps = vec_union(timestamps_a.borrow(), timestamps_b.borrow());
 
-        e2e_vector_to_vector_test(
+        vector_to_vector_interpolation_test_helper(
             root_dir,
             timestamps_a,
             values_a,
@@ -1070,7 +1356,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vector_to_vector_complex_interpolation() {
+    fn test_e2e_vector_to_vector_complex_interpolation() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
 
@@ -1085,7 +1371,7 @@ mod tests {
         ];
         let expected_timestamps = vec_union(timestamps_a.borrow(), timestamps_b.borrow());
 
-        e2e_vector_to_vector_test(
+        vector_to_vector_interpolation_test_helper(
             root_dir,
             timestamps_a,
             values_a,
@@ -1097,7 +1383,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vector_to_scalar() {
+    fn test_e2e_vector_to_scalar() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
 
@@ -1154,7 +1440,7 @@ mod tests {
     }
 
     #[test]
-    fn test_scalar_to_scalar() {
+    fn test_e2e_scalar_to_scalar() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
 
@@ -1326,7 +1612,7 @@ mod tests {
     }
 
     #[test]
-    fn test_i64_negative_values_misc_tests() {
+    fn test_e2e_i64_negative_values_misc_tests() {
         set_up_dirs!(db_dirs, "db");
         let db_dir = db_dirs[0].clone();
 
@@ -1377,7 +1663,7 @@ mod tests {
     }
 
     #[test]
-    fn test_f64_values_misc_tests() {
+    fn test_e2e_f64_values_misc_tests() {
         set_up_dirs!(db_dirs, "db");
         let db_dir = db_dirs[0].clone();
 
