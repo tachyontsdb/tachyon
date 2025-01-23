@@ -29,7 +29,7 @@ mod utils;
 pub struct Version(pub u16);
 
 pub fn print_err(err: &impl Error) {
-    println!("Encountered error: {}", err)
+    eprintln!("Encountered error: {}", err)
 }
 
 /// Encoded as a 128-bit UUID

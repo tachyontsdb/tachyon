@@ -36,12 +36,7 @@ pub enum CLIErr {
         input: String,
         value_type: ValueType,
     },
-    #[error(
-        "Line #{} in CSV failed to parse {}; expected type {}",
-        line_num,
-        value,
-        value_type
-    )]
+    #[error("Line #{line_num} in CSV failed to parse {value}; expected type {value_type}")]
     CSVType {
         line_num: usize,
         value: String,
@@ -106,7 +101,7 @@ fn handle_parse_headers_command(paths: Vec<PathBuf>) -> Result<(), CLIErr> {
         let mut table = Table::new();
         let file_size = File::open(&path)?.metadata()?.size();
 
-        // these paths are always our .ty files; assume it can be converted to str
+        // SAFETY: these paths are always our .ty files; assume it can be converted to str
         table.add_row(row!["File", path.to_str().unwrap()]);
 
         table.add_row(row!["Version", file.header.version.0]);
@@ -256,6 +251,13 @@ fn handle_import_csv_command(
             // +2 because idx starts at 0 and the first line in the csv is a header
             let line_num = idx + 2;
             let record = result?;
+
+            let csv_err = CLIErr::CSVType {
+                line_num,
+                value: record[1].to_string(),
+                value_type,
+            };
+
             vectors.push(Vector {
                 timestamp: record[0].parse::<u64>().map_err(|_| CLIErr::CSVType {
                     line_num,
@@ -265,27 +267,15 @@ fn handle_import_csv_command(
                 value: match value_type {
                     ValueType::Integer64 => record[1]
                         .parse::<i64>()
-                        .map_err(|_| CLIErr::CSVType {
-                            line_num,
-                            value: record[1].to_string(),
-                            value_type: ValueType::Integer64,
-                        })?
+                        .map_err(|_| csv_err)?
                         .into(),
                     ValueType::UInteger64 => record[1]
                         .parse::<u64>()
-                        .map_err(|_| CLIErr::CSVType {
-                            line_num,
-                            value: record[1].to_string(),
-                            value_type: ValueType::UInteger64,
-                        })?
+                        .map_err(|_| csv_err)?
                         .into(),
                     ValueType::Float64 => record[1]
                         .parse::<f64>()
-                        .map_err(|_| CLIErr::CSVType {
-                            line_num,
-                            value: record[1].to_string(),
-                            value_type: ValueType::Float64,
-                        })?
+                        .map_err(|_| csv_err)?
                         .into(),
                 },
             });
@@ -382,6 +372,10 @@ pub fn main() {
             value,
         }) => {
             let mut inserter = connection.prepare_insert(stream);
+            let input_vt_err = CLIErr::InputValueType {
+                input: value.clone(),
+                value_type: inserter.value_type(),
+            };
 
             match inserter.value_type() {
                 ValueType::Integer64 => {
@@ -389,10 +383,7 @@ pub fn main() {
                     if let Ok(value_i64) = value_res {
                         inserter.insert_integer64(timestamp, value_i64)
                     } else {
-                        print_err(&CLIErr::InputValueType {
-                            input: value,
-                            value_type: inserter.value_type(),
-                        });
+                        print_err(&input_vt_err);
                     }
                 }
                 ValueType::UInteger64 => {
@@ -400,10 +391,7 @@ pub fn main() {
                     if let Ok(value_u64) = value_res {
                         inserter.insert_uinteger64(timestamp, value_u64);
                     } else {
-                        print_err(&CLIErr::InputValueType {
-                            input: value,
-                            value_type: inserter.value_type(),
-                        });
+                        print_err(&input_vt_err);
                     }
                 }
                 ValueType::Float64 => {
@@ -411,10 +399,7 @@ pub fn main() {
                     if let Ok(value_f) = value_res {
                         inserter.insert_float64(timestamp, value_f)
                     } else {
-                        print_err(&CLIErr::InputValueType {
-                            input: value,
-                            value_type: inserter.value_type(),
-                        });
+                        print_err(&input_vt_err);
                     }
                 }
             }
