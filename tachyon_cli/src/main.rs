@@ -265,18 +265,9 @@ fn handle_import_csv_command(
                     value_type: ValueType::UInteger64,
                 })?,
                 value: match value_type {
-                    ValueType::Integer64 => record[1]
-                        .parse::<i64>()
-                        .map_err(|_| csv_err)?
-                        .into(),
-                    ValueType::UInteger64 => record[1]
-                        .parse::<u64>()
-                        .map_err(|_| csv_err)?
-                        .into(),
-                    ValueType::Float64 => record[1]
-                        .parse::<f64>()
-                        .map_err(|_| csv_err)?
-                        .into(),
+                    ValueType::Integer64 => record[1].parse::<i64>().map_err(|_| csv_err)?.into(),
+                    ValueType::UInteger64 => record[1].parse::<u64>().map_err(|_| csv_err)?.into(),
+                    ValueType::Float64 => record[1].parse::<f64>().map_err(|_| csv_err)?.into(),
                 },
             });
         }
