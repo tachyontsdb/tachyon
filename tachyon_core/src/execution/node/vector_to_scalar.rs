@@ -36,8 +36,6 @@ impl ExecutorNode for VectorToScalarNode {
     }
 
     fn next_vector(&mut self, conn: &mut Connection) -> Option<Vector> {
-        let vector_opt = self.vector_node.next_vector(conn);
-
         let scalar = match self.scalar {
             Some(s) => s,
             None => {
@@ -46,18 +44,40 @@ impl ExecutorNode for VectorToScalarNode {
             }
         };
 
-        if let Some(Vector { timestamp, value }) = vector_opt {
-            Some(Vector {
-                timestamp,
-                value: self.op.apply(
-                    value,
-                    self.vector_node.value_type(),
-                    scalar,
-                    self.scalar_node.value_type(),
-                ),
-            })
-        } else {
-            None
+        match self.op {
+            BinaryOp::Arithmetic(_) => {
+                let vector_opt = self.vector_node.next_vector(conn);
+
+                if let Some(Vector { timestamp, value }) = vector_opt {
+                    Some(Vector {
+                        timestamp,
+                        value: self.op.apply(
+                            value,
+                            self.vector_node.value_type(),
+                            scalar,
+                            self.scalar_node.value_type(),
+                        ),
+                    })
+                } else {
+                    None
+                }
+            }
+            BinaryOp::Comparison(_) => loop {
+                let vector_opt = self.vector_node.next_vector(conn);
+
+                if let Some(Vector { timestamp, value }) = vector_opt {
+                    if self.op.compare(
+                        value,
+                        self.vector_node.value_type(),
+                        scalar,
+                        self.scalar_node.value_type(),
+                    ) {
+                        break Some(Vector { timestamp, value });
+                    }
+                } else {
+                    break None;
+                }
+            },
         }
     }
 }

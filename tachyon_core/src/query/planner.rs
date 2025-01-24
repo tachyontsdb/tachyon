@@ -1,6 +1,6 @@
 use crate::execution::node::{
-    AggregateNode, AggregateType, AverageNode, BinaryOp, BinaryOpNode, GetKNode, GetKType,
-    NumberLiteralNode, TNode, VectorSelectNode,
+    AggregateNode, AggregateType, ArithmeticOp, AverageNode, BinaryOp, BinaryOpNode, ComparisonOp,
+    GetKNode, GetKType, NumberLiteralNode, TNode, VectorSelectNode,
 };
 use crate::storage::file::ScanHint;
 use crate::{Connection, Timestamp, ValueType};
@@ -96,12 +96,18 @@ impl<'a> QueryPlanner<'a> {
     ) -> Result<TNode, &'static str> {
         Ok(TNode::BinaryOp(BinaryOpNode::new(
             match expr.op.id() {
-                parser::token::T_ADD => BinaryOp::Add,
-                parser::token::T_SUB => BinaryOp::Subtract,
-                parser::token::T_MUL => BinaryOp::Multiply,
-                parser::token::T_DIV => BinaryOp::Divide,
-                parser::token::T_MOD => BinaryOp::Modulo,
-                _ => panic!("Unknown aggregation token!"),
+                parser::token::T_ADD => BinaryOp::Arithmetic(ArithmeticOp::Add),
+                parser::token::T_SUB => BinaryOp::Arithmetic(ArithmeticOp::Subtract),
+                parser::token::T_MUL => BinaryOp::Arithmetic(ArithmeticOp::Multiply),
+                parser::token::T_DIV => BinaryOp::Arithmetic(ArithmeticOp::Divide),
+                parser::token::T_MOD => BinaryOp::Arithmetic(ArithmeticOp::Modulo),
+                parser::token::T_EQLC => BinaryOp::Comparison(ComparisonOp::Equal),
+                parser::token::T_NEQ => BinaryOp::Comparison(ComparisonOp::NotEqual),
+                parser::token::T_GTR => BinaryOp::Comparison(ComparisonOp::Greater),
+                parser::token::T_LSS => BinaryOp::Comparison(ComparisonOp::Less),
+                parser::token::T_GTE => BinaryOp::Comparison(ComparisonOp::GreaterEqual),
+                parser::token::T_LTE => BinaryOp::Comparison(ComparisonOp::LessEqual),
+                _ => panic!("Unknown binary operation token!"),
             },
             Box::new(self.handle_expr(&expr.lhs, conn, ScanHint::None).unwrap()),
             Box::new(self.handle_expr(&expr.rhs, conn, ScanHint::None).unwrap()),

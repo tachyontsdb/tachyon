@@ -30,17 +30,24 @@ impl ExecutorNode for ScalarToScalarNode {
     }
 
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
-        let lhs_opt = self.lhs.next_scalar(conn);
-        let rhs_opt = self.rhs.next_scalar(conn);
+        match self.op {
+            BinaryOp::Arithmetic(_) => {
+                let lhs_opt = self.lhs.next_scalar(conn);
+                let rhs_opt = self.rhs.next_scalar(conn);
 
-        match (lhs_opt, rhs_opt) {
-            (Some(lhs_value), Some(rhs_value)) => Some(self.op.apply(
-                lhs_value,
-                self.lhs.value_type(),
-                rhs_value,
-                self.rhs.value_type(),
-            )),
-            _ => None,
+                match (lhs_opt, rhs_opt) {
+                    (Some(lhs_value), Some(rhs_value)) => Some(self.op.apply(
+                        lhs_value,
+                        self.lhs.value_type(),
+                        rhs_value,
+                        self.rhs.value_type(),
+                    )),
+                    _ => None,
+                }
+            }
+            BinaryOp::Comparison(_) => {
+                panic!("Comparison operator not allowed between scalar and scalar!")
+            }
         }
     }
 }
