@@ -60,9 +60,9 @@ pub fn print_error(err: &impl Error) {
 #[repr(transparent)]
 pub struct StreamId(pub u128);
 
-impl StreamId {
-    pub fn to_uuid(self) -> Uuid {
-        Uuid::from_u128(self.0)
+impl From<StreamId> for Uuid {
+    fn from(value: StreamId) -> Self {
+        Uuid::from_u128(value.0)
     }
 }
 
