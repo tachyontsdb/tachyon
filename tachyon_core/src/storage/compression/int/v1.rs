@@ -126,7 +126,7 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
 }
 
 impl<T: Write> CompressionEngineV1<T> {
-    // Called when the local buffer can be written along with length byte
+    // Called when the local buffer can be written along with length byte. Returns the number of bytes that have been compressed
     fn flush(&mut self) -> usize {
         if self.buffer_idx == 0 {
             return 0;
