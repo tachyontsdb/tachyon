@@ -224,6 +224,19 @@ mod tests {
             }
         } // writer drops
 
+        let files = get_files(&dirs[0].join(stream_id.to_string()));
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].timestamps, timestamps);
+        assert_eq!(files[0].values.len(), values.len());
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..values.len() {
+            assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
+        }
+        for (i, timestamp) in timestamps.iter().enumerate() {
+            assert!(files[0].timestamps[i] == *timestamp);
+        }
+
         {
             let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
             writer.create_stream(stream_id);
