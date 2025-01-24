@@ -396,9 +396,6 @@ pub struct TimeDataFile {
     pub values: Vec<Value>,
 }
 
-// ideas
-// right now we are returning the number of bytes that are compressed in the consume and other functions... this is kinda messy
-
 impl TimeDataFile {
     pub fn new(version: Version, stream_id: StreamId, value_type: ValueType) -> Self {
         Self {
