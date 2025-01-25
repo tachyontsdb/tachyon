@@ -32,22 +32,22 @@ const REPL_EXIT_MSG: &str = "Exiting...";
 #[derive(Error, Debug)]
 pub enum CLIErr {
     #[error("Input '{input}' could not be converted to stream type = {value_type}.")]
-    InputValueType {
+    InputValueTypeErr {
         input: String,
         value_type: ValueType,
     },
     #[error("Line #{line_num} in CSV failed to parse {value}; expected type {value_type}")]
-    CSVType {
+    CSVTypeErr {
         line_num: usize,
         value: String,
         value_type: ValueType,
     },
+    #[error("Failed to read from CSV.")]
+    CSVErr(#[from] csv::Error),
     #[error("Failed to read line.")]
-    ReadLineError(#[from] ReadlineError),
-    #[error("Unable to read from CSV.")]
-    CSVError(#[from] csv::Error),
+    ReadLineErr(#[from] ReadlineError),
     #[error("IO Error.")]
-    FileIOError(#[from] std::io::Error),
+    FileIOErr(#[from] std::io::Error),
 }
 
 #[derive(Parser)]
@@ -252,14 +252,14 @@ fn handle_import_csv_command(
             let line_num = idx + 2;
             let record = result?;
 
-            let csv_err = CLIErr::CSVType {
+            let csv_err = CLIErr::CSVTypeErr {
                 line_num,
                 value: record[1].to_string(),
                 value_type,
             };
 
             vectors.push(Vector {
-                timestamp: record[0].parse::<u64>().map_err(|_| CLIErr::CSVType {
+                timestamp: record[0].parse::<u64>().map_err(|_| CLIErr::CSVTypeErr {
                     line_num,
                     value: record[0].to_string(),
                     value_type: ValueType::UInteger64,
@@ -310,7 +310,7 @@ pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
                 return Ok(());
             }
             Err(e) => {
-                return Err(CLIErr::ReadLineError(e));
+                return Err(CLIErr::ReadLineErr(e));
             }
         }
     }
@@ -319,13 +319,15 @@ pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
 pub fn main() {
     let args = Args::parse();
 
-    let mut connection = Connection::new(args.db_dir);
+    // TODO: remove unwrap
+    let mut connection = Connection::new(args.db_dir).unwrap();
 
     match args.command {
         Some(Commands::ListAllStreams) => {
             let mut table = Table::new();
             table.add_row(row!["Stream ID", "Stream Name + Matchers", "Value Type"]);
-            for stream in connection.get_all_streams() {
+            // TODO: remove unwrap
+            for stream in connection.get_all_streams().unwrap() {
                 let matchers: Vec<String> = stream
                     .1
                     .into_iter()
@@ -355,7 +357,8 @@ pub fn main() {
             }
         }
         Some(Commands::CreateStream { stream, value_type }) => {
-            connection.create_stream(stream, value_type);
+            // TODO: remove unwrap
+            connection.create_stream(stream, value_type).unwrap();
         }
         Some(Commands::Insert {
             stream,
@@ -363,7 +366,7 @@ pub fn main() {
             value,
         }) => {
             let mut inserter = connection.prepare_insert(stream);
-            let input_vt_err = CLIErr::InputValueType {
+            let input_vt_err = CLIErr::InputValueTypeErr {
                 input: value.clone(),
                 value_type: inserter.value_type(),
             };

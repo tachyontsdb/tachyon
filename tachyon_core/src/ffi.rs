@@ -1,11 +1,36 @@
-use crate::{Connection, Inserter, Query, ReturnType, Timestamp, Value, ValueType, Vector};
-use std::ffi::{c_char, CStr};
+use crate::{
+    Connection, Inserter, Query, ReturnType, TachyonErr, Timestamp, Value, ValueType, Vector,
+};
+use std::ffi::{c_char, c_void, CStr};
 
+/// SAFETY: When returns 0, success (return value Connection). Otherwise error, `out` is out parameter
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_open(db_dir: *const c_char) -> *mut Connection {
-    let db_dir = CStr::from_ptr(db_dir).to_str().unwrap();
-    let connection = Connection::new(db_dir);
-    Box::into_raw(Box::new(connection))
+pub unsafe extern "C" fn tachyon_open(db_dir: *const c_char, out: *mut *mut c_void) -> u8 {
+    let db_dir_res = CStr::from_ptr(db_dir)
+        .to_str()
+        .map_err(|err| TachyonErr::InputErr {
+            reason: Box::new(err),
+        });
+
+    match db_dir_res {
+        Ok(db_dir) => match Connection::new(db_dir) {
+            Ok(connection) => {
+                *out = Box::into_raw(Box::new(connection)) as *mut c_void;
+                0u8
+            }
+            Err(err) => {
+                let tachyon_err = TachyonErr::from(err);
+                let return_value = tachyon_err.get_error_code();
+                *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+                return_value
+            }
+        },
+        Err(tachyon_err) => {
+            let return_value = tachyon_err.get_error_code();
+            *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+            return_value
+        }
+    }
 }
 
 #[no_mangle]
@@ -19,9 +44,30 @@ pub unsafe extern "C" fn tachyon_stream_create(
     connection: *mut Connection,
     stream: *const c_char,
     value_type: ValueType,
-) {
-    let stream = CStr::from_ptr(stream).to_str().unwrap();
-    (*connection).create_stream(stream, value_type);
+    out: *mut *mut c_void,
+) -> u8 {
+    let stream_res = CStr::from_ptr(stream)
+        .to_str()
+        .map_err(|err| TachyonErr::InputErr {
+            reason: Box::new(err),
+        });
+
+    match stream_res {
+        Ok(stream) => match (*connection).create_stream(stream, value_type) {
+            Ok(()) => 0u8,
+            Err(err) => {
+                let tachyon_err = TachyonErr::from(err);
+                let return_value = tachyon_err.get_error_code();
+                *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+                return_value
+            }
+        },
+        Err(tachyon_err) => {
+            let return_value = tachyon_err.get_error_code();
+            *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+            return_value
+        }
+    }
 }
 
 #[no_mangle]

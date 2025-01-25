@@ -6,6 +6,7 @@ use crate::query::planner::QueryPlanner;
 use crate::storage::page_cache::PageCache;
 use crate::storage::writer::Writer;
 use promql_parser::parser;
+use query::indexer::IndexerErr;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -13,8 +14,9 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use thiserror::Error;
 use uuid::Uuid;
 
 mod ffi;
@@ -27,6 +29,37 @@ mod utils;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[repr(transparent)]
 pub struct Version(pub u16);
+
+#[derive(Error, Debug)]
+pub enum TachyonErr {
+    #[error("Failed to perform desired operation.")]
+    TyErr,
+    #[error("The provided input was not valid: {reason}")]
+    InputErr { reason: Box<dyn Error> },
+    #[error("Failed to create the directory for the database: {db_dir}.")]
+    DatabaseCreationErr { db_dir: PathBuf },
+}
+
+impl TachyonErr {
+    fn get_error_code(&self) -> u8 {
+        match self {
+            TachyonErr::TyErr => 1,
+            TachyonErr::InputErr { .. } => 2,
+            TachyonErr::DatabaseCreationErr { .. } => 3,
+        }
+    }
+}
+
+impl From<ConnectionErr> for TachyonErr {
+    fn from(value: ConnectionErr) -> Self {
+        match value {
+            ConnectionErr::DatabaseCreationErr { db_dir } => {
+                TachyonErr::DatabaseCreationErr { db_dir }
+            }
+            _ => TachyonErr::TyErr,
+        }
+    }
+}
 
 pub fn print_err(err: &impl Error) {
     eprintln!("Encountered error: {}", err)
@@ -307,6 +340,18 @@ pub struct Vector {
 
 pub type StreamSummaryType = (Uuid, Vec<(String, String)>, ValueType);
 
+#[derive(Error, Debug)]
+pub enum ConnectionErr {
+    #[error("Indexer error.")]
+    IndexerErr(#[from] IndexerErr),
+    #[error("Failed to create the directory for the database: {db_dir}.")]
+    DatabaseCreationErr { db_dir: PathBuf },
+    #[error("Failed to create stream: {stream}.")]
+    StreamCreationErr { stream: String },
+    #[error("Failed to get all streams.")]
+    GetStreamsErr,
+}
+
 /// Safety: A connection is only single-threaded
 pub struct Connection {
     page_cache: Rc<RefCell<PageCache>>,
@@ -316,16 +361,19 @@ pub struct Connection {
 
 impl Connection {
     /// Recursively creates the directories to `db_dir` if they do not exist
-    pub fn new(db_dir: impl AsRef<Path>) -> Self {
-        fs::create_dir_all(&db_dir).unwrap();
+    pub fn new(db_dir: impl AsRef<Path>) -> Result<Self, ConnectionErr> {
+        fs::create_dir_all(&db_dir).map_err(|_| ConnectionErr::DatabaseCreationErr {
+            db_dir: db_dir.as_ref().to_path_buf(),
+        })?;
 
-        let indexer = Rc::new(RefCell::new(Indexer::new(db_dir.as_ref())));
-        indexer.borrow_mut().create_store();
-        Self {
+        let indexer = Rc::new(RefCell::new(Indexer::new(db_dir.as_ref())?));
+        indexer.borrow_mut().create_store()?;
+
+        Ok(Self {
             page_cache: Rc::new(RefCell::new(PageCache::new(10))),
             indexer: indexer.clone(),
             writer: Rc::new(RefCell::new(Writer::new(db_dir, indexer, CURRENT_VERSION))),
-        }
+        })
     }
 
     fn parse_stream(&self, stream: impl AsRef<str>) -> parser::VectorSelector {
@@ -346,19 +394,31 @@ impl Connection {
             .get_stream_ids(selector.name.as_ref().unwrap(), &selector.matchers)
     }
 
-    pub fn create_stream(&mut self, stream: impl AsRef<str>, value_type: ValueType) {
-        let selector = self.parse_stream(stream);
+    pub fn create_stream(
+        &mut self,
+        stream: impl AsRef<str>,
+        value_type: ValueType,
+    ) -> Result<(), ConnectionErr> {
+        let selector = self.parse_stream(&stream);
 
         if !self.get_stream_ids_for_selector(&selector).is_empty() {
             panic!("Attempting to create a stream that already exists!");
         }
 
-        let stream_id = self.indexer.borrow_mut().insert_new_id(
-            selector.name.as_ref().unwrap(),
-            &selector.matchers,
-            value_type,
-        );
+        let stream_id = self
+            .indexer
+            .borrow_mut()
+            .insert_new_id(
+                selector.name.as_ref().unwrap(),
+                &selector.matchers,
+                value_type,
+            )
+            .map_err(|_| ConnectionErr::StreamCreationErr {
+                stream: stream.as_ref().to_string(),
+            })?;
         self.writer.borrow_mut().create_stream(stream_id);
+
+        Ok(())
     }
 
     pub fn delete_stream(&mut self, stream: impl AsRef<str>) {
@@ -371,8 +431,11 @@ impl Connection {
             .is_empty()
     }
 
-    pub fn get_all_streams(&self) -> Vec<StreamSummaryType> {
-        self.indexer.borrow().get_all_streams()
+    pub fn get_all_streams(&self) -> Result<Vec<StreamSummaryType>, ConnectionErr> {
+        self.indexer
+            .borrow()
+            .get_all_streams()
+            .map_err(|_| ConnectionErr::GetStreamsErr)
     }
 
     pub fn prepare_insert(&mut self, stream: impl AsRef<str>) -> Inserter {
@@ -497,7 +560,7 @@ mod tests {
         value_type: ValueType,
     ) -> Inserter {
         if !conn.check_stream_exists(stream.as_ref()) {
-            conn.create_stream(stream.as_ref(), value_type);
+            conn.create_stream(stream.as_ref(), value_type).unwrap();
         }
 
         conn.prepare_insert(stream.as_ref())
@@ -510,7 +573,7 @@ mod tests {
         first_i: usize,
         expected_count: usize,
     ) {
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         let timestamps = [23, 29, 40, 51];
         let values = [45u64, 47, 23, 48];
@@ -571,7 +634,7 @@ mod tests {
         set_up_dirs!(dirs, "db");
 
         let root_dir = dirs[0].clone();
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         let timestamps = [23, 29, 40, 51];
         let values = [45, 47, 23, 48];
@@ -938,7 +1001,7 @@ mod tests {
         end: u64,
         expected: Value,
     ) {
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         let timestamps = [23, 29, 40, 51];
         let values = [45u64, 47, 23, 48];
@@ -1045,7 +1108,7 @@ mod tests {
         end: u64,
         expected_val: Vec<Value>,
     ) {
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         let timestamps = [23, 25, 29, 40, 44, 51];
         let values = [27u64, 31, 47, 23, 31, 48];
@@ -1178,7 +1241,7 @@ mod tests {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
 
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         let timestamps = [23, 29, 40, 51];
 
@@ -1256,7 +1319,7 @@ mod tests {
         expected_timestamps: Vec<Timestamp>,
         expected_values: Vec<u64>,
     ) {
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         let mut inserter1 = create_stream_helper(
             &mut conn,
@@ -1392,7 +1455,7 @@ mod tests {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
 
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         let timestamps = [23, 29, 40, 51];
 
@@ -1449,7 +1512,7 @@ mod tests {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
 
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         let timestamps = [23, 29, 40, 51];
 
@@ -1567,7 +1630,7 @@ mod tests {
         set_up_dirs!(db_dirs, "db");
         let db_dir = db_dirs[0].clone();
 
-        let mut connection = Connection::new(db_dir);
+        let mut connection = Connection::new(db_dir).unwrap();
 
         let timestamps = vec![1, 2, 3, 4, 5];
 
@@ -1621,7 +1684,7 @@ mod tests {
         set_up_dirs!(db_dirs, "db");
         let db_dir = db_dirs[0].clone();
 
-        let mut connection = Connection::new(db_dir);
+        let mut connection = Connection::new(db_dir).unwrap();
 
         let timestamps = vec![1, 2, 3, 4];
         let values = vec![-5i64, -7i64, -1i64, -1000i64];
@@ -1672,7 +1735,7 @@ mod tests {
         set_up_dirs!(db_dirs, "db");
         let db_dir = db_dirs[0].clone();
 
-        let mut connection = Connection::new(db_dir);
+        let mut connection = Connection::new(db_dir).unwrap();
 
         let timestamps = vec![1, 2];
         let values = vec![3.8f64, -23.1f64];

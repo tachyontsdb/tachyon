@@ -40,12 +40,16 @@ impl Writer {
         if file.num_entries() >= MAX_NUM_ENTRIES {
             let file_path = Writer::derive_file_path(&self.root, stream_id, file);
             file.write(file_path.clone());
-            self.indexer.borrow_mut().insert_new_file(
-                stream_id,
-                &file_path,
-                file.header.min_timestamp,
-                file.header.max_timestamp,
-            );
+            // TODO: remove unwrap
+            self.indexer
+                .borrow_mut()
+                .insert_new_file(
+                    stream_id,
+                    &file_path,
+                    file.header.min_timestamp,
+                    file.header.max_timestamp,
+                )
+                .unwrap();
             self.open_data_files.remove_entry(&stream_id);
         }
     }
@@ -84,12 +88,16 @@ impl Writer {
         for (stream_id, file) in self.open_data_files.iter_mut() {
             let file_path = Writer::derive_file_path(&self.root, *stream_id, file);
             file.write(file_path.clone());
-            self.indexer.borrow_mut().insert_new_file(
-                *stream_id,
-                &file_path,
-                file.header.min_timestamp,
-                file.header.max_timestamp,
-            )
+            // TODO: remove unwrap
+            self.indexer
+                .borrow_mut()
+                .insert_new_file(
+                    *stream_id,
+                    &file_path,
+                    file.header.min_timestamp,
+                    file.header.max_timestamp,
+                )
+                .unwrap()
         }
         self.open_data_files.clear();
     }
@@ -161,8 +169,8 @@ mod tests {
         set_up_dirs!(dirs, "db");
         let stream_id = Uuid::new_v4();
 
-        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        indexer.borrow_mut().create_store();
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
+        indexer.borrow_mut().create_store().unwrap();
 
         let mut writer = Writer::new(dirs[0].clone(), indexer, Version(0));
         let mut timestamps = Vec::<Timestamp>::new();
@@ -194,8 +202,8 @@ mod tests {
         set_up_dirs!(dirs, "db");
         let stream_ids = [Uuid::new_v4(), Uuid::new_v4()];
 
-        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        indexer.borrow_mut().create_store();
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
+        indexer.borrow_mut().create_store().unwrap();
         let mut writer = Writer::new(dirs[0].clone(), indexer, Version(0));
 
         let mut timestamps = [Vec::<Timestamp>::new(), Vec::<Timestamp>::new()];
@@ -234,7 +242,7 @@ mod tests {
         let n = (1.5 * MAX_NUM_ENTRIES as f32).round() as usize;
         let mut base: usize = 0;
 
-        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
         let mut writer = Writer::new(dirs[0].clone(), indexer, Version(0));
         let mut timestamps_per_file = [
             Vec::<Timestamp>::new(),
