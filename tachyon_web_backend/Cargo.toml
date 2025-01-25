@@ -1,0 +1,13 @@
+[package]
+name = "tachyon_web_backend"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.8.1", features = ["macros", "ws"] }
+axum-macros = "0.5.0"
+serde = "1.0.217"
+serde_json = "1.0.137"
+tachyon_core = { path = "../tachyon_core", features = ["tachyon_benchmarks"] }
+tokio = { version = "1.43.0", features = ["full"] }
+tower-http = { version = "0.6.2", features = ["full"] }
