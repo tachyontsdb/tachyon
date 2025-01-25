@@ -16,7 +16,6 @@ use uuid::Uuid;
  * Stores all data in memory until MAX_NUM_ENTRIES is reached. After which the file is commited and persisted to disk.
  * Allows users to flush partially written files to disk. Users cannot read data that is still in memory.
  */
-
 pub struct InMemoryWriter {
     open_data_files: HashMap<Uuid, TimeDataFile>, // Stream ID to in-mem file
     root: PathBuf,
