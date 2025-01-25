@@ -1,5 +1,10 @@
 [workspace]
-members = ["tachyon_core", "tachyon_cli", "tachyon_web_backend"]
+members = [
+    "tachyondb-promql-parser",
+    "tachyon_core",
+    "tachyon_cli",
+    "tachyon_web_backend",
+]
 resolver = "2"
 
 [profile.dev]

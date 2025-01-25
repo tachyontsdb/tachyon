@@ -1,0 +1,3 @@
+[submodule "tachyondb-promql-parser"]
+	path = tachyondb-promql-parser
+	url = https://github.com/tachyontsdb/tachyondb-promql-parser.git

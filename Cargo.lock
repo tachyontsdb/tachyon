@@ -763,9 +763,9 @@ dependencies = [
 
 [[package]]
 name = "cpufeatures"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16b80225097f2e5ae4e7179dd2266824648f3e2f49d9134d584b76389d31c4c3"
+checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
 dependencies = [
  "libc",
 ]
@@ -2139,8 +2139,6 @@ dependencies = [
 [[package]]
 name = "promql-parser"
 version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fe99e6f80a79abccf1e8fb48dd63473a36057e600cc6ea36147c8318698ae6f"
 dependencies = [
  "cfgrammar",
  "chrono",
@@ -2148,6 +2146,8 @@ dependencies = [
  "lrlex",
  "lrpar",
  "regex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
