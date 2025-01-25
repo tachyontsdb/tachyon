@@ -4,6 +4,7 @@ use crate::Timestamp;
 
 use super::file::Header;
 
+pub mod float;
 pub mod int;
 
 pub trait CompressionEngine<W: Write> {

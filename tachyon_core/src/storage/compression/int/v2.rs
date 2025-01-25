@@ -2,10 +2,10 @@ use std::io::{Read, Write};
 
 use crate::{
     storage::{
+        compression::Header,
         compression::{CompressionEngine, DecompressionEngine},
         FileReaderUtils,
     },
-    tachyon_benchmarks::Header,
     utils::static_assert,
     Timestamp,
 };
@@ -156,7 +156,8 @@ impl<T: Write> CompressionEngineV2<T> {
         for arr in [&self.ts_d_deltas, &self.v_d_deltas] {
             let mut max_bits_needed = 0;
             for x in arr {
-                max_bits_needed = u8::max(max_bits_needed, Self::bits_needed_u64(*x));
+                max_bits_needed =
+                    u8::max(max_bits_needed, IntCompressionUtils::bits_needed_u64(*x));
             }
 
             let length_code = V2_LENGTH_LOOKUP[max_bits_needed as usize];
@@ -205,11 +206,6 @@ impl<T: Write> CompressionEngineV2<T> {
         self.result.append(&mut self.temp_buffer);
         self.chunk_idx = 0;
         self.cur_length = 0;
-    }
-
-    #[inline]
-    fn bits_needed_u64(n: u64) -> u8 {
-        64 - n.leading_zeros() as u8
     }
 }
 

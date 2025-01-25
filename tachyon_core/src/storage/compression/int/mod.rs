@@ -19,6 +19,20 @@ impl IntCompressionUtils {
     pub fn zig_zag_encode(n: i64) -> u64 {
         ((n >> (i64::BITS as usize - 1)) ^ (n << 1)) as u64
     }
+
+    #[inline]
+    pub fn bits_needed_u64(n: u64) -> u8 {
+        64 - n.leading_zeros() as u8
+    }
+
+    #[inline]
+    pub fn varint_u64(buf: &[u8]) -> u64 {
+        let mut res = 0u64;
+        for i in 0..buf.len() {
+            res = (res << 8) | (buf[buf.len() - i - 1] as u64);
+        }
+        res
+    }
 }
 
 // TODO: Make macro to generate the enum + implementation
