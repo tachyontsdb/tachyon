@@ -1,6 +1,6 @@
 use crate::execution::node::{
-    AggregateNode, AggregateType, ArithmeticOp, AverageNode, BinaryOp, BinaryOpNode, ComparisonOp,
-    GetKNode, GetKType, NumberLiteralNode, TNode, VectorSelectNode,
+    AggregateNode, AggregateType, ArithmeticOp, BinaryOp, BinaryOpNode, ComparisonOp, GetKNode,
+    GetKType, NumberLiteralNode, TNode, VectorSelectNode,
 };
 use crate::storage::file::ScanHint;
 use crate::{Connection, Timestamp, ValueType};
@@ -45,21 +45,16 @@ impl<'a> QueryPlanner<'a> {
                 Ok(TNode::Aggregate(AggregateNode::new(
                     aggregate_type,
                     Box::new(self.handle_expr(&expr.expr, conn, scan_hint).unwrap()),
+                    None,
                 )))
             }
-            parser::token::T_AVG => Ok(TNode::Average(
-                AverageNode::try_new(
-                    Box::new(AggregateNode::new(
-                        AggregateType::Sum,
-                        Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Sum).unwrap()),
-                    )),
-                    Box::new(AggregateNode::new(
-                        AggregateType::Count,
-                        Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Count).unwrap()),
-                    )),
-                )
-                .unwrap(),
-            )),
+            parser::token::T_AVG => Ok(TNode::Aggregate(AggregateNode::new(
+                AggregateType::Average,
+                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Sum).unwrap()),
+                Some(Box::new(
+                    self.handle_expr(&expr.expr, conn, ScanHint::Count).unwrap(),
+                )),
+            ))),
             parser::token::T_BOTTOMK | parser::token::T_TOPK => {
                 let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None).unwrap());
                 let param = Box::new(
