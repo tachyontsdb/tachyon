@@ -38,7 +38,7 @@ name = "write"
 harness = false
 
 [dependencies]
-promql-parser = "0.4.3"
+promql-parser = { path = "../tachyondb-promql-parser" }
 rusqlite = { version = "0.32.1", features = ["serde_json", "bundled", "uuid"] }
 rustc-hash = "2.1.0"
 serde = "1.0.217"
