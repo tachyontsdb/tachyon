@@ -1,0 +1,163 @@
+# Tachyon CLI
+
+The Tachyon CLI (`tql`) allows users to interact with their time series databases. It supports querying, writing data, and managing database contexts.
+
+## Database Context
+
+TQL keeps track of the database it is running against to avoid repeated specification.
+
+### View Current Database
+```sh
+$ tql db current
+/home/user/application/tachyon_database
+```
+
+### List Known Databases
+```sh
+$ tql db list
+/home/user/application/tachyon_database
+/home/user/arduino-controller/temperature
+/home/user/stock_data
+```
+
+### Switch Database
+```sh
+$ tql db use /home/user/stock_data
+```
+
+---
+
+## Queries
+
+### Run an Interactive Query Shell
+```sh
+$ tql shell
+```
+#### Example:
+```sh
+$ tql shell
+tachyon$ http_requests{trend="increase"}
+--------------------
+Timestamp | Value
+12363621  | 1.0
+12363891  | 2.0
+10967861  | 3.0
+```
+
+### Run a One-Off Query
+```sh
+$ tql query <query>
+```
+#### Example:
+```sh
+$ tql query http_requests{trend="increase"}
+```
+
+### Graphical Query Output
+```sh
+$ tql query <query> -g
+```
+#### Example:
+```sh
+$ tql query temperature -g
+[some graph]
+```
+
+### Export Query Results
+```sh
+$ tql query <query> -e <format>
+```
+#### Example:
+```sh
+$ tql query temperature -e json
+```
+```sh
+$ tql query temperature -e csv
+```
+
+---
+
+## Writing Data
+
+### Manual Input
+#### General Command Structure:
+```sh
+$ tql write <stream> [(timestamp, value),*]
+```
+#### Example:
+```sh
+$ tql write http_requests{trend="increase"} [(ts, val), (ts, val)]
+2 entries written.
+```
+
+### File-Based Input
+```sh
+$ tql write <stream> -f <filename>
+```
+#### Example:
+```sh
+$ tql write http_requests{trend="increase"} -f data.csv
+```
+```sh
+$ tql write http_requests{trend="increase"} -f data.json
+```
+
+### Streaming Input
+```sh
+$ cat <file> | tql write -
+```
+#### Example:
+```sh
+$ cat data.json | tql write -
+```
+
+---
+
+## Information Commands
+
+### List Streams
+```sh
+$ tql info streams
+```
+#### Example:
+```sh
+$ tql info streams
+--------------------------------
+Stream ID | Stream + Matchers
+1         | http_requests
+2         | temperature{unit="celsius"}
+3         | http_requests{trend="increase"}
+4         | http_requests{trend="decrease"}
+```
+
+### Filter Streams
+```sh
+$ tql info streams -m <matcher>
+```
+#### Example:
+```sh
+$ tql info streams -m http_requests
+```
+
+### Stream Metadata
+```sh
+$ tql info stream <stream_name>
+```
+#### Example:
+```sh
+$ tql info stream http_requests
+Stream: http_requests
+Retention: 30d
+Total Points: 1,230,000
+Size: 12MB
+```
+
+### Database Statistics
+
+```sh
+$ tql info stats
+Total Streams: 34
+Total Data Points: 5,678,901
+Storage Used: 234MB
+Retention Policy: 90d
+```
