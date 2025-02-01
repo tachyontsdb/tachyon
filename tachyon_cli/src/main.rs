@@ -10,7 +10,7 @@ use std::{
     io::Write,
 };
 use std::{os::unix::fs::MetadataExt, path::PathBuf};
-use tachyon_core::{print_err, tachyon_benchmarks::TimeDataFile};
+use tachyon_core::{print_error, tachyon_benchmarks::TimeDataFile};
 use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
 use thiserror::Error;
@@ -341,7 +341,7 @@ pub fn main() {
         }
         Some(Commands::ParseHeaders { paths }) => {
             if let Err(e) = handle_parse_headers_command(paths) {
-                print_err(&e);
+                print_error(&e);
             }
         }
         Some(Commands::Query {
@@ -353,7 +353,7 @@ pub fn main() {
             if let Err(e) =
                 handle_query_command(&mut connection, query, start, end, export_csv_path)
             {
-                print_err(&e);
+                print_error(&e);
             }
         }
         Some(Commands::CreateStream { stream, value_type }) => {
@@ -377,7 +377,7 @@ pub fn main() {
                     if let Ok(value_i64) = value_res {
                         inserter.insert_integer64(timestamp, value_i64)
                     } else {
-                        print_err(&input_vt_err);
+                        print_error(&input_vt_err);
                     }
                 }
                 ValueType::UInteger64 => {
@@ -385,7 +385,7 @@ pub fn main() {
                     if let Ok(value_u64) = value_res {
                         inserter.insert_uinteger64(timestamp, value_u64);
                     } else {
-                        print_err(&input_vt_err);
+                        print_error(&input_vt_err);
                     }
                 }
                 ValueType::Float64 => {
@@ -393,7 +393,7 @@ pub fn main() {
                     if let Ok(value_f) = value_res {
                         inserter.insert_float64(timestamp, value_f)
                     } else {
-                        print_err(&input_vt_err);
+                        print_error(&input_vt_err);
                     }
                 }
             }
@@ -402,12 +402,12 @@ pub fn main() {
         }
         Some(Commands::ImportCSV { stream, csv_file }) => {
             if let Err(e) = handle_import_csv_command(connection, stream, csv_file) {
-                print_err(&e);
+                print_error(&e);
             }
         }
         None => {
             if let Err(e) = repl(connection) {
-                print_err(&e);
+                print_error(&e);
             }
         }
     }

@@ -40,16 +40,6 @@ pub enum TachyonErr {
     DatabaseCreationErr { db_dir: PathBuf },
 }
 
-impl TachyonErr {
-    fn get_error_code(&self) -> u8 {
-        match self {
-            TachyonErr::TyErr => 1,
-            TachyonErr::InputErr { .. } => 2,
-            TachyonErr::DatabaseCreationErr { .. } => 3,
-        }
-    }
-}
-
 impl From<ConnectionErr> for TachyonErr {
     fn from(value: ConnectionErr) -> Self {
         match value {
@@ -61,8 +51,8 @@ impl From<ConnectionErr> for TachyonErr {
     }
 }
 
-pub fn print_err(err: &impl Error) {
-    eprintln!("Encountered error: {}", err)
+pub fn print_error(err: &impl Error) {
+    eprintln!("Encountered error: {}", err);
 }
 
 /// Encoded as a 128-bit UUID
@@ -715,7 +705,7 @@ mod tests {
         values_b: &[i64],
         expected: &[i64],
     ) {
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         // Insert dummy values
         let mut t: Timestamp = 0;
@@ -797,7 +787,7 @@ mod tests {
         value_b: f64,
         expected: &[f64],
     ) {
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         // Insert dummy values
         let mut t: Timestamp = 0;
@@ -956,7 +946,7 @@ mod tests {
         value_b: i64,
         expected: f64,
     ) {
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         // Prepare test query
         let query = format!(r#"{} {} {}"#, value_a, operation, value_b);

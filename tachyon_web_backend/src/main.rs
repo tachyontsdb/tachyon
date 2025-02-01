@@ -24,7 +24,7 @@ struct PerformQueryResponse {
 }
 
 async fn perform_query(Json(request): Json<PerformQueryRequest>) -> Json<PerformQueryResponse> {
-    let mut connection = Connection::new(request.path);
+    let mut connection = Connection::new(request.path).unwrap();
     let mut query = connection.prepare_query(request.query, request.start, request.end);
 
     let value_type = query.value_type();
