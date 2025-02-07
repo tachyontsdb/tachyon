@@ -11,7 +11,6 @@ use crate::{
 };
 
 use super::IntCompressionUtils;
-use super::TimeDataFile;
 
 /*
     Compression Scheme V2:
@@ -108,37 +107,8 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
         }
     }
 
-    fn new_from_partial(writer: T, data_file: TimeDataFile) -> Self {
-        Self {
-            writer,
-            last_timestamp: *data_file.timestamps.last().unwrap(),
-            last_value: data_file.values.last().unwrap().get_uinteger64(),
-            last_deltas: if data_file.num_entries() < 2 {
-                (0, 0)
-            } else {
-                (
-                    data_file.timestamps[data_file.num_entries() - 1] as i64
-                        - data_file.timestamps[data_file.num_entries() - 2] as i64,
-                    data_file.values[data_file.num_entries() - 1].get_integer64()
-                        - data_file.values[data_file.num_entries() - 2].get_integer64(),
-                )
-            },
-            entries_written: 0,
-
-            ts_d_deltas: [0; V2_CHUNK_SIZE],
-            v_d_deltas: [0; V2_CHUNK_SIZE],
-            buffer_idx: 0,
-            chunk_idx: 0,
-            cur_length: 0,
-
-            result: Vec::new(),
-            temp_buffer: Vec::new(),
-        }
-    }
-
-    fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) -> usize {
+    fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) {
         // TODO: Check wrapping logic here
-        let mut bytes_written = 0;
         let curr_deltas = (
             (timestamp.wrapping_sub(self.last_timestamp)) as i64,
             (value.wrapping_sub(self.last_value)) as i64,
@@ -152,31 +122,29 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV2<T> {
 
         self.buffer_idx += 1;
         if self.buffer_idx >= V2_CHUNK_SIZE {
-            bytes_written += self.flush();
+            self.flush();
         }
 
         self.entries_written += 1;
         self.last_timestamp = timestamp;
         self.last_value = value;
         self.last_deltas = curr_deltas;
-        bytes_written
     }
 
     fn flush_all(&mut self) -> usize {
         self.flush();
         self.flush_chunk();
-        self.writer.write(&self.result).unwrap()
+        self.writer.write_all(&self.result).unwrap();
+        self.result.len()
     }
 }
 
 impl<T: Write> CompressionEngineV2<T> {
     // Called when the local buffer can be written along with length byte
-    fn flush(&mut self) -> usize {
+    fn flush(&mut self) {
         if self.buffer_idx == 0 {
-            return 0;
+            return;
         }
-
-        let mut bytes_written = 0;
 
         // Handle partially-filled buffers
         for i in self.buffer_idx..self.ts_d_deltas.len() {
@@ -221,31 +189,22 @@ impl<T: Write> CompressionEngineV2<T> {
         }
 
         if self.chunk_idx >= V2_NUM_CHUNKS_PER_LENGTH {
-            bytes_written += self.flush_chunk();
+            self.flush_chunk();
         }
 
         self.buffer_idx = 0;
-        bytes_written
     }
 
-    fn flush_chunk(&mut self) -> usize {
+    fn flush_chunk(&mut self) {
         if self.chunk_idx == 0 {
-            return 0;
+            return;
         }
 
         self.result
             .extend_from_slice(&self.cur_length.to_be_bytes()[1..]);
         self.result.append(&mut self.temp_buffer);
-        let bytes_written = self.writer.write(&self.result).unwrap(); // we persist any data we have
-        self.clear();
-        bytes_written
-    }
-
-    fn clear(&mut self) {
         self.chunk_idx = 0;
         self.cur_length = 0;
-        self.result = Vec::new();
-        self.temp_buffer = Vec::new();
     }
 
     #[inline]
@@ -474,7 +433,7 @@ mod tests {
         let mut res: Vec<u8> = Vec::new();
         let mut engine = CompressionEngineV2::<&mut Vec<u8>>::new(&mut res, &header);
         for i in 0..timestamps.len() {
-            engine.consume(timestamps[i], values[i]);
+            engine.consume(timestamps[i], values[i])
         }
         engine.flush_all();
 
@@ -497,7 +456,7 @@ mod tests {
         let mut res: Vec<u8> = Vec::new();
         let mut engine = CompressionEngineV2::<&mut Vec<u8>>::new(&mut res, &header);
         for i in 0..timestamps.len() {
-            engine.consume(timestamps[i], values[i]);
+            engine.consume(timestamps[i], values[i])
         }
         engine.flush_all();
 

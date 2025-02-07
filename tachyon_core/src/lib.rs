@@ -15,7 +15,6 @@ use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::path::Path;
 use std::rc::Rc;
-use storage::writer::persistent_writer::PersistentWriter;
 use uuid::Uuid;
 
 mod ffi;
@@ -37,12 +36,6 @@ pub fn print_err(err: &impl Error) {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(transparent)]
 pub struct StreamId(pub u128);
-
-impl From<StreamId> for Uuid {
-    fn from(value: StreamId) -> Self {
-        Uuid::from_u128(value.0)
-    }
-}
 
 pub const CURRENT_VERSION: Version = Version(2);
 
@@ -318,7 +311,7 @@ pub type StreamSummaryType = (Uuid, Vec<(String, String)>, ValueType);
 pub struct Connection {
     page_cache: Rc<RefCell<PageCache>>,
     indexer: Rc<RefCell<Indexer>>,
-    writer: Rc<RefCell<PersistentWriter>>,
+    writer: Rc<RefCell<Writer>>,
 }
 
 impl Connection {
@@ -331,11 +324,7 @@ impl Connection {
         Self {
             page_cache: Rc::new(RefCell::new(PageCache::new(10))),
             indexer: indexer.clone(),
-            writer: Rc::new(RefCell::new(PersistentWriter::new(
-                db_dir,
-                indexer,
-                CURRENT_VERSION,
-            ))),
+            writer: Rc::new(RefCell::new(Writer::new(db_dir, indexer, CURRENT_VERSION))),
         }
     }
 
@@ -426,7 +415,7 @@ impl Connection {
 pub struct Inserter {
     value_type: ValueType,
     stream_id: Uuid,
-    writer: Rc<RefCell<PersistentWriter>>,
+    writer: Rc<RefCell<Writer>>,
 }
 
 macro_rules! create_inserter_insert {
@@ -561,58 +550,6 @@ mod tests {
         }
 
         assert_eq!(count, expected_count);
-    }
-
-    fn e2e_large_vector_test(root_dir: PathBuf) {
-        let mut conn = Connection::new(root_dir);
-
-        let mut inserter = create_stream_helper(
-            &mut conn,
-            r#"http_requests_total{service = "web"}"#,
-            ValueType::UInteger64,
-        );
-
-        let mut timestamps = Vec::<Timestamp>::new();
-        let mut values = Vec::<Value>::new();
-
-        for i in 0..100000u64 {
-            timestamps.push(i);
-            values.push(i.into());
-            inserter.insert(timestamps[i as usize], values[i as usize]);
-        }
-
-        inserter.flush();
-
-        // Prepare test query
-        let query = r#"http_requests_total{service = "web"}"#;
-        let mut stmt = conn.prepare_query(query, Some(timestamps[0]), timestamps.last().copied());
-
-        // Process results
-        let mut i = 0;
-        let mut count = 0;
-        let expected_count = timestamps.len();
-        loop {
-            let res = stmt.next_vector();
-            if res.is_none() {
-                break;
-            }
-
-            let res = res.unwrap();
-            assert_eq!(timestamps[i], res.timestamp);
-            assert_eq!(values[i].get_uinteger64(), res.value.get_uinteger64());
-            i += 1;
-
-            count += 1;
-        }
-
-        assert_eq!(count, expected_count);
-    }
-
-    #[test]
-    fn test_e2e_large_vector() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        e2e_large_vector_test(root_dir)
     }
 
     #[test]
