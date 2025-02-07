@@ -90,7 +90,8 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
         }
     }
 
-    fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) {
+    fn consume(&mut self, timestamp: Timestamp, value: PhysicalType) -> usize {
+        let mut bytes_written = 0;
         let curr_deltas = (
             (timestamp - self.last_timestamp) as i64,
             (value - self.last_value) as i64,
@@ -103,13 +104,14 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
 
         self.buffer_idx += 2;
         if self.buffer_idx >= self.buffer.len() {
-            self.flush();
+            bytes_written += self.flush();
         }
 
         self.entries_written += 1;
         self.last_timestamp = timestamp;
         self.last_value = value;
         self.last_deltas = curr_deltas;
+        bytes_written
     }
 
     fn flush_all(&mut self) -> usize {
@@ -117,20 +119,26 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
         self.writer.write_all(&self.result).unwrap();
         self.result.len()
     }
+
+    fn new_from_partial(_: T, _: TimeDataFile) -> Self {
+        todo!()
+    }
 }
 
 impl<T: Write> CompressionEngineV1<T> {
-    // Called when the local buffer can be written along with length byte
-    fn flush(&mut self) {
+    // Called when the local buffer can be written along with length byte. Returns the number of bytes that have been compressed
+    fn flush(&mut self) -> usize {
         if self.buffer_idx == 0 {
-            return;
+            return 0;
         }
 
         let mut length = 0u8;
         let mut bytes_needed: u8;
+        let mut bytes_written = 1; // length is always 1 byte
 
         for j in 0..self.buffer_idx {
             bytes_needed = Self::bytes_needed_u64(self.buffer[j]);
+            bytes_written += bytes_needed;
             length |= Self::length_encoding(bytes_needed) << (6 - 2 * j);
         }
         self.result.push(length);
@@ -140,6 +148,7 @@ impl<T: Write> CompressionEngineV1<T> {
         }
 
         self.buffer_idx = 0;
+        1 + bytes_written as usize
     }
 
     fn length_encoding(n: u8) -> u8 {

@@ -12,7 +12,8 @@ trait IndexerStore {
     fn get_value_type_for_stream_id(&self, stream_id: Uuid) -> Option<ValueType>;
 
     fn insert_new_id(&mut self, stream: &str, matchers: &Matchers, value_type: ValueType) -> Uuid;
-    fn insert_new_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp);
+    fn insert_new_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Option<Timestamp>);
+    fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp);
 
     fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<Uuid>>;
     fn get_files_for_stream_id(
@@ -21,6 +22,7 @@ trait IndexerStore {
         start: Timestamp,
         end: Timestamp,
     ) -> Vec<PathBuf>;
+    fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Vec<PathBuf>;
 }
 
 mod sqlite {
@@ -245,11 +247,35 @@ mod sqlite {
             new_id
         }
 
-        fn insert_new_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
+        fn insert_new_file(
+            &mut self,
+            id: Uuid,
+            file: &Path,
+            start: Timestamp,
+            end: Option<Timestamp>,
+        ) {
             self.conn
                 .execute(
                     &format!(
                         "INSERT INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
+                        Self::SQLITE_ID_TO_FILENAME_TABLE
+                    ),
+                    (id, file.to_str(), start, end),
+                )
+                .unwrap();
+        }
+
+        fn insert_or_replace_file(
+            &mut self,
+            id: Uuid,
+            file: &Path,
+            start: Timestamp,
+            end: Timestamp,
+        ) {
+            self.conn
+                .execute(
+                    &format!(
+                        "INSERT OR REPLACE INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
                         Self::SQLITE_ID_TO_FILENAME_TABLE
                     ),
                     (id, file.to_str(), start, end),
@@ -281,7 +307,7 @@ mod sqlite {
             let mut stmt = self
                 .conn
                 .prepare_cached(&format!(
-                    "SELECT filename FROM {} WHERE id = ? AND ? <= end AND ? >= start",
+                    "SELECT filename FROM {} WHERE id = ? AND (? <= end OR end IS NULL) AND ? >= start ORDER BY start ASC",
                     Self::SQLITE_ID_TO_FILENAME_TABLE
                 ))
                 .unwrap();
@@ -332,6 +358,25 @@ mod sqlite {
             })
             .collect()
         }
+
+        fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Vec<PathBuf> {
+            let mut stmt = self
+                .conn
+                .prepare_cached(&format!(
+                    "SELECT filename FROM {} WHERE id = ? AND end IS NULL",
+                    Self::SQLITE_ID_TO_FILENAME_TABLE
+                ))
+                .unwrap();
+
+            let file_paths: Vec<PathBuf> = stmt
+                .query_map((stream_id,), |row| row.get::<usize, String>(0))
+                .unwrap()
+                .map(|item| item.unwrap().into())
+                .collect();
+            assert!(file_paths.len() <= 1);
+
+            file_paths
+        }
     }
 }
 
@@ -367,8 +412,24 @@ impl Indexer {
         self.store.get_value_type_for_stream_id(id)
     }
 
-    pub fn insert_new_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) {
+    pub fn insert_new_file(
+        &mut self,
+        id: Uuid,
+        file: &Path,
+        start: Timestamp,
+        end: Option<Timestamp>,
+    ) {
         self.store.insert_new_file(id, file, start, end);
+    }
+
+    pub fn insert_or_replace_file(
+        &mut self,
+        id: Uuid,
+        file: &Path,
+        start: Timestamp,
+        end: Timestamp,
+    ) {
+        self.store.insert_or_replace_file(id, file, start, end);
     }
 
     pub fn get_all_streams(&self) -> Vec<StreamSummaryType> {
@@ -407,6 +468,10 @@ impl Indexer {
         end: Timestamp,
     ) -> Vec<PathBuf> {
         self.store.get_files_for_stream_id(stream_id, start, end)
+    }
+
+    pub fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Vec<PathBuf> {
+        self.store.get_open_files_for_stream_id(stream_id)
     }
 }
 
@@ -456,13 +521,13 @@ mod tests {
         let id = indexer.insert_new_id(stream, &matchers, ValueType::UInteger64);
 
         let file1 = PathBuf::from(format!("{}/{}/file1.ty", dirs[0].to_str().unwrap(), id));
-        indexer.insert_new_file(id, &file1, 1, 3);
+        indexer.insert_new_file(id, &file1, 1, Some(3));
 
         let file2 = PathBuf::from(format!("{}/{}/file2.ty", dirs[0].to_str().unwrap(), id));
-        indexer.insert_new_file(id, &file2, 3, 5);
+        indexer.insert_new_file(id, &file2, 3, Some(5));
 
         let file3 = PathBuf::from(format!("{}/{}/file3.ty", dirs[0].to_str().unwrap(), id));
-        indexer.insert_new_file(id, &file3, 5, 7);
+        indexer.insert_new_file(id, &file3, 5, Some(7));
 
         // query indexer storage
         let mut filenames = indexer.get_required_files(id, 4, 4);
@@ -501,16 +566,16 @@ mod tests {
         let id2 = indexer.insert_new_id(stream, &matchers2, ValueType::UInteger64);
 
         let file1 = PathBuf::from(format!("{}/{}/file1.ty", dirs[0].to_str().unwrap(), id1));
-        indexer.insert_new_file(id1, &file1, 1, 4);
+        indexer.insert_new_file(id1, &file1, 1, Some(4));
 
         let file2 = PathBuf::from(format!("{}/{}/file2.ty", dirs[0].to_str().unwrap(), id1));
-        indexer.insert_new_file(id1, &file2, 5, 8);
+        indexer.insert_new_file(id1, &file2, 5, Some(8));
 
         let file3 = PathBuf::from(format!("{}/{}/file3.ty", dirs[0].to_str().unwrap(), id2));
-        indexer.insert_new_file(id2, &file3, 1, 4);
+        indexer.insert_new_file(id2, &file3, 1, Some(4));
 
         let file4 = PathBuf::from(format!("{}/{}/file4.ty", dirs[0].to_str().unwrap(), id2));
-        indexer.insert_new_file(id2, &file4, 5, 8);
+        indexer.insert_new_file(id2, &file4, 5, Some(8));
 
         indexer.drop_store();
     }
