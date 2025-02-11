@@ -66,8 +66,8 @@ impl AggregateNode {
         }
     }
 
-    fn get_count_value_type(child: &Box<TNode>) -> ValueType {
-        match **child {
+    fn get_count_value_type(child: &TNode) -> ValueType {
+        match *child {
             TNode::VectorSelect(_) => child.value_type(),
             _ => ValueType::UInteger64,
         }
