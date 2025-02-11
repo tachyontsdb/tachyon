@@ -1153,6 +1153,79 @@ mod tests {
         aggregate_test_helper(root_dir, "max", 29, 40, 47u64.into())
     }
 
+    fn aggregate_comparison_op_test_helper(
+        root_dir: PathBuf,
+        aggregate_op: &str,
+        binary_op: &str,
+        binary_operand: u64,
+        expected: Option<Value>,
+    ) {
+        let mut conn = Connection::new(root_dir);
+
+        let timestamps = [23, 25, 29];
+        let values = [27.0, 31.0, 47.0];
+
+        let mut inserter = create_stream_helper(
+            &mut conn,
+            r#"http_requests_total{service = "web"}"#,
+            ValueType::Float64,
+        );
+
+        // Insert dummy data
+        for (t, v) in zip(timestamps, values) {
+            inserter.insert(t, v.into());
+        }
+
+        inserter.flush();
+
+        // Prepare test query
+        let query = format!(
+            r#"{}(http_requests_total{{service = "web"}} {} {})"#,
+            aggregate_op, binary_op, binary_operand
+        );
+        let mut stmt = conn.prepare_query(query, Some(0), Some(100));
+
+        // Process results
+        match expected {
+            Some(expected_val) => {
+                let actual_val = stmt.next_scalar().unwrap();
+                assert!(actual_val.eq_same(stmt.value_type(), &expected_val));
+                assert!(stmt.next_scalar().is_none());
+            }
+            None => {
+                assert!(stmt.next_scalar().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn test_e2e_sum_of_comparison() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        aggregate_comparison_op_test_helper(root_dir, "sum", ">", 27, Some(78f64.into()))
+    }
+
+    #[test]
+    fn test_e2e_sum_of_no_values() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        aggregate_comparison_op_test_helper(root_dir, "sum", ">", 100, Some(0f64.into()))
+    }
+
+    #[test]
+    fn test_e2e_count_of_no_values() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        aggregate_comparison_op_test_helper(root_dir, "count", ">", 100, Some(0u64.into()))
+    }
+
+    #[test]
+    fn test_e2e_min_of_no_values() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        aggregate_comparison_op_test_helper(root_dir, "min", ">", 100, None)
+    }
+
     fn aggregatek_test_helper(
         root_dir: PathBuf,
         operation: &str,
