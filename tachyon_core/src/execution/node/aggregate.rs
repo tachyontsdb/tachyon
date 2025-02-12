@@ -37,7 +37,7 @@ impl AggregateNode {
         value_type: ValueType,
         child: &mut Box<TNode>,
     ) -> Option<Value> {
-        let mut sum = Value::get_default(value_type);
+        let mut sum = child.next_vector(conn)?.value;
 
         while let Some(Vector { value, .. }) = child.next_vector(conn) {
             sum = sum.add_same(value_type, &value);
@@ -94,13 +94,7 @@ impl ExecutorNode for AggregateNode {
         self.returned = true;
 
         match self.aggregate_type {
-            AggregateType::Sum => {
-                if returned {
-                    None
-                } else {
-                    AggregateNode::next_sum(conn, self.value_type(), &mut self.child)
-                }
-            }
+            AggregateType::Sum => AggregateNode::next_sum(conn, self.value_type(), &mut self.child),
             AggregateType::Count => {
                 if returned {
                     None
@@ -122,11 +116,7 @@ impl ExecutorNode for AggregateNode {
 
                 match (sum_opt, count_opt) {
                     (Some(sum), Some(count)) => {
-                        if count.eq_same(count_value_type, &Value::get_default(count_value_type)) {
-                            None
-                        } else {
-                            Some(sum.div(sum_value_type, &count, count_value_type))
-                        }
+                        Some(sum.div(sum_value_type, &count, count_value_type))
                     }
                     _ => None,
                 }

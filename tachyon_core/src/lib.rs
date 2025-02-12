@@ -1209,7 +1209,7 @@ mod tests {
     fn test_e2e_sum_of_no_values() {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
-        aggregate_comparison_op_test_helper(root_dir, "sum", ">", 100, Some(0f64.into()))
+        aggregate_comparison_op_test_helper(root_dir, "sum", ">", 100, None)
     }
 
     #[test]
