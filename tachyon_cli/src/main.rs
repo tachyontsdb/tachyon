@@ -10,7 +10,7 @@ use std::{
     io::Write,
 };
 use std::{os::unix::fs::MetadataExt, path::PathBuf};
-use tachyon_core::{print_err, tachyon_benchmarks::TimeDataFile};
+use tachyon_core::{print_error, tachyon_benchmarks::TimeDataFile};
 use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
 use thiserror::Error;
@@ -32,22 +32,22 @@ const REPL_EXIT_MSG: &str = "Exiting...";
 #[derive(Error, Debug)]
 pub enum CLIErr {
     #[error("Input '{input}' could not be converted to stream type = {value_type}.")]
-    InputValueType {
+    InputValueTypeErr {
         input: String,
         value_type: ValueType,
     },
     #[error("Line #{line_num} in CSV failed to parse {value}; expected type {value_type}")]
-    CSVType {
+    CSVTypeErr {
         line_num: usize,
         value: String,
         value_type: ValueType,
     },
+    #[error("Failed to read from CSV.")]
+    CSVErr(#[from] csv::Error),
     #[error("Failed to read line.")]
-    ReadLineError(#[from] ReadlineError),
-    #[error("Unable to read from CSV.")]
-    CSVError(#[from] csv::Error),
+    ReadLineErr(#[from] ReadlineError),
     #[error("IO Error.")]
-    FileIOError(#[from] std::io::Error),
+    FileIOErr(#[from] std::io::Error),
 }
 
 #[derive(Parser)]
@@ -252,14 +252,14 @@ fn handle_import_csv_command(
             let line_num = idx + 2;
             let record = result?;
 
-            let csv_err = CLIErr::CSVType {
+            let csv_err = CLIErr::CSVTypeErr {
                 line_num,
                 value: record[1].to_string(),
                 value_type,
             };
 
             vectors.push(Vector {
-                timestamp: record[0].parse::<u64>().map_err(|_| CLIErr::CSVType {
+                timestamp: record[0].parse::<u64>().map_err(|_| CLIErr::CSVTypeErr {
                     line_num,
                     value: record[0].to_string(),
                     value_type: ValueType::UInteger64,
@@ -310,7 +310,7 @@ pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
                 return Ok(());
             }
             Err(e) => {
-                return Err(CLIErr::ReadLineError(e));
+                return Err(CLIErr::ReadLineErr(e));
             }
         }
     }
@@ -319,13 +319,15 @@ pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
 pub fn main() {
     let args = Args::parse();
 
-    let mut connection = Connection::new(args.db_dir);
+    // TODO: remove unwrap
+    let mut connection = Connection::new(args.db_dir).unwrap();
 
     match args.command {
         Some(Commands::ListAllStreams) => {
             let mut table = Table::new();
             table.add_row(row!["Stream ID", "Stream Name + Matchers", "Value Type"]);
-            for stream in connection.get_all_streams() {
+            // TODO: remove unwrap
+            for stream in connection.get_all_streams().unwrap() {
                 let matchers: Vec<String> = stream
                     .1
                     .into_iter()
@@ -339,7 +341,7 @@ pub fn main() {
         }
         Some(Commands::ParseHeaders { paths }) => {
             if let Err(e) = handle_parse_headers_command(paths) {
-                print_err(&e);
+                print_error(&e);
             }
         }
         Some(Commands::Query {
@@ -351,11 +353,12 @@ pub fn main() {
             if let Err(e) =
                 handle_query_command(&mut connection, query, start, end, export_csv_path)
             {
-                print_err(&e);
+                print_error(&e);
             }
         }
         Some(Commands::CreateStream { stream, value_type }) => {
-            connection.create_stream(stream, value_type);
+            // TODO: remove unwrap
+            connection.create_stream(stream, value_type).unwrap();
         }
         Some(Commands::Insert {
             stream,
@@ -363,7 +366,7 @@ pub fn main() {
             value,
         }) => {
             let mut inserter = connection.prepare_insert(stream);
-            let input_vt_err = CLIErr::InputValueType {
+            let input_vt_err = CLIErr::InputValueTypeErr {
                 input: value.clone(),
                 value_type: inserter.value_type(),
             };
@@ -374,7 +377,7 @@ pub fn main() {
                     if let Ok(value_i64) = value_res {
                         inserter.insert_integer64(timestamp, value_i64)
                     } else {
-                        print_err(&input_vt_err);
+                        print_error(&input_vt_err);
                     }
                 }
                 ValueType::UInteger64 => {
@@ -382,7 +385,7 @@ pub fn main() {
                     if let Ok(value_u64) = value_res {
                         inserter.insert_uinteger64(timestamp, value_u64);
                     } else {
-                        print_err(&input_vt_err);
+                        print_error(&input_vt_err);
                     }
                 }
                 ValueType::Float64 => {
@@ -390,7 +393,7 @@ pub fn main() {
                     if let Ok(value_f) = value_res {
                         inserter.insert_float64(timestamp, value_f)
                     } else {
-                        print_err(&input_vt_err);
+                        print_error(&input_vt_err);
                     }
                 }
             }
@@ -399,12 +402,12 @@ pub fn main() {
         }
         Some(Commands::ImportCSV { stream, csv_file }) => {
             if let Err(e) = handle_import_csv_command(connection, stream, csv_file) {
-                print_err(&e);
+                print_error(&e);
             }
         }
         None => {
             if let Err(e) = repl(connection) {
-                print_err(&e);
+                print_error(&e);
             }
         }
     }

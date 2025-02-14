@@ -58,10 +58,10 @@ fn vector_selector_benchmark(c: &mut Criterion) {
         r#"topk(1000, http_requests_total{service = "web"})"#,
     ];
 
-    let mut conn = Connection::new(root_dir.clone());
+    let mut conn = Connection::new(root_dir.clone()).unwrap();
 
     if !conn.check_stream_exists(STREAM) {
-        conn.create_stream(STREAM, ValueType::UInteger64);
+        conn.create_stream(STREAM, ValueType::UInteger64).unwrap();
     }
 
     let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");

@@ -41,10 +41,12 @@ impl VectorSelectNode {
         }
 
         let stream_id = stream_ids[0];
+        // TODO: get rid of unwrap
         let file_paths = conn
             .indexer
             .borrow()
-            .get_required_files(stream_id, start, end);
+            .get_required_files(stream_id, start, end)
+            .unwrap();
 
         Self {
             stream_ids,
@@ -76,10 +78,12 @@ impl ExecutorNode for VectorSelectNode {
             }
 
             let stream_id = self.stream_ids[self.stream_idx];
+            // TODO: get rid of unwrap
             let file_paths = self
                 .indexer
                 .borrow()
-                .get_required_files(stream_id, self.start, self.end);
+                .get_required_files(stream_id, self.start, self.end)
+                .unwrap();
 
             self.cursor = Cursor::new(
                 file_paths,
