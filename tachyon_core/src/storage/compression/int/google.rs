@@ -9,6 +9,7 @@ use crate::{
 };
 
 use super::IntCompressionUtils;
+use super::TimeDataFile;
 
 const CHUNK_SIZE: usize = 16;
 
@@ -39,7 +40,8 @@ impl<T: Write> CompressionEngine<T> for GoogleCompressionEngine<T> {
         }
     }
 
-    fn consume(&mut self, timestamp: Timestamp, value: Self::PhysicalType) {
+    fn consume(&mut self, timestamp: Timestamp, value: Self::PhysicalType) -> usize {
+        let mut bytes_written = 0;
         let curr_deltas = (
             (timestamp.wrapping_sub(self.last_timestamp)) as i64,
             (value.wrapping_sub(self.last_value)) as i64,
@@ -47,31 +49,41 @@ impl<T: Write> CompressionEngine<T> for GoogleCompressionEngine<T> {
 
         let double_delta = curr_deltas.0 - self.last_deltas.0;
         let ts_delta = IntCompressionUtils::zig_zag_encode(double_delta);
-        self.encode(ts_delta);
+        bytes_written += self.encode(ts_delta);
 
         let double_delta = curr_deltas.1 - self.last_deltas.1;
         let v_delta = IntCompressionUtils::zig_zag_encode(double_delta);
-        self.encode(v_delta);
+        bytes_written += self.encode(v_delta);
 
         self.entries_written += 1;
         self.last_timestamp = timestamp;
         self.last_value = value;
         self.last_deltas = curr_deltas;
+        bytes_written
     }
 
     fn flush_all(&mut self) -> usize {
         self.writer.write_all(&self.result).unwrap();
         self.result.len()
     }
+
+    fn new_from_partial(_: T, _: TimeDataFile) -> Self
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
 }
 
 impl<T: Write> GoogleCompressionEngine<T> {
-    fn encode(&mut self, mut val: u64) {
+    fn encode(&mut self, mut val: u64) -> usize {
         let mask = ((1 << 7) - 1) as u64;
+
+        let old_size = self.result.len();
 
         if val == 0 {
             self.result.push(0);
-            return;
+            return self.result.len() - old_size;
         }
 
         while val > 0 {
@@ -82,6 +94,8 @@ impl<T: Write> GoogleCompressionEngine<T> {
             }
             self.result.push(byte);
         }
+
+        self.result.len() - old_size
     }
 }
 

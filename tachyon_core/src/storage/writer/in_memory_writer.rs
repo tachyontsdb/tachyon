@@ -1,5 +1,6 @@
-use super::file::TimeDataFile;
-use super::MAX_NUM_ENTRIES;
+use super::super::file::TimeDataFile;
+use super::super::MAX_NUM_ENTRIES;
+use super::Writer;
 use crate::query::indexer::Indexer;
 use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version, FILE_EXTENSION};
 use std::cell::RefCell;
@@ -9,51 +10,20 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use uuid::Uuid;
 
-pub struct Writer {
+/**
+ * Legacy Writer
+ *
+ * Stores all data in memory until MAX_NUM_ENTRIES is reached. After which the file is commited and persisted to disk.
+ * Allows users to flush partially written files to disk. Users cannot read data that is still in memory.
+ */
+pub struct InMemoryWriter {
     open_data_files: HashMap<Uuid, TimeDataFile>, // Stream ID to in-mem file
     root: PathBuf,
     indexer: Rc<RefCell<Indexer>>,
     version: Version,
 }
 
-impl Writer {
-    pub fn new(root: impl AsRef<Path>, indexer: Rc<RefCell<Indexer>>, version: Version) -> Self {
-        Writer {
-            open_data_files: HashMap::new(),
-            root: root.as_ref().to_path_buf(),
-            indexer,
-            version,
-        }
-    }
-
-    pub fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value, value_type: ValueType) {
-        let file = self
-            .open_data_files
-            .entry(stream_id)
-            .or_insert(TimeDataFile::new(
-                self.version,
-                StreamId(stream_id.as_u128()),
-                value_type,
-            ));
-
-        file.write_data_to_file_in_mem(ts, v);
-        if file.num_entries() >= MAX_NUM_ENTRIES {
-            let file_path = Writer::derive_file_path(&self.root, stream_id, file);
-            file.write(file_path.clone());
-            // TODO: remove unwrap
-            self.indexer
-                .borrow_mut()
-                .insert_new_file(
-                    stream_id,
-                    &file_path,
-                    file.header.min_timestamp,
-                    file.header.max_timestamp,
-                )
-                .unwrap();
-            self.open_data_files.remove_entry(&stream_id);
-        }
-    }
-
+impl InMemoryWriter {
     pub fn batch_write(&mut self, stream_id: Uuid, batch: &[Vector], value_type: ValueType) {
         let mut entries_written: usize = 0;
         let num_entries = batch.len();
@@ -71,35 +41,14 @@ impl Writer {
             entries_written += file.write_batch_data_to_file_in_mem(&batch[entries_written..]);
 
             if file.num_entries() >= MAX_NUM_ENTRIES {
-                file.write(Writer::derive_file_path(&(self.root), stream_id, file));
+                file.write(InMemoryWriter::derive_file_path(
+                    &(self.root),
+                    stream_id,
+                    file,
+                ));
                 self.open_data_files.remove_entry(&stream_id);
             }
         }
-    }
-
-    pub fn create_stream(&self, stream_id: Uuid) {
-        let stream = self.root.join(stream_id.to_string());
-        if !stream.exists() {
-            fs::create_dir(stream).unwrap();
-        }
-    }
-
-    pub fn flush_all(&mut self) {
-        for (stream_id, file) in self.open_data_files.iter_mut() {
-            let file_path = Writer::derive_file_path(&self.root, *stream_id, file);
-            file.write(file_path.clone());
-            // TODO: remove unwrap
-            self.indexer
-                .borrow_mut()
-                .insert_new_file(
-                    *stream_id,
-                    &file_path,
-                    file.header.min_timestamp,
-                    file.header.max_timestamp,
-                )
-                .unwrap()
-        }
-        self.open_data_files.clear();
     }
 
     fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, file: &TimeDataFile) -> PathBuf {
@@ -112,7 +61,71 @@ impl Writer {
     }
 }
 
-impl Drop for Writer {
+impl Writer for InMemoryWriter {
+    fn new(root: impl AsRef<Path>, indexer: Rc<RefCell<Indexer>>, version: Version) -> Self {
+        InMemoryWriter {
+            open_data_files: HashMap::new(),
+            root: root.as_ref().to_path_buf(),
+            indexer,
+            version,
+        }
+    }
+
+    fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value, value_type: ValueType) {
+        let file = self
+            .open_data_files
+            .entry(stream_id)
+            .or_insert(TimeDataFile::new(
+                self.version,
+                StreamId(stream_id.as_u128()),
+                value_type,
+            ));
+
+        file.write_data_to_file_in_mem(ts, v);
+        if file.num_entries() >= MAX_NUM_ENTRIES {
+            let file_path = InMemoryWriter::derive_file_path(&self.root, stream_id, file);
+            file.write(file_path.clone());
+            // TODO: remove unwrap
+            self.indexer
+                .borrow_mut()
+                .insert_new_file(
+                    stream_id,
+                    &file_path,
+                    file.header.min_timestamp,
+                    Some(file.header.max_timestamp),
+                )
+                .unwrap();
+            self.open_data_files.remove_entry(&stream_id);
+        }
+    }
+
+    fn create_stream(&self, stream_id: Uuid) {
+        let stream = self.root.join(stream_id.to_string());
+        if !stream.exists() {
+            fs::create_dir(stream).unwrap();
+        }
+    }
+
+    fn flush_all(&mut self) {
+        for (stream_id, file) in self.open_data_files.iter_mut() {
+            let file_path = InMemoryWriter::derive_file_path(&self.root, *stream_id, file);
+            file.write(file_path.clone());
+            // TODO: remove unwrap
+            self.indexer
+                .borrow_mut()
+                .insert_new_file(
+                    *stream_id,
+                    &file_path,
+                    file.header.min_timestamp,
+                    Some(file.header.max_timestamp),
+                )
+                .unwrap()
+        }
+        self.open_data_files.clear();
+    }
+}
+
+impl Drop for InMemoryWriter {
     fn drop(&mut self) {
         self.flush_all();
     }
@@ -172,7 +185,7 @@ mod tests {
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
         indexer.borrow_mut().create_store().unwrap();
 
-        let mut writer = Writer::new(dirs[0].clone(), indexer, Version(0));
+        let mut writer = InMemoryWriter::new(dirs[0].clone(), indexer, Version(0));
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
@@ -195,6 +208,9 @@ mod tests {
         for i in 0..values.len() {
             assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
         }
+        for (i, timestamp) in timestamps.iter().enumerate() {
+            assert!(files[0].timestamps[i] == *timestamp);
+        }
     }
 
     #[test]
@@ -204,7 +220,7 @@ mod tests {
 
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
         indexer.borrow_mut().create_store().unwrap();
-        let mut writer = Writer::new(dirs[0].clone(), indexer, Version(0));
+        let mut writer = InMemoryWriter::new(dirs[0].clone(), indexer, Version(0));
 
         let mut timestamps = [Vec::<Timestamp>::new(), Vec::<Timestamp>::new()];
         let mut values = [Vec::<Value>::new(), Vec::<Value>::new()];
@@ -243,7 +259,7 @@ mod tests {
         let mut base: usize = 0;
 
         let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
-        let mut writer = Writer::new(dirs[0].clone(), indexer, Version(0));
+        let mut writer = InMemoryWriter::new(dirs[0].clone(), indexer, Version(0));
         let mut timestamps_per_file = [
             Vec::<Timestamp>::new(),
             Vec::<Timestamp>::new(),
@@ -262,7 +278,7 @@ mod tests {
             timestamps_per_file: &mut [Vec<Timestamp>],
             values_per_file: &mut [Vec<Value>],
             count: &mut usize,
-            writer: &mut Writer,
+            writer: &mut InMemoryWriter,
             stream_id: Uuid,
         ) {
             let mut entries = Vec::<Vector>::with_capacity(n);
