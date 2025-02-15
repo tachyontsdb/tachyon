@@ -118,7 +118,6 @@ impl Writer for InMemoryWriter {
                     &file_path,
                     file.header.min_timestamp,
                     Some(file.header.max_timestamp),
-
                 )
                 .unwrap()
         }

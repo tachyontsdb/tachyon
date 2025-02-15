@@ -31,7 +31,13 @@ trait IndexerStore {
         start: Timestamp,
         end: Option<Timestamp>,
     ) -> Result<(), IndexerErr>;
-    fn insert_or_replace_file(&mut self, id: Uuid, file: &Path, start: Timestamp, end: Timestamp) -> Result<(), IndexerErr>;
+    fn insert_or_replace_file(
+        &mut self,
+        id: Uuid,
+        file: &Path,
+        start: Timestamp,
+        end: Timestamp,
+    ) -> Result<(), IndexerErr>;
 
     fn get_stream_and_matcher_ids(&self, stream: &str, matchers: &Matchers) -> Vec<HashSet<Uuid>>;
     fn get_files_for_stream_id(
@@ -40,10 +46,7 @@ trait IndexerStore {
         start: Timestamp,
         end: Timestamp,
     ) -> Result<Vec<PathBuf>, IndexerErr>;
-    fn get_open_files_for_stream_id(
-        &self,
-        stream_id: Uuid,
-    ) -> Result<Vec<PathBuf>, IndexerErr>;
+    fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Result<Vec<PathBuf>, IndexerErr>;
 }
 
 mod sqlite {
@@ -289,7 +292,7 @@ mod sqlite {
 
             Ok(())
         }
-        
+
         fn insert_or_replace_file(
             &mut self,
             id: Uuid,
@@ -306,7 +309,7 @@ mod sqlite {
                     (id, file.to_str(), start, end),
                 )
                 .unwrap();
-        
+
             Ok(())
         }
 
@@ -397,14 +400,14 @@ mod sqlite {
             Ok(streams)
         }
 
-        fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Result<Vec<PathBuf>, IndexerErr> {
-            let mut stmt = self
-                .conn
-                .prepare_cached(&format!(
-                    "SELECT filename FROM {} WHERE id = ? AND end IS NULL",
-                    Self::SQLITE_ID_TO_FILENAME_TABLE
-                ))?;
-
+        fn get_open_files_for_stream_id(
+            &self,
+            stream_id: Uuid,
+        ) -> Result<Vec<PathBuf>, IndexerErr> {
+            let mut stmt = self.conn.prepare_cached(&format!(
+                "SELECT filename FROM {} WHERE id = ? AND end IS NULL",
+                Self::SQLITE_ID_TO_FILENAME_TABLE
+            ))?;
 
             // SAFETY: the row.get call will only fail if we generated the table wrong, which is bad
             let rows = stmt.query_map((stream_id,), |row| {
@@ -520,7 +523,10 @@ impl Indexer {
         self.store.get_files_for_stream_id(stream_id, start, end)
     }
 
-    pub fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Result<Vec<PathBuf>, IndexerErr> {
+    pub fn get_open_files_for_stream_id(
+        &self,
+        stream_id: Uuid,
+    ) -> Result<Vec<PathBuf>, IndexerErr> {
         self.store.get_open_files_for_stream_id(stream_id)
     }
 }

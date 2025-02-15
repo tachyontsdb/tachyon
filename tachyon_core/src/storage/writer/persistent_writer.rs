@@ -33,7 +33,8 @@ impl PersistentWriter {
         let open_file = self
             .indexer
             .borrow()
-            .get_open_files_for_stream_id(stream_id).unwrap();
+            .get_open_files_for_stream_id(stream_id)
+            .unwrap();
 
         if open_file.len() == 1 {
             let file_path = &open_file[0];
@@ -48,7 +49,8 @@ impl PersistentWriter {
             let file_path = PersistentWriter::derive_file_path(&self.root, stream_id, ts);
             self.indexer
                 .borrow_mut()
-                .insert_new_file(stream_id, &file_path, ts, None).unwrap();
+                .insert_new_file(stream_id, &file_path, ts, None)
+                .unwrap();
 
             PartiallyPersistentDataFile::new(
                 self.version,
@@ -77,12 +79,15 @@ impl Writer for PersistentWriter {
             file.write(ts, v).unwrap();
             if file.num_entries() >= MAX_NUM_ENTRIES {
                 file.flush().unwrap();
-                self.indexer.borrow_mut().insert_or_replace_file(
-                    stream_id,
-                    &file.path,
-                    file.header.borrow().min_timestamp,
-                    file.header.borrow().max_timestamp,
-                ).unwrap();
+                self.indexer
+                    .borrow_mut()
+                    .insert_or_replace_file(
+                        stream_id,
+                        &file.path,
+                        file.header.borrow().min_timestamp,
+                        file.header.borrow().max_timestamp,
+                    )
+                    .unwrap();
                 self.open_data_files.remove_entry(&stream_id);
             }
         } else {
@@ -97,12 +102,15 @@ impl Writer for PersistentWriter {
             file.flush().unwrap();
             // TODO: we can have files that aren't the max number of entries
             // We need to decompress the partial file and then do some logic to complete any unfinished chunk at the end of the file
-            self.indexer.borrow_mut().insert_or_replace_file(
-                *stream_id,
-                &file.path,
-                file.header.borrow().min_timestamp,
-                file.header.borrow().max_timestamp,
-            ).unwrap();
+            self.indexer
+                .borrow_mut()
+                .insert_or_replace_file(
+                    *stream_id,
+                    &file.path,
+                    file.header.borrow().min_timestamp,
+                    file.header.borrow().max_timestamp,
+                )
+                .unwrap();
         }
         self.open_data_files.clear();
     }

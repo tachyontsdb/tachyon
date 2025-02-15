@@ -66,10 +66,11 @@ impl<T: Write> CompressionEngine<T> for GoogleCompressionEngine<T> {
         self.writer.write_all(&self.result).unwrap();
         self.result.len()
     }
-    
+
     fn new_from_partial(_: T, _: TimeDataFile) -> Self
     where
-        Self: Sized {
+        Self: Sized,
+    {
         todo!()
     }
 }

@@ -16,8 +16,8 @@ use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use thiserror::Error;
 use storage::writer::persistent_writer::PersistentWriter;
+use thiserror::Error;
 use uuid::Uuid;
 
 mod ffi;
