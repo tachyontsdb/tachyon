@@ -16,6 +16,7 @@ use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use thiserror::Error;
 use storage::writer::persistent_writer::PersistentWriter;
 use uuid::Uuid;
 
@@ -373,7 +374,7 @@ impl Connection {
                 indexer,
                 CURRENT_VERSION,
             ))),
-        }
+        })
     }
 
     fn parse_stream(&self, stream: impl AsRef<str>) -> parser::VectorSelector {
@@ -616,7 +617,7 @@ mod tests {
     }
 
     fn e2e_large_vector_test(root_dir: PathBuf) {
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         let mut inserter = create_stream_helper(
             &mut conn,

@@ -33,7 +33,7 @@ impl PersistentWriter {
         let open_file = self
             .indexer
             .borrow()
-            .get_open_files_for_stream_id(stream_id);
+            .get_open_files_for_stream_id(stream_id).unwrap();
 
         if open_file.len() == 1 {
             let file_path = &open_file[0];
@@ -48,7 +48,7 @@ impl PersistentWriter {
             let file_path = PersistentWriter::derive_file_path(&self.root, stream_id, ts);
             self.indexer
                 .borrow_mut()
-                .insert_new_file(stream_id, &file_path, ts, None);
+                .insert_new_file(stream_id, &file_path, ts, None).unwrap();
 
             PartiallyPersistentDataFile::new(
                 self.version,
@@ -82,7 +82,7 @@ impl Writer for PersistentWriter {
                     &file.path,
                     file.header.borrow().min_timestamp,
                     file.header.borrow().max_timestamp,
-                );
+                ).unwrap();
                 self.open_data_files.remove_entry(&stream_id);
             }
         } else {
@@ -102,7 +102,7 @@ impl Writer for PersistentWriter {
                 &file.path,
                 file.header.borrow().min_timestamp,
                 file.header.borrow().max_timestamp,
-            );
+            ).unwrap();
         }
         self.open_data_files.clear();
     }
@@ -167,8 +167,8 @@ mod tests {
         set_up_dirs!(dirs, "db");
         let stream_id = Uuid::new_v4();
 
-        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        indexer.borrow_mut().create_store();
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
+        indexer.borrow_mut().create_store().unwrap();
 
         let mut writer = PersistentWriter::new(dirs[0].clone(), indexer, Version(0));
         let mut timestamps = Vec::<Timestamp>::new();
@@ -203,8 +203,8 @@ mod tests {
         set_up_dirs!(dirs, "db");
         let stream_id = Uuid::new_v4();
 
-        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        indexer.borrow_mut().create_store();
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
+        indexer.borrow_mut().create_store().unwrap();
 
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
@@ -269,8 +269,8 @@ mod tests {
         set_up_dirs!(dirs, "db");
         let stream_ids = [Uuid::new_v4(), Uuid::new_v4()];
 
-        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        indexer.borrow_mut().create_store();
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
+        indexer.borrow_mut().create_store().unwrap();
         let mut writer = PersistentWriter::new(dirs[0].clone(), indexer, Version(0));
 
         let mut timestamps = [Vec::<Timestamp>::new(), Vec::<Timestamp>::new()];
@@ -312,8 +312,8 @@ mod tests {
         let n = (1.5 * MAX_NUM_ENTRIES as f32).round() as usize;
         let mut base: usize = 0;
 
-        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone())));
-        indexer.borrow_mut().create_store();
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
+        indexer.borrow_mut().create_store().unwrap();
         let mut writer = PersistentWriter::new(dirs[0].clone(), indexer, Version(0));
         let mut timestamps_per_file = [
             Vec::<Timestamp>::new(),
