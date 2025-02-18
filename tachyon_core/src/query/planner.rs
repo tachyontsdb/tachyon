@@ -21,7 +21,7 @@ pub enum PlannerErr {
     #[error("QueryPlanner requires {start_or_end} member to be set.")]
     StartEndTimeErr { start_or_end: String },
     #[error("Failed to handle @ modifier due to system time error.")]
-    TimerErr (#[from] SystemTimeError)
+    TimerErr(#[from] SystemTimeError),
 }
 
 #[derive(Debug)]
@@ -80,36 +80,28 @@ impl<'a> QueryPlanner<'a> {
                 let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None)?);
 
                 if let Some(param_expr) = expr.param.as_ref() {
-                    let param = Box::new(self.handle_expr(
-                        &param_expr,
-                        conn,
-                        ScanHint::None,
-                    )?);
+                    let param = Box::new(self.handle_expr(&param_expr, conn, ScanHint::None)?);
                     Ok(TNode::GetK(GetKNode::new(
                         conn,
                         GetKType::Bottom,
                         child,
                         param,
-                    )))    
+                    )))
                 } else {
                     Err(PlannerErr::QuerySyntaxErr)
                 }
             }
             parser::token::T_TOPK => {
                 let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None)?);
-                
+
                 if let Some(param_expr) = expr.param.as_ref() {
-                    let param = Box::new(self.handle_expr(
-                        &param_expr,
-                        conn,
-                        ScanHint::None,
-                    )?);
+                    let param = Box::new(self.handle_expr(&param_expr, conn, ScanHint::None)?);
                     Ok(TNode::GetK(GetKNode::new(
                         conn,
                         GetKType::Top,
                         child,
                         param,
-                    )))    
+                    )))
                 } else {
                     Err(PlannerErr::QuerySyntaxErr)
                 }
@@ -123,7 +115,9 @@ impl<'a> QueryPlanner<'a> {
         _: &UnaryExpr,
         _: &mut Connection,
     ) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr { expr_type: "Unary".to_string() })
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: "Unary".to_string(),
+        })
     }
 
     fn handle_binary_expr(
@@ -131,7 +125,7 @@ impl<'a> QueryPlanner<'a> {
         expr: &BinaryExpr,
         conn: &mut Connection,
     ) -> Result<TNode, PlannerErr> {
-        let op =             match expr.op.id() {
+        let op = match expr.op.id() {
             parser::token::T_ADD => Ok(BinaryOp::Arithmetic(ArithmeticOp::Add)),
             parser::token::T_SUB => Ok(BinaryOp::Arithmetic(ArithmeticOp::Subtract)),
             parser::token::T_MUL => Ok(BinaryOp::Arithmetic(ArithmeticOp::Multiply)),
@@ -166,7 +160,9 @@ impl<'a> QueryPlanner<'a> {
         _: &SubqueryExpr,
         _: &mut Connection,
     ) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr { expr_type: "Subquery".to_string() })
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: "Subquery".to_string(),
+        })
     }
 
     fn handle_number_literal_expr(
@@ -185,7 +181,9 @@ impl<'a> QueryPlanner<'a> {
         _: &StringLiteral,
         _: &mut Connection,
     ) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr { expr_type: "String Literal".to_string() })
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: "String Literal".to_string(),
+        })
     }
 
     fn handle_vector_selector_expr(
@@ -224,15 +222,19 @@ impl<'a> QueryPlanner<'a> {
                         start,
                         end,
                         hint,
-                    )))    
+                    )))
                 } else {
                     Err(PlannerErr::QuerySyntaxErr)
                 }
             } else {
-                Err(PlannerErr::StartEndTimeErr { start_or_end: "end".to_string() })
+                Err(PlannerErr::StartEndTimeErr {
+                    start_or_end: "end".to_string(),
+                })
             }
         } else {
-            Err(PlannerErr::StartEndTimeErr { start_or_end: "start".to_string() })
+            Err(PlannerErr::StartEndTimeErr {
+                start_or_end: "start".to_string(),
+            })
         }
     }
 
@@ -241,11 +243,15 @@ impl<'a> QueryPlanner<'a> {
         _: &MatrixSelector,
         _: &mut Connection,
     ) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr { expr_type: ("Matrix".to_string()) })
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: ("Matrix".to_string()),
+        })
     }
 
     fn handle_call_expr(&mut self, _: &Call, _: &mut Connection) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr { expr_type: ("Call".to_string()) })
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: ("Call".to_string()),
+        })
     }
 
     fn handle_extension_expr(
@@ -253,7 +259,9 @@ impl<'a> QueryPlanner<'a> {
         _: &Extension,
         _: &mut Connection,
     ) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr { expr_type: ("Extension".to_string()) })
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: ("Extension".to_string()),
+        })
     }
 
     fn handle_expr(
