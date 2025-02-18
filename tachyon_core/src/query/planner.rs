@@ -50,33 +50,32 @@ impl<'a> QueryPlanner<'a> {
             parser::token::T_SUM => Ok(TNode::Aggregate(AggregateNode::new(
                 AggregateType::Sum,
                 Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Sum)?),
+                None,
             ))),
             parser::token::T_COUNT => Ok(TNode::Aggregate(AggregateNode::new(
                 AggregateType::Count,
                 Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Count)?),
+                None,
             ))),
             parser::token::T_MIN => Ok(TNode::Aggregate(AggregateNode::new(
                 AggregateType::Min,
                 Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Min)?),
+                None,
             ))),
             parser::token::T_MAX => Ok(TNode::Aggregate(AggregateNode::new(
                 AggregateType::Max,
                 Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Max)?),
+                None,
             ))),
-            parser::token::T_AVG => Ok(TNode::Average(
-                AverageNode::try_new(
-                    Box::new(AggregateNode::new(
-                        AggregateType::Sum,
-                        Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Sum)?),
-                    )),
-                    Box::new(AggregateNode::new(
-                        AggregateType::Count,
-                        Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Count)?),
-                    )),
-                )
-                // TODO: remove unwrap
-                .unwrap(),
-            )),
+            parser::token::T_AVG => Ok(TNode::Aggregate(AggregateNode::new(
+                AggregateType::Average,
+                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Sum)?),
+                Some(Box::new(self.handle_expr(
+                    &expr.expr,
+                    conn,
+                    ScanHint::Count,
+                )?)),
+            ))),
             parser::token::T_BOTTOMK => {
                 let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None)?);
 
