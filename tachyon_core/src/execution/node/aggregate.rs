@@ -8,18 +8,68 @@ pub enum AggregateType {
     Count,
     Min,
     Max,
+    Average,
 }
 
 pub struct AggregateNode {
     pub aggregate_type: AggregateType,
     child: Box<TNode>,
+    other_child: Option<Box<TNode>>,
+    returned: bool, // Used to distinguish between returning 0 and None when summing/counting no values
 }
 
 impl AggregateNode {
-    pub fn new(aggregate_type: AggregateType, child: Box<TNode>) -> Self {
+    pub fn new(
+        aggregate_type: AggregateType,
+        child: Box<TNode>,
+        other_child: Option<Box<TNode>>,
+    ) -> Self {
         Self {
             aggregate_type,
             child,
+            other_child,
+            returned: false,
+        }
+    }
+
+    fn next_sum(
+        conn: &mut Connection,
+        value_type: ValueType,
+        child: &mut Box<TNode>,
+    ) -> Option<Value> {
+        let mut sum = child.next_vector(conn)?.value;
+
+        while let Some(Vector { value, .. }) = child.next_vector(conn) {
+            sum = sum.add_same(value_type, &value);
+        }
+
+        Some(sum)
+    }
+
+    fn next_count(
+        conn: &mut Connection,
+        value_type: ValueType,
+        child: &mut Box<TNode>,
+    ) -> Option<Value> {
+        if let TNode::VectorSelect(_) = **child {
+            let mut count = Value::get_default(value_type);
+            while let Some(Vector { value, .. }) = child.next_vector(conn) {
+                count = count.add_same(value_type, &value);
+            }
+            Some(count)
+        } else {
+            let mut count = 0u64;
+            while child.next_vector(conn).is_some() {
+                count += 1;
+            }
+            Some(count.into())
+        }
+    }
+
+    fn get_count_value_type(child: &TNode) -> ValueType {
+        match *child {
+            TNode::VectorSelect(_) => child.value_type(),
+            _ => ValueType::UInteger64,
         }
     }
 }
@@ -29,10 +79,8 @@ impl ExecutorNode for AggregateNode {
         let child_value_type = self.child.value_type();
 
         match self.aggregate_type {
-            AggregateType::Count => match *self.child {
-                TNode::VectorSelect(_) => child_value_type,
-                _ => ValueType::UInteger64,
-            },
+            AggregateType::Count => AggregateNode::get_count_value_type(&self.child),
+            AggregateType::Average => ValueType::Float64,
             _ => child_value_type,
         }
     }
@@ -42,33 +90,35 @@ impl ExecutorNode for AggregateNode {
     }
 
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+        let returned = self.returned;
+        self.returned = true;
+
         match self.aggregate_type {
-            AggregateType::Sum => {
-                let mut sum = self.child.next_vector(conn)?.value;
-                let value_type = self.value_type();
-
-                while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
-                    sum = sum.add_same(value_type, &value);
-                }
-
-                Some(sum)
-            }
+            AggregateType::Sum => AggregateNode::next_sum(conn, self.value_type(), &mut self.child),
             AggregateType::Count => {
-                let first_vector = self.child.next_vector(conn)?;
-
-                if let TNode::VectorSelect(_) = *self.child {
-                    let mut count = first_vector.value;
-                    let value_type = self.value_type();
-                    while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
-                        count = count.add_same(value_type, &value);
-                    }
-                    Some(count)
+                if returned {
+                    None
                 } else {
-                    let mut count = 1u64;
-                    while self.child.next_vector(conn).is_some() {
-                        count += 1;
+                    AggregateNode::next_count(conn, self.value_type(), &mut self.child)
+                }
+            }
+            AggregateType::Average => {
+                let other_child = self
+                    .other_child
+                    .as_mut()
+                    .expect("invalid initialization of child nodes of AggregateType::Average"); // Should never happen
+
+                let sum_value_type = self.child.value_type();
+                let sum_opt = AggregateNode::next_sum(conn, sum_value_type, &mut self.child);
+
+                let count_value_type = AggregateNode::get_count_value_type(other_child);
+                let count_opt = AggregateNode::next_count(conn, count_value_type, other_child);
+
+                match (sum_opt, count_opt) {
+                    (Some(sum), Some(count)) => {
+                        Some(sum.div(sum_value_type, &count, count_value_type))
                     }
-                    Some(count.into())
+                    _ => None,
                 }
             }
             AggregateType::Min | AggregateType::Max => {

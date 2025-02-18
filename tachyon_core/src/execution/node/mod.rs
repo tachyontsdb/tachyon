@@ -1,7 +1,6 @@
 use crate::{Connection, ReturnType, Value, ValueType, Vector};
 
 mod aggregate;
-mod average;
 mod binary_op;
 mod get_k;
 mod number_literal;
@@ -11,7 +10,6 @@ mod vector_to_scalar;
 mod vector_to_vector;
 
 pub use aggregate::*;
-pub use average::*;
 pub use binary_op::*;
 pub use get_k::*;
 pub use number_literal::*;
@@ -42,7 +40,6 @@ pub enum TNode {
     VectorToScalar(VectorToScalarNode),
     ScalarToScalar(ScalarToScalarNode),
     Aggregate(AggregateNode),
-    Average(AverageNode),
     GetK(GetKNode),
 }
 
@@ -56,7 +53,6 @@ impl ExecutorNode for TNode {
             TNode::VectorToScalar(sel) => sel.value_type(),
             TNode::ScalarToScalar(sel) => sel.value_type(),
             TNode::Aggregate(sel) => sel.value_type(),
-            TNode::Average(sel) => sel.value_type(),
             TNode::GetK(sel) => sel.value_type(),
         }
     }
@@ -70,7 +66,6 @@ impl ExecutorNode for TNode {
             TNode::VectorToScalar(sel) => sel.return_type(),
             TNode::ScalarToScalar(sel) => sel.return_type(),
             TNode::Aggregate(sel) => sel.return_type(),
-            TNode::Average(sel) => sel.return_type(),
             TNode::GetK(sel) => sel.return_type(),
         }
     }
@@ -81,7 +76,6 @@ impl ExecutorNode for TNode {
             TNode::BinaryOp(sel) => sel.next_scalar(conn),
             TNode::ScalarToScalar(sel) => sel.next_scalar(conn),
             TNode::Aggregate(sel) => sel.next_scalar(conn),
-            TNode::Average(sel) => sel.next_scalar(conn),
             TNode::GetK(sel) => sel.next_scalar(conn),
             _ => panic!("next_scalar not implemented for this node!"),
         }
