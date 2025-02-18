@@ -47,26 +47,23 @@ impl<'a> QueryPlanner<'a> {
         conn: &mut Connection,
     ) -> Result<TNode, PlannerErr> {
         match expr.op.id() {
-            parser::token::T_SUM => Ok(TNode::Aggregate(AggregateNode::new(
-                AggregateType::Sum,
-                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Sum)?),
-                None,
-            ))),
-            parser::token::T_COUNT => Ok(TNode::Aggregate(AggregateNode::new(
-                AggregateType::Count,
-                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Count)?),
-                None,
-            ))),
-            parser::token::T_MIN => Ok(TNode::Aggregate(AggregateNode::new(
-                AggregateType::Min,
-                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Min)?),
-                None,
-            ))),
-            parser::token::T_MAX => Ok(TNode::Aggregate(AggregateNode::new(
-                AggregateType::Max,
-                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Max)?),
-                None,
-            ))),
+            parser::token::T_SUM
+            | parser::token::T_COUNT
+            | parser::token::T_MIN
+            | parser::token::T_MAX => {
+                let (aggregate_type, scan_hint) = match expr.op.id() {
+                    parser::token::T_SUM => (AggregateType::Sum, ScanHint::Sum),
+                    parser::token::T_COUNT => (AggregateType::Count, ScanHint::Count),
+                    parser::token::T_MIN => (AggregateType::Min, ScanHint::Min),
+                    parser::token::T_MAX => (AggregateType::Max, ScanHint::Max),
+                    _ => unreachable!(),
+                };
+                Ok(TNode::Aggregate(AggregateNode::new(
+                    aggregate_type,
+                    Box::new(self.handle_expr(&expr.expr, conn, scan_hint)?),
+                    None,
+                )))
+            }
             parser::token::T_AVG => Ok(TNode::Aggregate(AggregateNode::new(
                 AggregateType::Average,
                 Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Sum)?),
@@ -76,29 +73,18 @@ impl<'a> QueryPlanner<'a> {
                     ScanHint::Count,
                 )?)),
             ))),
-            parser::token::T_BOTTOMK => {
+            parser::token::T_BOTTOMK | parser::token::T_TOPK => {
                 let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None)?);
 
-                if let Some(param_expr) = expr.param.as_ref() {
+                if let Some(param_expr) = &expr.param {
                     let param = Box::new(self.handle_expr(param_expr, conn, ScanHint::None)?);
                     Ok(TNode::GetK(GetKNode::new(
                         conn,
-                        GetKType::Bottom,
-                        child,
-                        param,
-                    )))
-                } else {
-                    Err(PlannerErr::QuerySyntaxErr)
-                }
-            }
-            parser::token::T_TOPK => {
-                let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None)?);
-
-                if let Some(param_expr) = expr.param.as_ref() {
-                    let param = Box::new(self.handle_expr(param_expr, conn, ScanHint::None)?);
-                    Ok(TNode::GetK(GetKNode::new(
-                        conn,
-                        GetKType::Top,
+                        match expr.op.id() {
+                            parser::token::T_BOTTOMK => GetKType::Bottom,
+                            parser::token::T_TOPK => GetKType::Top,
+                            _ => unreachable!(),
+                        },
                         child,
                         param,
                     )))
