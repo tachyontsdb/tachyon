@@ -80,7 +80,7 @@ impl<'a> QueryPlanner<'a> {
                 let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None)?);
 
                 if let Some(param_expr) = expr.param.as_ref() {
-                    let param = Box::new(self.handle_expr(&param_expr, conn, ScanHint::None)?);
+                    let param = Box::new(self.handle_expr(param_expr, conn, ScanHint::None)?);
                     Ok(TNode::GetK(GetKNode::new(
                         conn,
                         GetKType::Bottom,
@@ -95,7 +95,7 @@ impl<'a> QueryPlanner<'a> {
                 let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None)?);
 
                 if let Some(param_expr) = expr.param.as_ref() {
-                    let param = Box::new(self.handle_expr(&param_expr, conn, ScanHint::None)?);
+                    let param = Box::new(self.handle_expr(param_expr, conn, ScanHint::None)?);
                     Ok(TNode::GetK(GetKNode::new(
                         conn,
                         GetKType::Top,
@@ -152,7 +152,7 @@ impl<'a> QueryPlanner<'a> {
         expr: &ParenExpr,
         conn: &mut Connection,
     ) -> Result<TNode, PlannerErr> {
-        Ok(self.handle_expr(&expr.expr, conn, ScanHint::None)?)
+        self.handle_expr(&expr.expr, conn, ScanHint::None)
     }
 
     fn handle_subquery_expr(
