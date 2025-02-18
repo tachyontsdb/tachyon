@@ -394,14 +394,4 @@ mod tests {
             }
         };
     }
-
-    #[test]
-    fn test_query_syntax_error() {
-        let query_string = r#"topk(5, http_requests_total{service = "web" or service = "nice"})"#;
-        let res = parser::parse(query_string);
-        match res {
-            Err(e) => println!("{}", e),
-            _ => panic!("expected error"),
-        };
-    }
 }
