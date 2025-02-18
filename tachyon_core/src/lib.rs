@@ -1160,7 +1160,7 @@ mod tests {
         binary_operand: u64,
         expected: Option<Value>,
     ) {
-        let mut conn = Connection::new(root_dir);
+        let mut conn = Connection::new(root_dir).unwrap();
 
         let timestamps = [23, 25, 29];
         let values = [27.0, 31.0, 47.0];
