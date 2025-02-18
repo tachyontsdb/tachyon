@@ -1,3 +1,5 @@
+use std::time::SystemTimeError;
+
 use crate::execution::node::{
     AggregateNode, AggregateType, ArithmeticOp, BinaryOp, BinaryOpNode, ComparisonOp, GetKNode,
     GetKType, NumberLiteralNode, TNode, VectorSelectNode,
@@ -8,6 +10,20 @@ use promql_parser::parser::{
     self, AggregateExpr, BinaryExpr, Call, Expr, Extension, MatrixSelector, NumberLiteral,
     ParenExpr, StringLiteral, SubqueryExpr, UnaryExpr, VectorSelector,
 };
+use thiserror::Error;
+
+#[allow(clippy::enum_variant_names)]
+#[derive(Error, Debug)]
+pub enum PlannerErr {
+    #[error("Incorrect query syntax.")]
+    QuerySyntaxErr,
+    #[error("{expr_type} expressions are not supported.")]
+    UnsupportedErr { expr_type: String },
+    #[error("QueryPlanner requires {start_or_end} member to be set.")]
+    StartEndTimeErr { start_or_end: String },
+    #[error("Failed to handle @ modifier due to system time error.")]
+    TimerErr(#[from] SystemTimeError),
+}
 
 #[derive(Debug)]
 pub struct QueryPlanner<'a> {
@@ -21,15 +37,15 @@ impl<'a> QueryPlanner<'a> {
         Self { ast, start, end }
     }
 
-    pub fn plan(&mut self, conn: &mut Connection) -> TNode {
-        self.handle_expr(self.ast, conn, ScanHint::None).unwrap()
+    pub fn plan(&mut self, conn: &mut Connection) -> Result<TNode, PlannerErr> {
+        self.handle_expr(self.ast, conn, ScanHint::None)
     }
 
     fn handle_aggregate_expr(
         &mut self,
         expr: &AggregateExpr,
         conn: &mut Connection,
-    ) -> Result<TNode, &'static str> {
+    ) -> Result<TNode, PlannerErr> {
         match expr.op.id() {
             parser::token::T_SUM
             | parser::token::T_COUNT
@@ -40,39 +56,43 @@ impl<'a> QueryPlanner<'a> {
                     parser::token::T_COUNT => (AggregateType::Count, ScanHint::Count),
                     parser::token::T_MIN => (AggregateType::Min, ScanHint::Min),
                     parser::token::T_MAX => (AggregateType::Max, ScanHint::Max),
-                    _ => panic!("Unknown aggregation token!"),
+                    _ => unreachable!(),
                 };
                 Ok(TNode::Aggregate(AggregateNode::new(
                     aggregate_type,
-                    Box::new(self.handle_expr(&expr.expr, conn, scan_hint).unwrap()),
+                    Box::new(self.handle_expr(&expr.expr, conn, scan_hint)?),
                     None,
                 )))
             }
             parser::token::T_AVG => Ok(TNode::Aggregate(AggregateNode::new(
                 AggregateType::Average,
-                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Sum).unwrap()),
-                Some(Box::new(
-                    self.handle_expr(&expr.expr, conn, ScanHint::Count).unwrap(),
-                )),
+                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Sum)?),
+                Some(Box::new(self.handle_expr(
+                    &expr.expr,
+                    conn,
+                    ScanHint::Count,
+                )?)),
             ))),
             parser::token::T_BOTTOMK | parser::token::T_TOPK => {
-                let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None).unwrap());
-                let param = Box::new(
-                    self.handle_expr(expr.param.as_ref().unwrap(), conn, ScanHint::None)
-                        .unwrap(),
-                );
-                Ok(TNode::GetK(GetKNode::new(
-                    conn,
-                    match expr.op.id() {
-                        parser::token::T_BOTTOMK => GetKType::Bottom,
-                        parser::token::T_TOPK => GetKType::Top,
-                        _ => panic!("Unknown aggregation token!"),
-                    },
-                    child,
-                    param,
-                )))
+                let child = Box::new(self.handle_expr(&expr.expr, conn, ScanHint::None)?);
+
+                if let Some(param_expr) = &expr.param {
+                    let param = Box::new(self.handle_expr(param_expr, conn, ScanHint::None)?);
+                    Ok(TNode::GetK(GetKNode::new(
+                        conn,
+                        match expr.op.id() {
+                            parser::token::T_BOTTOMK => GetKType::Bottom,
+                            parser::token::T_TOPK => GetKType::Top,
+                            _ => unreachable!(),
+                        },
+                        child,
+                        param,
+                    )))
+                } else {
+                    Err(PlannerErr::QuerySyntaxErr)
+                }
             }
-            _ => panic!("Unknown aggregation token!"),
+            _ => Err(PlannerErr::QuerySyntaxErr),
         }
     }
 
@@ -80,32 +100,36 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         _: &UnaryExpr,
         _: &mut Connection,
-    ) -> Result<TNode, &'static str> {
-        Err("Unary expressions currently not supported!")
+    ) -> Result<TNode, PlannerErr> {
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: "Unary".to_string(),
+        })
     }
 
     fn handle_binary_expr(
         &mut self,
         expr: &BinaryExpr,
         conn: &mut Connection,
-    ) -> Result<TNode, &'static str> {
+    ) -> Result<TNode, PlannerErr> {
+        let op = match expr.op.id() {
+            parser::token::T_ADD => Ok(BinaryOp::Arithmetic(ArithmeticOp::Add)),
+            parser::token::T_SUB => Ok(BinaryOp::Arithmetic(ArithmeticOp::Subtract)),
+            parser::token::T_MUL => Ok(BinaryOp::Arithmetic(ArithmeticOp::Multiply)),
+            parser::token::T_DIV => Ok(BinaryOp::Arithmetic(ArithmeticOp::Divide)),
+            parser::token::T_MOD => Ok(BinaryOp::Arithmetic(ArithmeticOp::Modulo)),
+            parser::token::T_EQLC => Ok(BinaryOp::Comparison(ComparisonOp::Equal)),
+            parser::token::T_NEQ => Ok(BinaryOp::Comparison(ComparisonOp::NotEqual)),
+            parser::token::T_GTR => Ok(BinaryOp::Comparison(ComparisonOp::Greater)),
+            parser::token::T_LSS => Ok(BinaryOp::Comparison(ComparisonOp::Less)),
+            parser::token::T_GTE => Ok(BinaryOp::Comparison(ComparisonOp::GreaterEqual)),
+            parser::token::T_LTE => Ok(BinaryOp::Comparison(ComparisonOp::LessEqual)),
+            _ => Err(PlannerErr::QuerySyntaxErr),
+        };
+
         Ok(TNode::BinaryOp(BinaryOpNode::new(
-            match expr.op.id() {
-                parser::token::T_ADD => BinaryOp::Arithmetic(ArithmeticOp::Add),
-                parser::token::T_SUB => BinaryOp::Arithmetic(ArithmeticOp::Subtract),
-                parser::token::T_MUL => BinaryOp::Arithmetic(ArithmeticOp::Multiply),
-                parser::token::T_DIV => BinaryOp::Arithmetic(ArithmeticOp::Divide),
-                parser::token::T_MOD => BinaryOp::Arithmetic(ArithmeticOp::Modulo),
-                parser::token::T_EQLC => BinaryOp::Comparison(ComparisonOp::Equal),
-                parser::token::T_NEQ => BinaryOp::Comparison(ComparisonOp::NotEqual),
-                parser::token::T_GTR => BinaryOp::Comparison(ComparisonOp::Greater),
-                parser::token::T_LSS => BinaryOp::Comparison(ComparisonOp::Less),
-                parser::token::T_GTE => BinaryOp::Comparison(ComparisonOp::GreaterEqual),
-                parser::token::T_LTE => BinaryOp::Comparison(ComparisonOp::LessEqual),
-                _ => panic!("Unknown binary operation token!"),
-            },
-            Box::new(self.handle_expr(&expr.lhs, conn, ScanHint::None).unwrap()),
-            Box::new(self.handle_expr(&expr.rhs, conn, ScanHint::None).unwrap()),
+            op?,
+            Box::new(self.handle_expr(&expr.lhs, conn, ScanHint::None)?),
+            Box::new(self.handle_expr(&expr.rhs, conn, ScanHint::None)?),
         )))
     }
 
@@ -113,7 +137,7 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         expr: &ParenExpr,
         conn: &mut Connection,
-    ) -> Result<TNode, &'static str> {
+    ) -> Result<TNode, PlannerErr> {
         self.handle_expr(&expr.expr, conn, ScanHint::None)
     }
 
@@ -121,15 +145,17 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         _: &SubqueryExpr,
         _: &mut Connection,
-    ) -> Result<TNode, &'static str> {
-        Err("Subquery expressions currently not supported!")
+    ) -> Result<TNode, PlannerErr> {
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: "Subquery".to_string(),
+        })
     }
 
     fn handle_number_literal_expr(
         &mut self,
         expr: &NumberLiteral,
         _: &mut Connection,
-    ) -> Result<TNode, &'static str> {
+    ) -> Result<TNode, PlannerErr> {
         Ok(TNode::NumberLiteral(NumberLiteralNode::new(
             ValueType::Float64,
             expr.val.into(),
@@ -140,8 +166,10 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         _: &StringLiteral,
         _: &mut Connection,
-    ) -> Result<TNode, &'static str> {
-        Err("String literal expressions currently not supported!")
+    ) -> Result<TNode, PlannerErr> {
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: "String Literal".to_string(),
+        })
     }
 
     fn handle_vector_selector_expr(
@@ -149,55 +177,77 @@ impl<'a> QueryPlanner<'a> {
         expr: &VectorSelector,
         conn: &mut Connection,
         hint: ScanHint,
-    ) -> Result<TNode, &'static str> {
-        let start = if expr.at.is_some() {
+    ) -> Result<TNode, PlannerErr> {
+        let start_opt = if expr.at.is_some() {
+            // SAFETY: expr.at is Some from above, unwrapping is safe
             let mut at_res = match expr.at.as_ref().unwrap() {
                 parser::AtModifier::Start => 0,
                 parser::AtModifier::End => u64::MAX,
-                parser::AtModifier::At(t) => t.elapsed().unwrap().as_millis() as u64,
+                parser::AtModifier::At(t) => t.elapsed()?.as_millis() as u64,
             };
 
             if expr.offset.is_some() {
+                // SAFETY: expr.offset is Some from above, unwrapping is safe
                 at_res = match expr.offset.as_ref().unwrap() {
                     parser::Offset::Pos(t) => at_res.saturating_add(t.as_millis() as u64),
                     parser::Offset::Neg(t) => at_res.saturating_sub(t.as_millis() as u64),
                 }
             }
-            at_res
+            Some(at_res)
         } else {
-            self.start.unwrap()
+            self.start
         };
 
-        let end = self.end.unwrap();
-
-        Ok(TNode::VectorSelect(VectorSelectNode::new(
-            conn,
-            expr.name.clone().unwrap(),
-            expr.matchers.clone(),
-            start,
-            end,
-            hint,
-        )))
+        if let Some(start) = start_opt {
+            if let Some(end) = self.end {
+                if let Some(name) = &expr.name {
+                    Ok(TNode::VectorSelect(VectorSelectNode::new(
+                        conn,
+                        name.to_string(),
+                        expr.matchers.clone(),
+                        start,
+                        end,
+                        hint,
+                    )))
+                } else {
+                    Err(PlannerErr::QuerySyntaxErr)
+                }
+            } else {
+                Err(PlannerErr::StartEndTimeErr {
+                    start_or_end: "end".to_string(),
+                })
+            }
+        } else {
+            Err(PlannerErr::StartEndTimeErr {
+                start_or_end: "start".to_string(),
+            })
+        }
     }
 
     fn handle_matrix_selector_expr(
         &mut self,
         _: &MatrixSelector,
         _: &mut Connection,
-    ) -> Result<TNode, &'static str> {
-        Err("Matrix expressions currently not supported!")
+    ) -> Result<TNode, PlannerErr> {
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: ("Matrix".to_string()),
+        })
     }
 
-    fn handle_call_expr(&mut self, _: &Call, _: &mut Connection) -> Result<TNode, &'static str> {
-        Err("Call expressions currently not supported!")
+    fn handle_call_expr(&mut self, _: &Call, _: &mut Connection) -> Result<TNode, PlannerErr> {
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: ("Call".to_string()),
+        })
     }
 
     fn handle_extension_expr(
         &mut self,
         _: &Extension,
         _: &mut Connection,
-    ) -> Result<TNode, &'static str> {
-        Err("Extension expressions currently not supported!")
+    ) -> Result<TNode, PlannerErr> {
+        Err(PlannerErr::UnsupportedErr {
+            expr_type: ("Extension".to_string()),
+        })
     }
 
     fn handle_expr(
@@ -205,7 +255,7 @@ impl<'a> QueryPlanner<'a> {
         expr: &Expr,
         conn: &mut Connection,
         hint: ScanHint,
-    ) -> Result<TNode, &'static str> {
+    ) -> Result<TNode, PlannerErr> {
         match expr {
             Expr::Aggregate(aggregate_expr) => self.handle_aggregate_expr(aggregate_expr, conn),
             Expr::Unary(unary_expr) => self.handle_unary_expr(unary_expr, conn),

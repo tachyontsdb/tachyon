@@ -467,7 +467,8 @@ impl Connection {
     ) -> Query {
         let ast = parser::parse(query.as_ref()).unwrap();
         let mut planner = QueryPlanner::new(&ast, start, end);
-        let plan = planner.plan(self);
+        // TODO: remove unwrap
+        let plan = planner.plan(self).unwrap();
 
         Query {
             plan,

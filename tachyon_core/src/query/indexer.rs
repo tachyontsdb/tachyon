@@ -300,15 +300,13 @@ mod sqlite {
             start: Timestamp,
             end: Timestamp,
         ) -> Result<(), IndexerErr> {
-            self.conn
-                .execute(
-                    &format!(
-                        "INSERT OR REPLACE INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
-                        Self::SQLITE_ID_TO_FILENAME_TABLE
-                    ),
-                    (id, file.to_str(), start, end),
-                )
-                .unwrap();
+            self.conn.execute(
+                &format!(
+                    "INSERT OR REPLACE INTO {} (id, filename, start, end) VALUES (?, ?, ?, ?)",
+                    Self::SQLITE_ID_TO_FILENAME_TABLE
+                ),
+                (id, file.to_str(), start, end),
+            )?;
 
             Ok(())
         }
@@ -357,10 +355,21 @@ mod sqlite {
                         "SELECT value_type FROM {} WHERE id = ?",
                         Self::SQLITE_ID_TO_VALUE_TYPE_TABLE
                     ),
-                    [serde_json::to_string(&stream_id).unwrap()],
+                    // SAFETY: should always be able to convert UUID to string
+                    [serde_json::to_string(&stream_id).expect("Failed to serialize stream_id")],
                     |row| row.get::<usize, u8>(0),
                 )
-                .map_or_else(|_| None, |value_type| Some(value_type.try_into().unwrap()))
+                // SAFETY: value_type should convert into ValueType, if it doesn't we stored it wrong
+                .map_or_else(
+                    |_| None,
+                    |value_type| {
+                        Some(
+                            value_type
+                                .try_into()
+                                .expect("Value in value_type column is invalid"),
+                        )
+                    },
+                )
         }
 
         fn get_all_streams(&self) -> Result<Vec<StreamSummaryType>, IndexerErr> {
@@ -391,7 +400,10 @@ mod sqlite {
                 let stream_summary = (
                     stream_id,
                     self.get_stream_and_matchers_for_stream_id(stream_id)?,
-                    value_type_u8.try_into().unwrap(),
+                    // SAFETY: this will only fail if the value_type is invalid, but we're the ones who put it there
+                    value_type_u8
+                        .try_into()
+                        .expect("Value in value_type column is invalid"),
                 );
 
                 streams.push(stream_summary);
@@ -417,16 +429,11 @@ mod sqlite {
             })?;
 
             // SAFETY: this will always be Ok based on implementation of .query_map above
-            Ok(rows.map(|item| item.unwrap().into()).collect())
+            let file_paths: Vec<PathBuf> = rows.map(|item| item.unwrap().into()).collect();
+            // SAFETY: if multiple files are open the DB could be in a bad state, this should never happen
+            assert!(file_paths.len() <= 1);
 
-            // let file_paths: Vec<PathBuf> = stmt
-            //     .query_map((stream_id,), |row| row.get::<usize, String>(0))
-            //     .unwrap()
-            //     .map(|item| item.unwrap().into())
-            //     .collect();
-            // assert!(file_paths.len() <= 1);
-
-            // file_paths
+            Ok(file_paths)
         }
     }
 }
