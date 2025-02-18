@@ -12,6 +12,7 @@ use promql_parser::parser::{
 };
 use thiserror::Error;
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Error, Debug)]
 pub enum PlannerErr {
     #[error("Incorrect query syntax.")]
