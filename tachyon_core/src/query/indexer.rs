@@ -429,7 +429,11 @@ mod sqlite {
             })?;
 
             // SAFETY: this will always be Ok based on implementation of .query_map above
-            Ok(rows.map(|item| item.unwrap().into()).collect())
+            let file_paths: Vec<PathBuf> = rows.map(|item| item.unwrap().into()).collect();
+            // SAFETY: if multiple files are open the DB could be in a bad state, this should never happen
+            assert!(file_paths.len() <= 1);
+
+            Ok(file_paths)
         }
     }
 }
