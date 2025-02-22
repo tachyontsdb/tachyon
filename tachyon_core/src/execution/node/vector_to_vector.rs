@@ -22,10 +22,6 @@ enum VectorToVectorStream {
 
 impl VectorToVectorNode {
     pub fn new(op: BinaryOp, lhs: Box<TNode>, rhs: Box<TNode>) -> Self {
-        if lhs.value_type() == ValueType::Float64 || rhs.value_type() == ValueType::Float64 {
-            todo!("Floats not supported yet");
-        }
-
         Self {
             op,
             lhs,
@@ -92,13 +88,7 @@ impl VectorToVectorNode {
 
 impl ExecutorNode for VectorToVectorNode {
     fn value_type(&self) -> ValueType {
-        let lhs_value_type = self.lhs.value_type();
-
-        if lhs_value_type != self.rhs.value_type() {
-            todo!("Implement operations between different types!");
-        }
-
-        lhs_value_type
+        ValueType::get_applied_value_type(self.lhs.value_type(), self.rhs.value_type())
     }
 
     fn return_type(&self) -> ReturnType {

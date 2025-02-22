@@ -22,13 +22,10 @@ impl VectorToScalarNode {
 
 impl ExecutorNode for VectorToScalarNode {
     fn value_type(&self) -> ValueType {
-        let vector_value_type = self.vector_node.value_type();
-
-        if vector_value_type != self.scalar_node.value_type() {
-            todo!("Implement operations between different types!");
-        }
-
-        vector_value_type
+        ValueType::get_applied_value_type(
+            self.vector_node.value_type(),
+            self.scalar_node.value_type(),
+        )
     }
 
     fn return_type(&self) -> ReturnType {
