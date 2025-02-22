@@ -2,8 +2,8 @@ use std::io::{Read, Write};
 
 use crate::{
     storage::{
+        compression::Header,
         compression::{CompressionEngine, DecompressionEngine},
-        file::Header,
         FileReaderUtils,
     },
     utils::static_assert,
@@ -188,7 +188,8 @@ impl<T: Write> CompressionEngineV2<T> {
         for arr in [&self.ts_d_deltas, &self.v_d_deltas] {
             let mut max_bits_needed = 0;
             for x in arr {
-                max_bits_needed = u8::max(max_bits_needed, Self::bits_needed_u64(*x));
+                max_bits_needed =
+                    u8::max(max_bits_needed, IntCompressionUtils::bits_needed_u64(*x));
             }
 
             let length_code = V2_LENGTH_LOOKUP[max_bits_needed as usize];
@@ -246,11 +247,6 @@ impl<T: Write> CompressionEngineV2<T> {
         self.cur_length = 0;
         self.result = Vec::new();
         self.temp_buffer = Vec::new();
-    }
-
-    #[inline]
-    fn bits_needed_u64(n: u64) -> u8 {
-        64 - n.leading_zeros() as u8
     }
 }
 
