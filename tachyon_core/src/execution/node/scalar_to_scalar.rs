@@ -1,6 +1,5 @@
-use crate::{Connection, ReturnType, Value, ValueType};
-
 use super::{BinaryOp, ExecutorNode, TNode};
+use crate::{Connection, ReturnType, Value, ValueType};
 
 pub struct ScalarToScalarNode {
     op: BinaryOp,
@@ -16,13 +15,7 @@ impl ScalarToScalarNode {
 
 impl ExecutorNode for ScalarToScalarNode {
     fn value_type(&self) -> ValueType {
-        let lhs_value_type = self.lhs.value_type();
-
-        if lhs_value_type != self.rhs.value_type() {
-            todo!("Implement operations between different types!");
-        }
-
-        lhs_value_type
+        ValueType::get_applied_value_type(self.lhs.value_type(), self.rhs.value_type())
     }
 
     fn return_type(&self) -> ReturnType {

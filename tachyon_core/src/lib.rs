@@ -81,6 +81,18 @@ pub enum ValueType {
     Float64,
 }
 
+impl ValueType {
+    pub fn get_applied_value_type(lhs_value_type: Self, rhs_value_type: Self) -> Self {
+        if lhs_value_type == Self::Float64 || rhs_value_type == Self::Float64 {
+            Self::Float64
+        } else if lhs_value_type == Self::Integer64 || rhs_value_type == Self::Integer64 {
+            Self::Integer64
+        } else {
+            Self::UInteger64
+        }
+    }
+}
+
 impl TryFrom<u8> for ValueType {
     type Error = ();
 
@@ -140,30 +152,46 @@ impl From<f64> for Value {
 macro_rules! create_value_primitive_fn {
     (
         $function_name: ident, $function_name_same: ident, $return_type: ty,
-        $same_variable_name: ident, $other_variable_name: ident,
+        $same_variable_name: ident, $same_variable_value_type: ident,
+        $other_variable_name: ident, $other_variable_value_type: ident,
         $expr_i64: expr, $expr_u64: expr, $expr_f64: expr,
-        $not_equal_block: block
+        $expr_f64_same: expr, $expr_f64_other: expr,
+        $expr_i64_same: expr, $expr_i64_other: expr,
     ) => {
         pub fn $function_name(
-            &self,
-            value_type_self: crate::ValueType,
-            other: &Self,
-            value_type_other: crate::ValueType,
+            &$same_variable_name,
+            $same_variable_value_type: crate::ValueType,
+            $other_variable_name: &Self,
+            $other_variable_value_type: crate::ValueType,
         ) -> $return_type {
-            if value_type_self == value_type_other {
-                self.$function_name_same(value_type_self, other)
+            if $same_variable_value_type == crate::ValueType::Float64 || $other_variable_value_type == crate::ValueType::Float64 {
+                if $same_variable_value_type == crate::ValueType::Float64 && $other_variable_value_type == crate::ValueType::Float64 {
+                    $expr_f64
+                } else if $same_variable_value_type == crate::ValueType::Float64 {
+                    $expr_f64_same
+                } else {
+                    $expr_f64_other
+                }
+            } else if $same_variable_value_type == crate::ValueType::Integer64 || $other_variable_value_type == crate::ValueType::Integer64 {
+                if $same_variable_value_type == crate::ValueType::Integer64 && $other_variable_value_type == crate::ValueType::Integer64 {
+                    $expr_i64
+                } else if $same_variable_value_type == crate::ValueType::Integer64 {
+                    $expr_i64_same
+                } else {
+                    $expr_i64_other
+                }
             } else {
-                $not_equal_block
+                $expr_u64
             }
         }
 
-        /// SAFETY: `value_type` must be the same between `self` and `other`.
+        /// SAFETY: The value type must be the same between `self` and `other`.
         pub fn $function_name_same(
             &$same_variable_name,
-            value_type: crate::ValueType,
+            $same_variable_value_type: crate::ValueType,
             $other_variable_name: &Self,
         ) -> $return_type {
-            match value_type {
+            match $same_variable_value_type {
                 crate::ValueType::Integer64 => {
                     $expr_i64
                 }
@@ -179,23 +207,29 @@ macro_rules! create_value_primitive_fn {
 }
 
 macro_rules! create_value_primitive_fn_simplified {
-    ($function_name: ident, $function_name_same: ident, $called_fn: ident) => {
+    (
+        $function_name: ident, $function_name_same: ident, $return_type: ty,
+        $called_fn: ident $(, $t: tt)*
+    ) => {
         create_value_primitive_fn!(
             $function_name,
             $function_name_same,
-            Self,
+            $return_type,
             self,
+            value_type_self,
             other,
+            value_type_other,
             self.get_integer64()
-                .$called_fn(other.get_integer64())
+                .$called_fn($($t)*other.get_integer64())
                 .into(),
             self.get_uinteger64()
-                .$called_fn(other.get_uinteger64())
+                .$called_fn($($t)*other.get_uinteger64())
                 .into(),
-            self.get_float64().$called_fn(other.get_float64()).into(),
-            {
-                panic!("Invalid operation between values of different types!");
-            }
+            self.get_float64().$called_fn($($t)*other.get_float64()).into(),
+            self.get_float64().$called_fn($($t)*other.convert_into_f64(value_type_other)).into(),
+            self.convert_into_f64(value_type_self).$called_fn($($t)*other.get_float64()).into(),
+            self.get_integer64().$called_fn($($t)*other.convert_into_i64(value_type_other)).into(),
+            self.convert_into_i64(value_type_self).$called_fn($($t)*other.get_integer64()).into(),
         );
     };
 }
@@ -262,39 +296,21 @@ impl Value {
         }
     }
 
-    create_value_primitive_fn!(
-        eq,
-        eq_same,
-        bool,
-        self,
-        other,
-        self.get_integer64().eq(&other.get_integer64()),
-        self.get_uinteger64().eq(&other.get_uinteger64()),
-        self.get_float64().eq(&other.get_float64()),
-        { false }
-    );
-    create_value_primitive_fn!(
-        partial_cmp,
-        partial_cmp_same,
-        Option<Ordering>,
-        self,
-        other,
-        self.get_integer64().partial_cmp(&other.get_integer64()),
-        self.get_uinteger64().partial_cmp(&other.get_uinteger64()),
-        self.get_float64().partial_cmp(&other.get_float64()),
-        { None }
-    );
+    create_value_primitive_fn_simplified!(eq, eq_same, bool, eq, &);
+    create_value_primitive_fn_simplified!(partial_cmp, partial_cmp_same, Option<Ordering>, partial_cmp, &);
 
-    create_value_primitive_fn_simplified!(add, add_same, add);
-    create_value_primitive_fn_simplified!(sub, sub_same, sub);
-    create_value_primitive_fn_simplified!(mul, mul_same, mul);
+    create_value_primitive_fn_simplified!(add, add_same, Self, add);
+    create_value_primitive_fn_simplified!(sub, sub_same, Self, sub);
+    create_value_primitive_fn_simplified!(mul, mul_same, Self, mul);
 
     create_value_primitive_fn!(
         div,
         div_same,
         Self,
         self,
+        value_type_same,
         other,
+        value_type_other,
         (self.get_integer64() as f64)
             .div(other.get_integer64() as f64)
             .into(),
@@ -302,16 +318,28 @@ impl Value {
             .div(other.get_uinteger64() as f64)
             .into(),
         self.get_float64().div(other.get_float64()).into(),
-        {
-            panic!("Invalid operation between values of different types!");
-        }
+        self.get_float64()
+            .div(other.convert_into_f64(value_type_other))
+            .into(),
+        self.convert_into_f64(value_type_same)
+            .div(other.get_float64())
+            .into(),
+        (self.get_integer64() as f64)
+            .div(other.convert_into_f64(value_type_other))
+            .into(),
+        self.convert_into_f64(value_type_same)
+            .div(other.get_integer64() as f64)
+            .into(),
     );
+
     create_value_primitive_fn!(
         mdl,
         mdl_same,
         Self,
         self,
+        value_type_same,
         other,
+        value_type_other,
         (self.get_integer64() as f64)
             .rem(other.get_integer64() as f64)
             .into(),
@@ -319,13 +347,22 @@ impl Value {
             .rem(other.get_uinteger64() as f64)
             .into(),
         self.get_float64().rem(other.get_float64()).into(),
-        {
-            panic!("Invalid operation between values of different types!");
-        }
+        self.get_float64()
+            .rem(other.convert_into_f64(value_type_other))
+            .into(),
+        self.convert_into_f64(value_type_same)
+            .rem(other.get_float64())
+            .into(),
+        (self.get_integer64() as f64)
+            .rem(other.convert_into_f64(value_type_other))
+            .into(),
+        self.convert_into_f64(value_type_same)
+            .rem(other.get_integer64() as f64)
+            .into(),
     );
 
-    create_value_primitive_fn_simplified!(min, min_same, min);
-    create_value_primitive_fn_simplified!(max, max_same, max);
+    create_value_primitive_fn_simplified!(min, min_same, Self, min);
+    create_value_primitive_fn_simplified!(max, max_same, Self, max);
 }
 
 #[derive(Clone, Copy)]
