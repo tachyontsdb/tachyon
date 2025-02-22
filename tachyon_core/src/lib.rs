@@ -157,7 +157,7 @@ macro_rules! create_value_primitive_fn {
             }
         }
 
-        /// Safety: `value_type` must be the same between `self` and `other`.
+        /// SAFETY: `value_type` must be the same between `self` and `other`.
         pub fn $function_name_same(
             &$same_variable_name,
             value_type: crate::ValueType,
@@ -349,7 +349,7 @@ pub enum ConnectionErr {
     GetStreamsErr,
 }
 
-/// Safety: A connection is only single-threaded
+/// SAFETY: A connection is only single-threaded
 pub struct Connection {
     page_cache: Rc<RefCell<PageCache>>,
     indexer: Rc<RefCell<Indexer>>,

@@ -15,9 +15,22 @@ cargo build --locked --release
 
 > Note: Generated C/C++ headers will be placed in the output (`./target/include`) directory.
 
-## Running Lints
+## Running
 
-### Cargo Format
+### CLI
+
+```
+cargo run --locked --release --bin tachyon_cli -- [COMMANDS]
+```
+
+### Web Backend
+```
+cargo run --locked --release --bin tachyon_web_backend
+```
+
+## Lints
+
+### Format
 ```
 cargo fmt --all --check
 ```
@@ -27,7 +40,7 @@ cargo fmt --all --check
 cargo clippy --all-targets --all-features --locked --release -- -D warnings
 ```
 
-## Running Tests and Benchmarks
+## Tests and Benchmarks
 First, unzip the `./data.zip` file. This should create a `./data` directory.
 ```
 unzip data.zip

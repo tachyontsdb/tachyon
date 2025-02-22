@@ -23,7 +23,8 @@ pub unsafe extern "C" fn tachyon_error_print(code: u8, ptr: *const c_void) {
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_error_free(code: u8, ptr: *mut c_void) {
     if let 1..=3 = code {
-        drop(Box::from_raw(ptr as *mut TachyonErr));
+        let err = Box::from_raw(ptr as *mut TachyonErr);
+        drop(err);
     }
 }
 
@@ -137,6 +138,7 @@ pub unsafe extern "C" fn tachyon_inserter_value_type(inserter: *const Inserter) 
     (*inserter).value_type()
 }
 
+/// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_inserter_insert_integer64(
     inserter: *mut Inserter,
@@ -146,6 +148,7 @@ pub unsafe extern "C" fn tachyon_inserter_insert_integer64(
     (*inserter).insert_integer64(timestamp, value);
 }
 
+/// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_inserter_insert_uinteger64(
     inserter: *mut Inserter,
@@ -155,6 +158,7 @@ pub unsafe extern "C" fn tachyon_inserter_insert_uinteger64(
     (*inserter).insert_uinteger64(timestamp, value);
 }
 
+/// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_inserter_insert_float64(
     inserter: *mut Inserter,
@@ -202,6 +206,8 @@ pub unsafe extern "C" fn tachyon_query_return_type(query: *const Query) -> Retur
     (*query).return_type()
 }
 
+/// SAFETY: The result is placed in the `scalar` parameter.
+/// The return value indicates if there is more output.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_query_next_scalar(query: *mut Query, scalar: *mut Value) -> bool {
     let result = (*query).next_scalar();
@@ -214,6 +220,8 @@ pub unsafe extern "C" fn tachyon_query_next_scalar(query: *mut Query, scalar: *m
     }
 }
 
+/// SAFETY: The result is placed in the `vector` parameter.
+/// The return value indicates if there is more output.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_query_next_vector(query: *mut Query, vector: *mut Vector) -> bool {
     let result = (*query).next_vector();
