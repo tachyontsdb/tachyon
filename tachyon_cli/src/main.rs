@@ -1,7 +1,11 @@
+mod cli;
+mod handlers;
+
 use clap::{
     builder::{NonEmptyStringValueParser, PossibleValuesParser, TypedValueParser},
     Parser, Subcommand,
 };
+use cli::{EntryArgs, TachyonCLI};
 use csv::Reader;
 use prettytable::{row, Table};
 use rustyline::{error::ReadlineError, DefaultEditor};
@@ -50,51 +54,51 @@ pub enum CLIErr {
     FileIOErr(#[from] std::io::Error),
 }
 
-#[derive(Parser)]
-#[command(version, about, long_about = None)]
-pub struct Args {
-    db_dir: PathBuf,
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
+// #[derive(Parser)]
+// #[command(version, about, long_about = None)]
+// pub struct Args {
+//     db_dir: PathBuf,
+//     #[command(subcommand)]
+//     command: Option<Commands>,
+// }
 
-#[derive(Subcommand)]
-pub enum Commands {
-    ListAllStreams,
-    ParseHeaders {
-        paths: Vec<PathBuf>,
-    },
-    Query {
-        #[arg(value_parser = NonEmptyStringValueParser::new())]
-        query: String,
-        start: Option<Timestamp>,
-        end: Option<Timestamp>,
-        export_csv_path: Option<PathBuf>,
-    },
-    CreateStream {
-        #[arg(value_parser = NonEmptyStringValueParser::new())]
-        stream: String,
-        #[arg(value_parser = PossibleValuesParser::new(["i64", "u64", "f64"]).map(|s| match s.as_str() {
-            "i64" => ValueType::Integer64,
-            "u64" => ValueType::UInteger64,
-            "f64" => ValueType::Float64,
-            _ => unreachable!()
-        }))]
-        value_type: ValueType,
-    },
-    Insert {
-        #[arg(value_parser = NonEmptyStringValueParser::new())]
-        stream: String,
-        timestamp: Timestamp,
-        #[arg(value_parser = NonEmptyStringValueParser::new())]
-        value: String,
-    },
-    ImportCSV {
-        #[arg(value_parser = NonEmptyStringValueParser::new())]
-        stream: String,
-        csv_file: PathBuf,
-    },
-}
+// #[derive(Subcommand)]
+// pub enum Commands {
+//     ListAllStreams,
+//     ParseHeaders {
+//         paths: Vec<PathBuf>,
+//     },
+//     Query {
+//         #[arg(value_parser = NonEmptyStringValueParser::new())]
+//         query: String,
+//         start: Option<Timestamp>,
+//         end: Option<Timestamp>,
+//         export_csv_path: Option<PathBuf>,
+//     },
+//     CreateStream {
+//         #[arg(value_parser = NonEmptyStringValueParser::new())]
+//         stream: String,
+//         #[arg(value_parser = PossibleValuesParser::new(["i64", "u64", "f64"]).map(|s| match s.as_str() {
+//             "i64" => ValueType::Integer64,
+//             "u64" => ValueType::UInteger64,
+//             "f64" => ValueType::Float64,
+//             _ => unreachable!()
+//         }))]
+//         value_type: ValueType,
+//     },
+//     Insert {
+//         #[arg(value_parser = NonEmptyStringValueParser::new())]
+//         stream: String,
+//         timestamp: Timestamp,
+//         #[arg(value_parser = NonEmptyStringValueParser::new())]
+//         value: String,
+//     },
+//     ImportCSV {
+//         #[arg(value_parser = NonEmptyStringValueParser::new())]
+//         stream: String,
+//         csv_file: PathBuf,
+//     },
+// }
 
 fn handle_parse_headers_command(paths: Vec<PathBuf>) -> Result<(), CLIErr> {
     fn output_header(path: PathBuf, file: TimeDataFile) -> Result<(), CLIErr> {
@@ -317,98 +321,104 @@ pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
 }
 
 pub fn main() {
-    let args = Args::parse();
+    let args = EntryArgs::parse();
+    let connection  = Connection::new(args.db_dir).unwrap();
+    
+    let mut cli = TachyonCLI::new(connection);
+    cli.repl();
 
-    // TODO: remove unwrap
-    let mut connection = Connection::new(args.db_dir).unwrap();
+    // let args = Args::parse();
 
-    match args.command {
-        Some(Commands::ListAllStreams) => {
-            let mut table = Table::new();
-            table.add_row(row!["Stream ID", "Stream Name + Matchers", "Value Type"]);
-            // TODO: remove unwrap
-            for stream in connection.get_all_streams().unwrap() {
-                let matchers: Vec<String> = stream
-                    .1
-                    .into_iter()
-                    .map(|(matcher_name, matcher_value)| {
-                        format!("\"{matcher_name}\" = \"{matcher_value}\"")
-                    })
-                    .collect();
-                table.add_row(row![stream.0, matchers.join(" | "), stream.2]);
-            }
-            table.printstd();
-        }
-        Some(Commands::ParseHeaders { paths }) => {
-            if let Err(e) = handle_parse_headers_command(paths) {
-                print_error(&e);
-            }
-        }
-        Some(Commands::Query {
-            query,
-            start,
-            end,
-            export_csv_path,
-        }) => {
-            if let Err(e) =
-                handle_query_command(&mut connection, query, start, end, export_csv_path)
-            {
-                print_error(&e);
-            }
-        }
-        Some(Commands::CreateStream { stream, value_type }) => {
-            // TODO: remove unwrap
-            connection.create_stream(stream, value_type).unwrap();
-        }
-        Some(Commands::Insert {
-            stream,
-            timestamp,
-            value,
-        }) => {
-            let mut inserter = connection.prepare_insert(stream);
-            let input_vt_err = CLIErr::InputValueTypeErr {
-                input: value.clone(),
-                value_type: inserter.value_type(),
-            };
+    // // TODO: remove unwrap
+    // let mut connection = Connection::new(args.db_dir).unwrap();
 
-            match inserter.value_type() {
-                ValueType::Integer64 => {
-                    let value_res = value.parse();
-                    if let Ok(value_i64) = value_res {
-                        inserter.insert_integer64(timestamp, value_i64)
-                    } else {
-                        print_error(&input_vt_err);
-                    }
-                }
-                ValueType::UInteger64 => {
-                    let value_res = value.parse();
-                    if let Ok(value_u64) = value_res {
-                        inserter.insert_uinteger64(timestamp, value_u64);
-                    } else {
-                        print_error(&input_vt_err);
-                    }
-                }
-                ValueType::Float64 => {
-                    let value_res = value.parse();
-                    if let Ok(value_f) = value_res {
-                        inserter.insert_float64(timestamp, value_f)
-                    } else {
-                        print_error(&input_vt_err);
-                    }
-                }
-            }
+    // match args.command {
+    //     Some(Commands::ListAllStreams) => {
+    //         let mut table = Table::new();
+    //         table.add_row(row!["Stream ID", "Stream Name + Matchers", "Value Type"]);
+    //         // TODO: remove unwrap
+    //         for stream in connection.get_all_streams().unwrap() {
+    //             let matchers: Vec<String> = stream
+    //                 .1
+    //                 .into_iter()
+    //                 .map(|(matcher_name, matcher_value)| {
+    //                     format!("\"{matcher_name}\" = \"{matcher_value}\"")
+    //                 })
+    //                 .collect();
+    //             table.add_row(row![stream.0, matchers.join(" | "), stream.2]);
+    //         }
+    //         table.printstd();
+    //     }
+    //     Some(Commands::ParseHeaders { paths }) => {
+    //         if let Err(e) = handle_parse_headers_command(paths) {
+    //             print_error(&e);
+    //         }
+    //     }
+    //     Some(Commands::Query {
+    //         query,
+    //         start,
+    //         end,
+    //         export_csv_path,
+    //     }) => {
+    //         if let Err(e) =
+    //             handle_query_command(&mut connection, query, start, end, export_csv_path)
+    //         {
+    //             print_error(&e);
+    //         }
+    //     }
+    //     Some(Commands::CreateStream { stream, value_type }) => {
+    //         // TODO: remove unwrap
+    //         connection.create_stream(stream, value_type).unwrap();
+    //     }
+    //     Some(Commands::Insert {
+    //         stream,
+    //         timestamp,
+    //         value,
+    //     }) => {
+    //         let mut inserter = connection.prepare_insert(stream);
+    //         let input_vt_err = CLIErr::InputValueTypeErr {
+    //             input: value.clone(),
+    //             value_type: inserter.value_type(),
+    //         };
 
-            inserter.flush();
-        }
-        Some(Commands::ImportCSV { stream, csv_file }) => {
-            if let Err(e) = handle_import_csv_command(connection, stream, csv_file) {
-                print_error(&e);
-            }
-        }
-        None => {
-            if let Err(e) = repl(connection) {
-                print_error(&e);
-            }
-        }
-    }
+    //         match inserter.value_type() {
+    //             ValueType::Integer64 => {
+    //                 let value_res = value.parse();
+    //                 if let Ok(value_i64) = value_res {
+    //                     inserter.insert_integer64(timestamp, value_i64)
+    //                 } else {
+    //                     print_error(&input_vt_err);
+    //                 }
+    //             }
+    //             ValueType::UInteger64 => {
+    //                 let value_res = value.parse();
+    //                 if let Ok(value_u64) = value_res {
+    //                     inserter.insert_uinteger64(timestamp, value_u64);
+    //                 } else {
+    //                     print_error(&input_vt_err);
+    //                 }
+    //             }
+    //             ValueType::Float64 => {
+    //                 let value_res = value.parse();
+    //                 if let Ok(value_f) = value_res {
+    //                     inserter.insert_float64(timestamp, value_f)
+    //                 } else {
+    //                     print_error(&input_vt_err);
+    //                 }
+    //             }
+    //         }
+
+    //         inserter.flush();
+    //     }
+    //     Some(Commands::ImportCSV { stream, csv_file }) => {
+    //         if let Err(e) = handle_import_csv_command(connection, stream, csv_file) {
+    //             print_error(&e);
+    //         }
+    //     }
+    //     None => {
+    //         if let Err(e) = repl(connection) {
+    //             print_error(&e);
+    //         }
+    //     }
+    // }
 }
