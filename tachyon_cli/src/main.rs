@@ -1,20 +1,18 @@
 mod cli;
 mod handlers;
+pub mod output;
 
-use clap::{
-    builder::{NonEmptyStringValueParser, PossibleValuesParser, TypedValueParser},
-    Parser, Subcommand,
-};
-use cli::{EntryArgs, TachyonCLI};
+use clap::Parser;
+use cli::{EntryArgs, TachyonCli};
 use csv::Reader;
-use prettytable::{row, Table};
 use rustyline::{error::ReadlineError, DefaultEditor};
+use std::path::PathBuf;
 use std::{
     fs::{self, File},
     io::Write,
+    os::unix::fs::MetadataExt,
 };
-use std::{os::unix::fs::MetadataExt, path::PathBuf};
-use tachyon_core::{print_error, tachyon_benchmarks::TimeDataFile};
+use tachyon_core::tachyon_benchmarks::TimeDataFile;
 use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
 use thiserror::Error;
@@ -100,78 +98,78 @@ pub enum CLIErr {
 //     },
 // }
 
-fn handle_parse_headers_command(paths: Vec<PathBuf>) -> Result<(), CLIErr> {
-    fn output_header(path: PathBuf, file: TimeDataFile) -> Result<(), CLIErr> {
-        let mut table = Table::new();
-        let file_size = File::open(&path)?.metadata()?.size();
+// fn handle_parse_headers_command(paths: Vec<PathBuf>) -> Result<(), CLIErr> {
+//     fn output_header(path: PathBuf, file: TimeDataFile) -> Result<(), CLIErr> {
+//         let mut table = Table::new();
+//         let file_size = File::open(&path)?.metadata()?.size();
 
-        // SAFETY: these paths are always our .ty files; assume it can be converted to str
-        table.add_row(row!["File", path.to_str().unwrap()]);
+//         // SAFETY: these paths are always our .ty files; assume it can be converted to str
+//         table.add_row(row!["File", path.to_str().unwrap()]);
 
-        table.add_row(row!["Version", file.header.version.0]);
-        table.add_row(row!["Stream ID", file.header.stream_id.0]);
+//         table.add_row(row!["Version", file.header.version.0]);
+//         table.add_row(row!["Stream ID", file.header.stream_id.0]);
 
-        table.add_row(row!["Min Timestamp", file.header.min_timestamp]);
-        table.add_row(row!["Max Timestamp", file.header.max_timestamp]);
+//         table.add_row(row!["Min Timestamp", file.header.min_timestamp]);
+//         table.add_row(row!["Max Timestamp", file.header.max_timestamp]);
 
-        table.add_row(row!["Count", file.header.count]);
-        table.add_row(row!["Value Type", file.header.value_type]);
+//         table.add_row(row!["Count", file.header.count]);
+//         table.add_row(row!["Value Type", file.header.value_type]);
 
-        table.add_row(row![
-            "Value Sum",
-            file.header.value_sum.get_output(file.header.value_type)
-        ]);
-        table.add_row(row![
-            "Min Value",
-            file.header.min_value.get_output(file.header.value_type)
-        ]);
-        table.add_row(row![
-            "Max Value",
-            file.header.max_value.get_output(file.header.value_type)
-        ]);
+//         table.add_row(row![
+//             "Value Sum",
+//             file.header.value_sum.get_output(file.header.value_type)
+//         ]);
+//         table.add_row(row![
+//             "Min Value",
+//             file.header.min_value.get_output(file.header.value_type)
+//         ]);
+//         table.add_row(row![
+//             "Max Value",
+//             file.header.max_value.get_output(file.header.value_type)
+//         ]);
 
-        table.add_row(row![
-            "First Value",
-            file.header.first_value.get_output(file.header.value_type)
-        ]);
+//         table.add_row(row![
+//             "First Value",
+//             file.header.first_value.get_output(file.header.value_type)
+//         ]);
 
-        table.add_row(row![
-            "Compression Ratio",
-            format!(
-                "{:.2}x",
-                ((file.header.count as f64 * 16_f64) / file_size as f64)
-            )
-        ]);
+//         table.add_row(row![
+//             "Compression Ratio",
+//             format!(
+//                 "{:.2}x",
+//                 ((file.header.count as f64 * 16_f64) / file_size as f64)
+//             )
+//         ]);
 
-        table.printstd();
+//         table.printstd();
 
-        Ok(())
-    }
+//         Ok(())
+//     }
 
-    fn recurse_subdirs_and_output_headers(path: PathBuf) -> Result<(), CLIErr> {
-        if path.is_dir() {
-            let files = fs::read_dir(path)?;
-            for file in files {
-                recurse_subdirs_and_output_headers(file?.path())?;
-            }
-        } else if path
-            .extension()
-            .is_some_and(|extension| extension == FILE_EXTENSION)
-        {
-            let file = TimeDataFile::read_data_file(path.clone());
-            output_header(path, file)?;
-            println!();
-        }
+//     fn recurse_subdirs_and_output_headers(path: PathBuf) -> Result<(), CLIErr> {
+//         if path.is_dir() {
+//             let files = fs::read_dir(path)?;
+//             for file in files {
+//                 recurse_subdirs_and_output_headers(file?.path())?;
+//             }
+//         } else if path
+//             .extension()
+//             .is_some_and(|extension| extension == FILE_EXTENSION)
+//         {
+//             let file = TimeDataFile::read_data_file(path.clone());
+//             output_header(path, file)?;
+//             println!();
+//         }
 
-        Ok(())
-    }
+//         Ok(())
+//     }
 
-    for path in paths {
-        recurse_subdirs_and_output_headers(path)?;
-    }
+//     for path in paths {
+//         recurse_subdirs_and_output_headers(path)?;
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 fn export_as_csv(path: PathBuf, timeseries: &[(u64, f64)]) -> Result<(), CLIErr> {
     let mut file = File::create(path)?;
@@ -324,7 +322,7 @@ pub fn main() {
     let args = EntryArgs::parse();
     let connection = Connection::new(args.db_dir).unwrap();
 
-    let mut cli = TachyonCLI::new(connection);
+    let mut cli = TachyonCli::new(connection);
     cli.repl();
 
     // let args = Args::parse();
