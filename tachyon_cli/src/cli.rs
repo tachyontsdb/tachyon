@@ -1,7 +1,14 @@
 use std::path::PathBuf;
 
-use clap::{builder::{NonEmptyStringValueParser, PossibleValuesParser, TypedValueParser}, command, Parser, Subcommand};
-use rustyline::{error::ReadlineError, history::{FileHistory, History}, DefaultEditor};
+use clap::{
+    builder::{NonEmptyStringValueParser, PossibleValuesParser, TypedValueParser},
+    command, Parser, Subcommand, ValueEnum,
+};
+use rustyline::{
+    error::ReadlineError,
+    history::{FileHistory, History},
+    DefaultEditor,
+};
 use tachyon_core::{print_error, Connection, Timestamp, ValueType};
 
 use crate::{handlers, CLIErr};
@@ -26,11 +33,34 @@ pub struct EntryArgs {
     pub db_dir: PathBuf,
 }
 
-pub struct TachyonCLI {
-    rl: rustyline::Editor<(), FileHistory>,
-    connection: Connection
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum OutputMode {
+    Graphical,
+    Tabular,
+    File,
 }
 
+pub struct TachyonCLIConfig {
+    pub output_mode: OutputMode,
+    pub output_path: Option<PathBuf>,
+    pub value_type: ValueType,
+}
+
+impl TachyonCLIConfig {
+    pub fn default() -> Self {
+        Self {
+            output_mode: OutputMode::Graphical,
+            output_path: None,
+            value_type: ValueType::Float64,
+        }
+    }
+}
+
+pub struct TachyonCLI {
+    rl: rustyline::Editor<(), FileHistory>,
+    connection: Connection,
+    config: TachyonCLIConfig,
+}
 
 impl TachyonCLI {
     pub fn new(connection: Connection) -> Self {
@@ -38,13 +68,14 @@ impl TachyonCLI {
 
         Self {
             rl,
-            connection
+            connection,
+            config: TachyonCLIConfig::default(),
         }
     }
 
     pub fn repl(&mut self) -> Result<(), CLIErr> {
         println!("{}", TACHYON_CLI_HEADER);
-    
+
         loop {
             let input = self.rl.readline(PROMPT);
             match input {
@@ -53,13 +84,19 @@ impl TachyonCLI {
                     if add_history_res.is_err() {
                         println!("Warning: Failed to add line to history.");
                     }
-    
+
                     if let Some(command_str) = line.strip_prefix(COMMAND_PREFIX) {
-                        let args: Vec<&str> =  command_str.split_whitespace().collect();
-    
-                        match handlers::command::TachyonCommand::try_parse_from(std::iter::once("").chain(args)) {
+                        let args: Vec<&str> = command_str.split_whitespace().collect();
+
+                        match handlers::command::TachyonCommand::try_parse_from(
+                            std::iter::once("").chain(args),
+                        ) {
                             Ok(command) => {
-                                handlers::command::handle_command(command, &mut self.connection);
+                                handlers::command::handle_command(
+                                    command,
+                                    &mut self.connection,
+                                    &mut self.config,
+                                );
                             }
                             Err(err) => {
                                 println!("{}", err);
@@ -68,9 +105,6 @@ impl TachyonCLI {
                     } else {
                         handlers::query::handle_query(&line, &mut self.connection, None, None)?;
                     }
-    
-    
-                    // handle_query_command(&mut connection, &line, None, None, None)?;
                 }
                 Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
                     return Ok(());
