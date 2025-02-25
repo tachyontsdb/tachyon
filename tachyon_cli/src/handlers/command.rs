@@ -8,7 +8,7 @@ use csv::Reader;
 use tachyon_core::{Connection, ValueType, Vector};
 
 use crate::{
-    cli::{OutputMode, TachyonCLIConfig},
+    cli::{Config, OutputMode},
     CLIErr,
 };
 
@@ -34,7 +34,7 @@ pub enum TachyonCommand {
         output_mode: Option<OutputMode>,
 
         #[arg(short, long)]
-        output_path: Option<PathBuf>, // Optional argument
+        path: Option<PathBuf>, // Optional argument
 
         #[arg(value_parser = PossibleValuesParser::new(["i64", "u64", "f64"]).map(|s| match s.as_str() {
             "i64" => ValueType::Integer64,
@@ -52,7 +52,7 @@ pub enum InfoSubcommand {}
 pub fn handle_command(
     command: TachyonCommand,
     connection: &mut Connection,
-    config: &mut TachyonCLIConfig,
+    config: &mut Config,
 ) -> Result<(), CLIErr> {
     match command {
         TachyonCommand::Info => Ok(()),
@@ -97,7 +97,7 @@ pub fn handle_command(
         TachyonCommand::Exit => Ok(()),
         TachyonCommand::Mode {
             output_mode,
-            output_path,
+            path: output_path,
             value_type,
         } => {
             match output_mode {
@@ -109,7 +109,7 @@ pub fn handle_command(
 
             match output_path {
                 Some(output_path) => {
-                    config.output_path = Some(output_path);
+                    config.path = Some(output_path);
                 }
                 None => {}
             }

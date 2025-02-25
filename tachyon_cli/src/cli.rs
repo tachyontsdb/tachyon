@@ -1,15 +1,8 @@
 use std::path::PathBuf;
 
-use clap::{
-    builder::{NonEmptyStringValueParser, PossibleValuesParser, TypedValueParser},
-    command, Parser, Subcommand, ValueEnum,
-};
-use rustyline::{
-    error::ReadlineError,
-    history::{FileHistory, History},
-    DefaultEditor,
-};
-use tachyon_core::{print_error, Connection, Timestamp, ValueType};
+use clap::{command, Parser, ValueEnum};
+use rustyline::{error::ReadlineError, history::FileHistory, DefaultEditor};
+use tachyon_core::{Connection, ValueType};
 
 use crate::{handlers, CLIErr};
 
@@ -40,36 +33,36 @@ pub enum OutputMode {
     File,
 }
 
-pub struct TachyonCLIConfig {
+pub struct Config {
     pub output_mode: OutputMode,
-    pub output_path: Option<PathBuf>,
+    pub path: Option<PathBuf>,
     pub value_type: ValueType,
 }
 
-impl TachyonCLIConfig {
+impl Config {
     pub fn default() -> Self {
         Self {
             output_mode: OutputMode::Graphical,
-            output_path: None,
+            path: None,
             value_type: ValueType::Float64,
         }
     }
 }
 
-pub struct TachyonCLI {
+pub struct TachyonCli {
     rl: rustyline::Editor<(), FileHistory>,
     connection: Connection,
-    config: TachyonCLIConfig,
+    config: Config,
 }
 
-impl TachyonCLI {
+impl TachyonCli {
     pub fn new(connection: Connection) -> Self {
         let rl = DefaultEditor::new().unwrap();
 
         Self {
             rl,
             connection,
-            config: TachyonCLIConfig::default(),
+            config: Config::default(),
         }
     }
 
@@ -92,7 +85,8 @@ impl TachyonCLI {
                             std::iter::once("").chain(args),
                         ) {
                             Ok(command) => {
-                                handlers::command::handle_command(
+                                let _ = handlers::command::handle_command(
+                                    // TODO: handle errors
                                     command,
                                     &mut self.connection,
                                     &mut self.config,
@@ -103,7 +97,13 @@ impl TachyonCLI {
                             }
                         }
                     } else {
-                        handlers::query::handle_query(&line, &mut self.connection, None, None)?;
+                        handlers::query::handle_query(
+                            &line,
+                            &mut self.connection,
+                            None,
+                            None,
+                            &self.config,
+                        )?;
                     }
                 }
                 Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
