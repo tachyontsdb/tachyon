@@ -1,7 +1,7 @@
-use tachyon_core::ValueType;
+use tachyon_core::{Timestamp, Value, ValueType};
 use textplots::{Chart, Plot, Shape};
 
-use crate::cli::Config;
+use crate::{cli::Config, CLIErr};
 
 use super::CliOutput;
 
@@ -9,10 +9,10 @@ pub struct Graphical;
 
 impl CliOutput for Graphical {
     fn output(
-        timeseries: Vec<(tachyon_core::Timestamp, tachyon_core::Value)>,
+        timeseries: Vec<(Timestamp, Value)>,
         value_type: ValueType,
         _: &Config,
-    ) {
+    ) -> Result<(), CLIErr> {
         let f32_timeseries: Vec<(f32, f32)> = timeseries
             .iter()
             .map(|(timestamp, value)| {
@@ -25,5 +25,6 @@ impl CliOutput for Graphical {
                 .lineplot(&Shape::Lines(&f32_timeseries))
                 .display();
         }
+        Ok(())
     }
 }

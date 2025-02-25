@@ -4,6 +4,8 @@ use tabled::{
 };
 use tachyon_core::{Timestamp, Value};
 
+use crate::CLIErr;
+
 use super::CliOutput;
 
 #[derive(Tabled)]
@@ -31,7 +33,7 @@ impl CliOutput for Tabular {
         data: Vec<(Timestamp, Value)>,
         value_type: tachyon_core::ValueType,
         _: &crate::cli::Config,
-    ) {
+    ) -> Result<(), CLIErr> {
         let table = match value_type {
             tachyon_core::ValueType::Integer64 => {
                 let mut table =
@@ -66,5 +68,6 @@ impl CliOutput for Tabular {
         };
 
         println!("{}", table);
+        Ok(())
     }
 }
