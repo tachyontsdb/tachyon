@@ -34,7 +34,7 @@ pub fn handle_query(
                 timeseries.push((timestamp, value));
             }
 
-            vector_output(timeseries, query_value_type, config);
+            vector_output(timeseries, query_value_type, config)?;
         }
     }
 

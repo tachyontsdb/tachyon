@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{command, Parser, ValueEnum};
 use rustyline::{error::ReadlineError, history::FileHistory, DefaultEditor};
-use tachyon_core::{Connection, ValueType};
+use tachyon_core::{print_error, Connection, ValueType};
 
 use crate::{handlers, CLIErr};
 
@@ -83,29 +83,35 @@ impl TachyonCli {
                     if let Some(command_str) = line.strip_prefix(COMMAND_PREFIX) {
                         let args: Vec<&str> = command_str.split_whitespace().collect();
 
-                        match handlers::command::TachyonCommand::try_parse_from(
+                        match handlers::commands::TachyonCommand::try_parse_from(
                             std::iter::once("").chain(args),
                         ) {
                             Ok(command) => {
-                                let _ = handlers::command::handle_command(
+                                match handlers::commands::handle_command(
                                     // TODO: handle errors
                                     command,
                                     &mut self.connection,
                                     &mut self.config,
-                                );
+                                ) {
+                                    Ok(_) => {}
+                                    Err(err) => print_error(&err),
+                                };
                             }
                             Err(err) => {
                                 println!("{}", err);
                             }
                         }
                     } else {
-                        handlers::query::handle_query(
+                        match handlers::query::handle_query(
                             &line,
                             &mut self.connection,
                             None,
                             None,
                             &self.config,
-                        )?;
+                        ) {
+                            Ok(_) => {}
+                            Err(err) => print_error(&err),
+                        }
                     }
                 }
                 Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
