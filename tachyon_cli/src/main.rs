@@ -5,16 +5,14 @@ pub mod output;
 use clap::Parser;
 use cli::{EntryArgs, TachyonCli};
 use csv::Reader;
-use rustyline::{error::ReadlineError, DefaultEditor};
+use rustyline::error::ReadlineError;
 use std::path::PathBuf;
 use std::{
     fs::{self, File},
     io::Write,
     os::unix::fs::MetadataExt,
 };
-use tachyon_core::tachyon_benchmarks::TimeDataFile;
-use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
-use textplots::{Chart, Plot, Shape};
+use tachyon_core::{Connection, ValueType, Vector};
 use thiserror::Error;
 
 const TACHYON_CLI_HEADER: &str = r"
@@ -28,8 +26,6 @@ const TACHYON_CLI_HEADER: &str = r"
                                       /\___/                              
                                       \/__/                               
 ";
-const PROMPT: &str = "> ";
-const REPL_EXIT_MSG: &str = "Exiting...";
 
 #[derive(Error, Debug)]
 pub enum CLIErr {
@@ -182,65 +178,6 @@ fn export_as_csv(path: PathBuf, timeseries: &[(u64, f64)]) -> Result<(), CLIErr>
     Ok(())
 }
 
-fn handle_query_command(
-    connection: &mut Connection,
-    query: impl AsRef<str>,
-    start: Option<Timestamp>,
-    end: Option<Timestamp>,
-    export_csv_path: Option<PathBuf>,
-) -> Result<(), CLIErr> {
-    // TODO: Fix temporary start and end hack
-    const HACK_TIME_START: u64 = 0;
-    const HACK_TIME_END: u64 = 1719776339748;
-    let mut query = connection.prepare_query(
-        query,
-        start.or(Some(HACK_TIME_START)),
-        end.or(Some(HACK_TIME_END)),
-    );
-
-    let query_value_type = query.value_type();
-
-    match query.return_type() {
-        tachyon_core::ReturnType::Scalar => {
-            while let Some(value) = query.next_scalar() {
-                println!("{:?}", value.get_output(query_value_type));
-            }
-        }
-        tachyon_core::ReturnType::Vector => {
-            let mut timeseries = Vec::<(u64, f64)>::new();
-
-            let mut max_value = f64::MIN;
-            let mut min_value = f64::MAX;
-
-            while let Some(Vector { timestamp, value }) = query.next_vector() {
-                let value = value.convert_into_f64(query_value_type);
-
-                max_value = f64::max(max_value, value);
-                min_value = f64::min(min_value, value);
-
-                timeseries.push((timestamp, value));
-            }
-
-            if let Some(path) = export_csv_path {
-                export_as_csv(path, &timeseries)?;
-            }
-
-            let f32_timeseries: Vec<(f32, f32)> = timeseries
-                .iter()
-                .map(|(timestamp, value)| (*timestamp as f32, *value as f32))
-                .collect();
-
-            if let Some((last_timestamp, _)) = f32_timeseries.last() {
-                Chart::new(180, 60, f32_timeseries[0].0, *last_timestamp)
-                    .lineplot(&Shape::Lines(&f32_timeseries))
-                    .display();
-            }
-        }
-    }
-
-    Ok(())
-}
-
 fn handle_import_csv_command(
     mut connection: Connection,
     stream: String,
@@ -292,131 +229,10 @@ fn handle_import_csv_command(
     Ok(())
 }
 
-pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
-    println!("{}", TACHYON_CLI_HEADER);
-
-    let mut rl = DefaultEditor::new()?;
-    loop {
-        let input = rl.readline(PROMPT);
-        match input {
-            Ok(line) => {
-                let add_history_res = rl.add_history_entry(&line);
-                if add_history_res.is_err() {
-                    println!("Warning: Failed to add line to history.");
-                }
-
-                handle_query_command(&mut connection, &line, None, None, None)?;
-            }
-            Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
-                println!("{}", REPL_EXIT_MSG);
-                return Ok(());
-            }
-            Err(e) => {
-                return Err(CLIErr::ReadLineErr(e));
-            }
-        }
-    }
-}
-
 pub fn main() {
     let args = EntryArgs::parse();
-    let connection = Connection::new(args.db_dir).unwrap();
+    let connection = Connection::new(&args.db_dir).unwrap();
 
-    let mut cli = TachyonCli::new(connection);
-    cli.repl();
-
-    // let args = Args::parse();
-
-    // // TODO: remove unwrap
-    // let mut connection = Connection::new(args.db_dir).unwrap();
-
-    // match args.command {
-    //     Some(Commands::ListAllStreams) => {
-    //         let mut table = Table::new();
-    //         table.add_row(row!["Stream ID", "Stream Name + Matchers", "Value Type"]);
-    //         // TODO: remove unwrap
-    //         for stream in connection.get_all_streams().unwrap() {
-    //             let matchers: Vec<String> = stream
-    //                 .1
-    //                 .into_iter()
-    //                 .map(|(matcher_name, matcher_value)| {
-    //                     format!("\"{matcher_name}\" = \"{matcher_value}\"")
-    //                 })
-    //                 .collect();
-    //             table.add_row(row![stream.0, matchers.join(" | "), stream.2]);
-    //         }
-    //         table.printstd();
-    //     }
-    //     Some(Commands::ParseHeaders { paths }) => {
-    //         if let Err(e) = handle_parse_headers_command(paths) {
-    //             print_error(&e);
-    //         }
-    //     }
-    //     Some(Commands::Query {
-    //         query,
-    //         start,
-    //         end,
-    //         export_csv_path,
-    //     }) => {
-    //         if let Err(e) =
-    //             handle_query_command(&mut connection, query, start, end, export_csv_path)
-    //         {
-    //             print_error(&e);
-    //         }
-    //     }
-    //     Some(Commands::CreateStream { stream, value_type }) => {
-    //         // TODO: remove unwrap
-    //         connection.create_stream(stream, value_type).unwrap();
-    //     }
-    //     Some(Commands::Insert {
-    //         stream,
-    //         timestamp,
-    //         value,
-    //     }) => {
-    //         let mut inserter = connection.prepare_insert(stream);
-    //         let input_vt_err = CLIErr::InputValueTypeErr {
-    //             input: value.clone(),
-    //             value_type: inserter.value_type(),
-    //         };
-
-    //         match inserter.value_type() {
-    //             ValueType::Integer64 => {
-    //                 let value_res = value.parse();
-    //                 if let Ok(value_i64) = value_res {
-    //                     inserter.insert_integer64(timestamp, value_i64)
-    //                 } else {
-    //                     print_error(&input_vt_err);
-    //                 }
-    //             }
-    //             ValueType::UInteger64 => {
-    //                 let value_res = value.parse();
-    //                 if let Ok(value_u64) = value_res {
-    //                     inserter.insert_uinteger64(timestamp, value_u64);
-    //                 } else {
-    //                     print_error(&input_vt_err);
-    //                 }
-    //             }
-    //             ValueType::Float64 => {
-    //                 let value_res = value.parse();
-    //                 if let Ok(value_f) = value_res {
-    //                     inserter.insert_float64(timestamp, value_f)
-    //                 } else {
-    //                     print_error(&input_vt_err);
-    //                 }
-    //             }
-    //         }
-
-    //         inserter.flush();
-    //     }
-    //     Some(Commands::ImportCSV { stream, csv_file }) => {
-    //         if let Err(e) = handle_import_csv_command(connection, stream, csv_file) {
-    //             print_error(&e);
-    //         }
-    //     }
-    //     None => {
-    //         if let Err(e) = repl(connection) {
-    //             print_error(&e);
-    //         }
-    //     }
-    // }
+    let mut cli = TachyonCli::new(connection, args.db_dir);
+    cli.repl().unwrap();
 }
