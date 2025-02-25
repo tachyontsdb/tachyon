@@ -5,6 +5,8 @@ use clap::{
     command, Parser, Subcommand,
 };
 use csv::Reader;
+use dir_size::get_size_in_human_bytes;
+use tabled::{builder::Builder, settings::Style};
 use tachyon_core::{Connection, ValueType, Vector};
 
 use crate::{
@@ -16,12 +18,14 @@ use crate::{
 #[command(name="", version, about, long_about = None)]
 pub enum TachyonCommand {
     Exit,
-    Info,
+    Info {
+        #[command(subcommand)]
+        command: Info,
+    },
     Write {
         path: PathBuf,
         #[arg(value_parser = NonEmptyStringValueParser::new())]
         stream: String,
-        format: Option<String>,
         #[arg(short, long, default_value_t = false)]
         create: bool,
     },
@@ -47,7 +51,10 @@ pub enum TachyonCommand {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum InfoSubcommand {}
+pub enum Info {
+    Stat,
+    Streams,
+}
 
 pub fn handle_command(
     command: TachyonCommand,
@@ -55,11 +62,56 @@ pub fn handle_command(
     config: &mut Config,
 ) -> Result<(), CLIErr> {
     match command {
-        TachyonCommand::Info => Ok(()),
+        TachyonCommand::Info { command } => match command {
+            Info::Stat => {
+                let num_streams = match connection.get_all_streams() {
+                    Ok(streams) => streams.len() as i64,
+                    Err(_) => -1,
+                };
+
+                let dir_size = match get_size_in_human_bytes(&config.db_dir) {
+                    Ok(size) => size,
+                    Err(_) => "N/A".to_string(),
+                };
+
+                println!("Total Streams: {}", num_streams);
+                println!("Storage Used: {}", dir_size);
+
+                Ok(())
+            }
+            Info::Streams => {
+                let mut rows = Vec::<Vec<String>>::new();
+                rows.push(vec![
+                    "Stream ID".to_string(),
+                    "Stream Name + Matchers".to_string(),
+                    "Value Type".to_string(),
+                ]);
+
+                for stream in connection.get_all_streams().unwrap() {
+                    let matchers: Vec<String> = stream
+                        .1
+                        .into_iter()
+                        .map(|(matcher_name, matcher_value)| {
+                            format!("\"{matcher_name}\" = \"{matcher_value}\"")
+                        })
+                        .collect();
+                    rows.push(vec![
+                        stream.0.to_string(),
+                        matchers.join(" | "),
+                        stream.2.to_string(),
+                    ]);
+                }
+
+                let mut table = Builder::from(rows).build();
+                table.with(Style::modern_rounded());
+
+                println!("{}", table);
+                Ok(())
+            }
+        },
         TachyonCommand::Write {
             path,
             stream,
-            format,
             create,
         } => {
             let mut inserter = connection.prepare_insert(&stream);

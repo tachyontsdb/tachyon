@@ -37,14 +37,16 @@ pub struct Config {
     pub output_mode: OutputMode,
     pub path: Option<PathBuf>,
     pub value_type: ValueType,
+    pub db_dir: PathBuf,
 }
 
 impl Config {
-    pub fn default() -> Self {
+    pub fn default(db_dir: PathBuf) -> Self {
         Self {
             output_mode: OutputMode::Graphical,
             path: None,
             value_type: ValueType::Float64,
+            db_dir,
         }
     }
 }
@@ -56,13 +58,13 @@ pub struct TachyonCli {
 }
 
 impl TachyonCli {
-    pub fn new(connection: Connection) -> Self {
+    pub fn new(connection: Connection, db_dir: PathBuf) -> Self {
         let rl = DefaultEditor::new().unwrap();
 
         Self {
             rl,
             connection,
-            config: Config::default(),
+            config: Config::default(db_dir),
         }
     }
 
