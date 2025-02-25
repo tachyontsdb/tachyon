@@ -322,8 +322,8 @@ pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
 
 pub fn main() {
     let args = EntryArgs::parse();
-    let connection  = Connection::new(args.db_dir).unwrap();
-    
+    let connection = Connection::new(args.db_dir).unwrap();
+
     let mut cli = TachyonCLI::new(connection);
     cli.repl();
 

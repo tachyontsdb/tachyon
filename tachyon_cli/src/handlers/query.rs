@@ -5,18 +5,20 @@ use textplots::{Chart, Plot, Shape};
 
 use crate::CLIErr;
 
-pub fn handle_query(query: &str, connection: &mut Connection, start: Option<Timestamp>, end: Option<Timestamp>) -> Result<(), CLIErr> {
+pub fn handle_query(
+    query: &str,
+    connection: &mut Connection,
+    start: Option<Timestamp>,
+    end: Option<Timestamp>,
+) -> Result<(), CLIErr> {
     let start_time: u64 = 0;
     let end_time: u64 = SystemTime::now()
-    .duration_since(UNIX_EPOCH)
-    .expect("Time went backwards")
-    .as_millis() as u64;
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis() as u64;
 
-    let mut query = connection.prepare_query(
-        query,
-        start.or(Some(start_time)),
-        end.or(Some(end_time)),
-    );
+    let mut query =
+        connection.prepare_query(query, start.or(Some(start_time)), end.or(Some(end_time)));
 
     let query_value_type = query.value_type();
 
