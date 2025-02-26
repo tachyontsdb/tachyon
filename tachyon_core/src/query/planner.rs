@@ -58,19 +58,46 @@ impl<'a> QueryPlanner<'a> {
                     parser::token::T_MAX => (AggregateType::Max, ScanHint::Max),
                     _ => unreachable!(),
                 };
+
                 Ok(TNode::Aggregate(AggregateNode::new(
                     aggregate_type,
-                    Box::new(self.handle_expr(&expr.expr, conn, scan_hint)?),
+                    expr.subperiod,
+                    self.start.unwrap(),
+                    self.end.unwrap(),
+                    Box::new(self.handle_expr(
+                        &expr.expr,
+                        conn,
+                        if expr.subperiod.is_some() {
+                            ScanHint::None
+                        } else {
+                            scan_hint
+                        },
+                    )?),
                     None,
                 )))
             }
             parser::token::T_AVG => Ok(TNode::Aggregate(AggregateNode::new(
                 AggregateType::Average,
-                Box::new(self.handle_expr(&expr.expr, conn, ScanHint::Sum)?),
+                expr.subperiod,
+                self.start.unwrap(),
+                self.end.unwrap(),
+                Box::new(self.handle_expr(
+                    &expr.expr,
+                    conn,
+                    if expr.subperiod.is_some() {
+                        ScanHint::None
+                    } else {
+                        ScanHint::Sum
+                    },
+                )?),
                 Some(Box::new(self.handle_expr(
                     &expr.expr,
                     conn,
-                    ScanHint::Count,
+                    if expr.subperiod.is_some() {
+                        ScanHint::None
+                    } else {
+                        ScanHint::Count
+                    },
                 )?)),
             ))),
             parser::token::T_BOTTOMK | parser::token::T_TOPK => {
