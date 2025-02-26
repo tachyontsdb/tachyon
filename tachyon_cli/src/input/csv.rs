@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use csv::Reader;
 use tachyon_core::{ValueType, Vector};
@@ -10,7 +10,7 @@ use super::CliInput;
 pub struct Csv;
 
 impl CliInput for Csv {
-    fn input(path: &PathBuf, value_type: ValueType) -> Result<Vec<Vector>, CLIErr> {
+    fn input(path: &Path, value_type: ValueType) -> Result<Vec<Vector>, CLIErr> {
         let mut rdr = Reader::from_path(path)?;
         let mut vectors = Vec::new();
         for (idx, result) in rdr.records().enumerate() {

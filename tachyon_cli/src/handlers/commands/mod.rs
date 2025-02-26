@@ -109,25 +109,16 @@ pub fn handle_command(
             path: output_path,
             value_type,
         } => {
-            match output_mode {
-                Some(output_mode) => {
-                    config.output_mode = output_mode;
-                }
-                None => {}
+            if let Some(output_mode) = output_mode {
+                config.output_mode = output_mode;
             }
 
-            match output_path {
-                Some(output_path) => {
-                    config.path = Some(output_path);
-                }
-                None => {}
+            if let Some(output_path) = output_path {
+                config.path = Some(output_path);
             }
 
-            match value_type {
-                Some(value_type) => {
-                    config.value_type = value_type;
-                }
-                None => {}
+            if let Some(value_type) = value_type {
+                config.value_type = value_type;
             }
 
             Ok(())
