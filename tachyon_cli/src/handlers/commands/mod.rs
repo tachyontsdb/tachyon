@@ -28,7 +28,6 @@ pub enum TachyonCommand {
         command: debug::Debug,
     },
     Write {
-        #[arg(value_parser = NonEmptyStringValueParser::new())]
         path: PathBuf,
         #[arg(value_parser = NonEmptyStringValueParser::new())]
         stream: String,
