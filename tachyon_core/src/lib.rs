@@ -209,7 +209,7 @@ macro_rules! create_value_primitive_fn {
 macro_rules! create_value_primitive_fn_simplified {
     (
         $function_name: ident, $function_name_same: ident, $return_type: ty,
-        $called_fn: ident $(, $t: tt)*
+        $called_fn: ident $(, $t: tt)?
     ) => {
         create_value_primitive_fn!(
             $function_name,
@@ -220,16 +220,16 @@ macro_rules! create_value_primitive_fn_simplified {
             other,
             value_type_other,
             self.get_integer64()
-                .$called_fn($($t)*other.get_integer64())
+                .$called_fn($($t)?other.get_integer64())
                 .into(),
             self.get_uinteger64()
-                .$called_fn($($t)*other.get_uinteger64())
+                .$called_fn($($t)?other.get_uinteger64())
                 .into(),
-            self.get_float64().$called_fn($($t)*other.get_float64()).into(),
-            self.get_float64().$called_fn($($t)*other.convert_into_f64(value_type_other)).into(),
-            self.convert_into_f64(value_type_self).$called_fn($($t)*other.get_float64()).into(),
-            self.get_integer64().$called_fn($($t)*other.convert_into_i64(value_type_other)).into(),
-            self.convert_into_i64(value_type_self).$called_fn($($t)*other.get_integer64()).into(),
+            self.get_float64().$called_fn($($t)?other.get_float64()).into(),
+            self.get_float64().$called_fn($($t)?other.convert_into_f64(value_type_other)).into(),
+            self.convert_into_f64(value_type_self).$called_fn($($t)?other.get_float64()).into(),
+            self.get_integer64().$called_fn($($t)?other.convert_into_i64(value_type_other)).into(),
+            self.convert_into_i64(value_type_self).$called_fn($($t)?other.get_integer64()).into(),
         );
     };
 }
