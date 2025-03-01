@@ -10,7 +10,7 @@ use std::{
     io::Write,
 };
 use std::{os::unix::fs::MetadataExt, path::PathBuf};
-use tachyon_core::{print_error, tachyon_benchmarks::TimeDataFile};
+use tachyon_core::{print_error, tachyon_benchmarks::TimeDataFile, PlannerErr, PrepareQueryErr};
 use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
 use thiserror::Error;
@@ -46,6 +46,8 @@ pub enum CLIErr {
     CSVErr(#[from] csv::Error),
     #[error("Failed to read line.")]
     ReadLineErr(#[from] ReadlineError),
+    #[error(transparent)]
+    PrepareQueryErr(#[from] PrepareQueryErr),
     #[error("IO Error.")]
     FileIOErr(#[from] std::io::Error),
 }
@@ -194,7 +196,7 @@ fn handle_query_command(
         query,
         start.or(Some(HACK_TIME_START)),
         end.or(Some(HACK_TIME_END)),
-    );
+    )?;
 
     let query_value_type = query.value_type();
 
@@ -303,7 +305,19 @@ pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
                     println!("Warning: Failed to add line to history.");
                 }
 
-                handle_query_command(&mut connection, &line, None, None, None)?;
+                match handle_query_command(&mut connection, &line, None, None, None) {
+                    Ok(_) => {}
+                    Err(err) => {
+                        if let CLIErr::PrepareQueryErr(PrepareQueryErr::PlannerErr(
+                            PlannerErr::VectorSelectErr(vector_err),
+                        )) = err
+                        {
+                            print_error(&vector_err);
+                        } else {
+                            return Err(err);
+                        }
+                    }
+                }
             }
             Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
                 println!("{}", REPL_EXIT_MSG);

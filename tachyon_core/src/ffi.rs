@@ -9,6 +9,7 @@ fn get_error_code(error: &TachyonErr) -> u8 {
         TachyonErr::TyErr => 1,
         TachyonErr::InputErr { .. } => 2,
         TachyonErr::DatabaseCreationErr { .. } => 3,
+        TachyonErr::PrepareQueryErr(_) => 4,
     }
 }
 
@@ -173,21 +174,36 @@ pub unsafe extern "C" fn tachyon_inserter_flush(inserter: *mut Inserter) {
     (*inserter).flush();
 }
 
-/// SAFETY: The caller is responsible for freeing the returned pointer by using the function `tachyon_query_close`.
+/// SAFETY: On success (code 0), this returns a `Query *` in the `out` parameter. Otherwise, it returns an error.
+/// The caller is responsible for freeing the returned pointer in `out`.
+/// Success data can be freed using the function `tachyon_query_close`.
+/// Error data can be freed using the function `tachyon_error_free`.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_query_create<'a>(
     connection: *mut Connection,
     query: *const c_char,
     start: *const Timestamp,
     end: *const Timestamp,
-) -> *mut Query<'a> {
+    out: *mut *mut c_void,
+) -> u8 {
     let query = CStr::from_ptr(query).to_str().unwrap();
     let query = (*connection).prepare_query(
         query,
         if start.is_null() { None } else { Some(*start) },
         if end.is_null() { None } else { Some(*end) },
     );
-    Box::into_raw(Box::new(query))
+    match query {
+        Ok(query) => {
+            *out = Box::into_raw(Box::new(query)) as *mut c_void;
+            0u8
+        }
+        Err(err) => {
+            let tachyon_err = TachyonErr::from(err);
+            let return_value = get_error_code(&tachyon_err);
+            *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+            return_value
+        }
+    }
 }
 
 #[no_mangle]

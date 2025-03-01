@@ -1,13 +1,12 @@
+use super::ExecutorNode;
 use crate::query::indexer::Indexer;
 use crate::storage::file::{Cursor, ScanHint};
 use crate::storage::page_cache::PageCache;
-use crate::{Connection, ReturnType, Timestamp, ValueType, Vector};
+use crate::{Connection, ReturnType, Timestamp, ValueType, Vector, VectorSelectErr};
 use promql_parser::label::Matchers;
 use std::cell::RefCell;
 use std::rc::Rc;
 use uuid::Uuid;
-
-use super::ExecutorNode;
 
 pub struct VectorSelectNode {
     stream_ids: Vec<Uuid>,
@@ -28,7 +27,7 @@ impl VectorSelectNode {
         start: Timestamp,
         end: Timestamp,
         hint: ScanHint,
-    ) -> Self {
+    ) -> Result<Self, VectorSelectErr> {
         let stream_ids: Vec<Uuid> = conn
             .indexer
             .borrow()
@@ -37,7 +36,12 @@ impl VectorSelectNode {
             .collect();
 
         if stream_ids.is_empty() {
-            panic!("No streams match selector!");
+            return Err(VectorSelectErr::NoStreamsMatchedErr {
+                name,
+                matchers,
+                start,
+                end,
+            });
         }
 
         let stream_id = stream_ids[0];
@@ -48,7 +52,7 @@ impl VectorSelectNode {
             .get_required_files(stream_id, start, end)
             .unwrap();
 
-        Self {
+        Ok(Self {
             stream_ids,
             stream_idx: 0,
             cursor: Cursor::new(file_paths, start, end, conn.page_cache.clone(), hint).unwrap(),
@@ -57,7 +61,7 @@ impl VectorSelectNode {
             start,
             end,
             hint,
-        }
+        })
     }
 }
 
