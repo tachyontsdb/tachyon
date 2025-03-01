@@ -540,7 +540,7 @@ impl Connection {
         start: Option<Timestamp>,
         end: Option<Timestamp>,
     ) -> Result<Query, PrepareQueryErr> {
-        let ast = parser::parse(query.as_ref()).map_err(|ast| PrepareQueryErr::ASTParseErr(ast))?;
+        let ast = parser::parse(query.as_ref()).map_err(PrepareQueryErr::ASTParseErr)?;
         let mut planner = QueryPlanner::new(&ast, start, end);
         let plan = planner.plan(self)?;
 

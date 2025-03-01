@@ -18,7 +18,6 @@ cargo build --locked --release
 ## Running
 
 ### CLI
-
 ```
 cargo run --locked --release --bin tachyon_cli -- [COMMANDS]
 ```

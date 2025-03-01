@@ -179,7 +179,7 @@ pub unsafe extern "C" fn tachyon_inserter_flush(inserter: *mut Inserter) {
 /// Success data can be freed using the function `tachyon_query_close`.
 /// Error data can be freed using the function `tachyon_error_free`.
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_query_create<'a>(
+pub unsafe extern "C" fn tachyon_query_create(
     connection: *mut Connection,
     query: *const c_char,
     start: *const Timestamp,
