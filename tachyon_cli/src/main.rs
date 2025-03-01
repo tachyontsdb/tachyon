@@ -10,7 +10,7 @@ use std::{
     io::Write,
 };
 use std::{os::unix::fs::MetadataExt, path::PathBuf};
-use tachyon_core::{print_error, tachyon_benchmarks::TimeDataFile, PlannerErr, PrepareQueryErr};
+use tachyon_core::{print_error, tachyon_benchmarks::TimeDataFile, PrepareQueryErr};
 use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
 use thiserror::Error;
@@ -308,11 +308,8 @@ pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
                 match handle_query_command(&mut connection, &line, None, None, None) {
                     Ok(_) => {}
                     Err(err) => {
-                        if let CLIErr::PrepareQueryErr(PrepareQueryErr::PlannerErr(
-                            PlannerErr::VectorSelectErr(vector_err),
-                        )) = err
-                        {
-                            print_error(&vector_err);
+                        if let CLIErr::PrepareQueryErr(prepare_query) = err {
+                            print_error(&prepare_query);
                         } else {
                             return Err(err);
                         }
