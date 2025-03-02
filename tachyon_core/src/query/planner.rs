@@ -1,29 +1,13 @@
-use std::time::SystemTimeError;
-
 use crate::execution::node::{
     AggregateNode, AggregateType, ArithmeticOp, BinaryOp, BinaryOpNode, ComparisonOp, GetKNode,
     GetKType, NumberLiteralNode, TNode, VectorSelectNode,
 };
 use crate::storage::file::ScanHint;
-use crate::{Connection, Timestamp, ValueType};
+use crate::{Connection, PlannerErr, Timestamp, ValueType};
 use promql_parser::parser::{
     self, AggregateExpr, BinaryExpr, Call, Expr, Extension, MatrixSelector, NumberLiteral,
     ParenExpr, StringLiteral, SubqueryExpr, UnaryExpr, VectorSelector,
 };
-use thiserror::Error;
-
-#[allow(clippy::enum_variant_names)]
-#[derive(Error, Debug)]
-pub enum PlannerErr {
-    #[error("Incorrect query syntax.")]
-    QuerySyntaxErr,
-    #[error("{expr_type} expressions are not supported.")]
-    UnsupportedErr { expr_type: String },
-    #[error("QueryPlanner requires {start_or_end} member to be set.")]
-    StartEndTimeErr { start_or_end: String },
-    #[error("Failed to handle @ modifier due to system time error.")]
-    TimerErr(#[from] SystemTimeError),
-}
 
 #[derive(Debug)]
 pub struct QueryPlanner<'a> {
@@ -208,7 +192,7 @@ impl<'a> QueryPlanner<'a> {
                         start,
                         end,
                         hint,
-                    )))
+                    )?))
                 } else {
                     Err(PlannerErr::QuerySyntaxErr)
                 }

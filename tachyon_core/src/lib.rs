@@ -5,6 +5,7 @@ use crate::query::indexer::Indexer;
 use crate::query::planner::QueryPlanner;
 use crate::storage::page_cache::PageCache;
 use crate::storage::writer::Writer;
+use promql_parser::label::Matchers;
 use promql_parser::parser;
 use query::indexer::IndexerErr;
 use std::cell::RefCell;
@@ -16,6 +17,7 @@ use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::SystemTimeError;
 use storage::writer::persistent_writer::PersistentWriter;
 use thiserror::Error;
 use uuid::Uuid;
@@ -39,6 +41,8 @@ pub enum TachyonErr {
     InputErr { reason: Box<dyn Error> },
     #[error("Failed to create the directory for the database: {db_dir}.")]
     DatabaseCreationErr { db_dir: PathBuf },
+    #[error(transparent)]
+    PrepareQueryErr(#[from] PrepareQueryErr),
 }
 
 impl From<ConnectionErr> for TachyonErr {
@@ -386,6 +390,40 @@ pub enum ConnectionErr {
     GetStreamsErr,
 }
 
+#[derive(Error, Debug)]
+pub enum VectorSelectErr {
+    #[error("No streams match selector \"{name}{{{matchers}}}\" from \"{start}\" to \"{end}\".")]
+    NoStreamsMatchedErr {
+        name: String,
+        matchers: Matchers,
+        start: Timestamp,
+        end: Timestamp,
+    },
+}
+
+#[allow(clippy::enum_variant_names)]
+#[derive(Error, Debug)]
+pub enum PlannerErr {
+    #[error("Incorrect query syntax.")]
+    QuerySyntaxErr,
+    #[error("{expr_type} expressions are not supported.")]
+    UnsupportedErr { expr_type: String },
+    #[error("QueryPlanner requires {start_or_end} member to be set.")]
+    StartEndTimeErr { start_or_end: String },
+    #[error("Failed to handle @ modifier due to system time error.")]
+    TimerErr(#[from] SystemTimeError),
+    #[error(transparent)]
+    VectorSelectErr(#[from] VectorSelectErr),
+}
+
+#[derive(Error, Debug)]
+pub enum PrepareQueryErr {
+    #[error("Failed to parse the AST.")]
+    ASTParseErr(String),
+    #[error(transparent)]
+    PlannerErr(#[from] PlannerErr),
+}
+
 /// SAFETY: A connection is only single-threaded
 pub struct Connection {
     page_cache: Rc<RefCell<PageCache>>,
@@ -501,16 +539,15 @@ impl Connection {
         query: impl AsRef<str>,
         start: Option<Timestamp>,
         end: Option<Timestamp>,
-    ) -> Query {
-        let ast = parser::parse(query.as_ref()).unwrap();
+    ) -> Result<Query, PrepareQueryErr> {
+        let ast = parser::parse(query.as_ref()).map_err(PrepareQueryErr::ASTParseErr)?;
         let mut planner = QueryPlanner::new(&ast, start, end);
-        // TODO: remove unwrap
-        let plan = planner.plan(self).unwrap();
+        let plan = planner.plan(self)?;
 
-        Query {
+        Ok(Query {
             plan,
             connection: self,
-        }
+        })
     }
 }
 
@@ -632,7 +669,7 @@ mod tests {
 
         // Prepare test query
         let query = r#"http_requests_total{service = "web"}"#;
-        let mut stmt = conn.prepare_query(query, Some(start), Some(end));
+        let mut stmt = conn.prepare_query(query, Some(start), Some(end)).unwrap();
 
         // Process results
         let mut i = first_i;
@@ -676,7 +713,9 @@ mod tests {
 
         // Prepare test query
         let query = r#"http_requests_total{service = "web"}"#;
-        let mut stmt = conn.prepare_query(query, Some(timestamps[0]), timestamps.last().copied());
+        let mut stmt = conn
+            .prepare_query(query, Some(timestamps[0]), timestamps.last().copied())
+            .unwrap();
 
         // Process results
         let mut i = 0;
@@ -757,11 +796,13 @@ mod tests {
 
         inserter2.flush();
 
-        let mut stmt = conn.prepare_query(
-            r#"http_requests_total{service = "web"}"#,
-            Some(23),
-            Some(51),
-        );
+        let mut stmt = conn
+            .prepare_query(
+                r#"http_requests_total{service = "web"}"#,
+                Some(23),
+                Some(51),
+            )
+            .unwrap();
 
         let mut i = 0;
 
@@ -778,11 +819,13 @@ mod tests {
 
         assert_eq!(i, 4);
 
-        let mut stmt = conn.prepare_query(
-            r#"http_requests_total{service = "cool"}"#,
-            Some(12),
-            Some(67),
-        );
+        let mut stmt = conn
+            .prepare_query(
+                r#"http_requests_total{service = "cool"}"#,
+                Some(12),
+                Some(67),
+            )
+            .unwrap();
 
         let mut i = 0;
         loop {
@@ -833,7 +876,7 @@ mod tests {
             r#"http_requests_total{{service = "web"}} {} http_requests_total{{service = "mobile"}}"#,
             operation
         );
-        let mut stmt = conn.prepare_query(query, Some(0), Some(t));
+        let mut stmt = conn.prepare_query(query, Some(0), Some(t)).unwrap();
 
         // Process results
         let mut i: usize = 0;
@@ -908,7 +951,7 @@ mod tests {
             r#"http_requests_total{{service = "web"}} {} {}"#,
             operation, value_b
         );
-        let mut stmt = conn.prepare_query(query, Some(0), Some(t));
+        let mut stmt = conn.prepare_query(query, Some(0), Some(t)).unwrap();
 
         // Process results
         let mut i: usize = 0;
@@ -1051,7 +1094,7 @@ mod tests {
 
         // Prepare test query
         let query = format!(r#"{} {} {}"#, value_a, operation, value_b);
-        let mut stmt = conn.prepare_query(query, Some(0), Some(100));
+        let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
 
         // Process results
         loop {
@@ -1112,7 +1155,7 @@ mod tests {
 
         // Prepare test query
         let query = format!(r#"{}(http_requests_total{{service = "web"}})"#, operation);
-        let mut stmt = conn.prepare_query(&query, Some(start), Some(end));
+        let mut stmt = conn.prepare_query(&query, Some(start), Some(end)).unwrap();
 
         // Process results
         let actual_val = stmt.next_scalar().unwrap();
@@ -1221,7 +1264,7 @@ mod tests {
             r#"{}(http_requests_total{{service = "web"}} {} {})"#,
             aggregate_op, binary_op, binary_operand
         );
-        let mut stmt = conn.prepare_query(query, Some(0), Some(100));
+        let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
 
         // Process results
         match expected {
@@ -1295,7 +1338,7 @@ mod tests {
             r#"{}({}, http_requests_total{{service = "web"}})"#,
             operation, param
         );
-        let mut stmt = conn.prepare_query(&query, Some(start), Some(end));
+        let mut stmt = conn.prepare_query(&query, Some(start), Some(end)).unwrap();
 
         // Process results
         let mut i = 0;
@@ -1440,7 +1483,7 @@ mod tests {
         // Prepare test query
         let query =
             r#"http_requests_total{service = "web"} * http_requests_total{service = "mobile"}"#;
-        let mut stmt = conn.prepare_query(query, Some(0), Some(100));
+        let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
 
         // Process results
         let mut i = 0;
@@ -1513,7 +1556,7 @@ mod tests {
         // Prepare test query
         let query =
             r#"http_requests_total{service = "web"} + http_requests_total{service = "mobile"}"#;
-        let mut stmt = conn.prepare_query(query, Some(0), Some(100));
+        let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
 
         // Process results
         let mut i = 0;
@@ -1653,7 +1696,7 @@ mod tests {
 
         // Prepare test query
         let query = r#"http_requests_total{service = "web"} + sum(http_requests_total{service = "mobile"})"#;
-        let mut stmt = conn.prepare_query(query, Some(0), Some(100));
+        let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
 
         // Process results
         let mut i = 0;
@@ -1710,7 +1753,7 @@ mod tests {
 
         // Prepare test query
         let query = r#"sum(http_requests_total{service = "web"}) / sum(http_requests_total{service = "mobile"})"#;
-        let mut stmt = conn.prepare_query(query, Some(0), Some(100));
+        let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
 
         // Process results
         let sum_values_a = values_a.iter().sum::<u64>();
@@ -1819,7 +1862,9 @@ mod tests {
             u64s.clone(),
         );
 
-        let uquery = connection.prepare_query(USTREAM, Some(0), Some(1000));
+        let uquery = connection
+            .prepare_query(USTREAM, Some(0), Some(1000))
+            .unwrap();
         query_values_assert(uquery, ValueType::UInteger64, u64s);
 
         let _ = CreateAndInsertI64Helper::help(
@@ -1829,7 +1874,9 @@ mod tests {
             i64s.clone(),
         );
 
-        let iquery = connection.prepare_query(ISTREAM, Some(0), Some(1000));
+        let iquery = connection
+            .prepare_query(ISTREAM, Some(0), Some(1000))
+            .unwrap();
         query_values_assert(iquery, ValueType::Integer64, i64s);
 
         let _ = CreateAndInsertF64Helper::help(
@@ -1839,7 +1886,9 @@ mod tests {
             f64s.clone(),
         );
 
-        let fquery = connection.prepare_query(FSTREAM, Some(0), Some(1000));
+        let fquery = connection
+            .prepare_query(FSTREAM, Some(0), Some(1000))
+            .unwrap();
         query_values_assert(fquery, ValueType::Float64, f64s);
     }
 
@@ -1861,13 +1910,16 @@ mod tests {
         );
 
         {
-            let iquery = connection.prepare_query(r#"mystream{t="i"}"#, Some(0), Some(1000));
+            let iquery = connection
+                .prepare_query(r#"mystream{t="i"}"#, Some(0), Some(1000))
+                .unwrap();
             query_values_assert(iquery, ValueType::Integer64, values.clone());
         }
 
         {
-            let mut topquery =
-                connection.prepare_query(r#"topk(2, mystream{t="i"})"#, Some(0), Some(1000));
+            let mut topquery = connection
+                .prepare_query(r#"topk(2, mystream{t="i"})"#, Some(0), Some(1000))
+                .unwrap();
             assert_eq!(topquery.value_type(), ValueType::Integer64);
             assert_eq!(topquery.next_scalar().unwrap().get_integer64(), -1i64);
             assert_eq!(topquery.next_scalar().unwrap().get_integer64(), -5i64);
@@ -1875,8 +1927,9 @@ mod tests {
         }
 
         {
-            let mut sumquery =
-                connection.prepare_query(r#"sum(mystream{t="i"})"#, Some(0), Some(1000));
+            let mut sumquery = connection
+                .prepare_query(r#"sum(mystream{t="i"})"#, Some(0), Some(1000))
+                .unwrap();
             assert_eq!(sumquery.value_type(), ValueType::Integer64);
             assert_eq!(
                 sumquery.next_scalar().unwrap().get_integer64(),
@@ -1886,8 +1939,9 @@ mod tests {
         }
 
         {
-            let mut minquery =
-                connection.prepare_query(r#"min(mystream{t="i"})"#, Some(0), Some(1000));
+            let mut minquery = connection
+                .prepare_query(r#"min(mystream{t="i"})"#, Some(0), Some(1000))
+                .unwrap();
             assert_eq!(minquery.value_type(), ValueType::Integer64);
             assert_eq!(minquery.next_scalar().unwrap().get_integer64(), -1000i64);
             assert!(minquery.next_scalar().is_none());
@@ -1912,21 +1966,25 @@ mod tests {
         );
 
         {
-            let fquery = connection.prepare_query(r#"mystream{t="f"}"#, Some(0), Some(1000));
+            let fquery = connection
+                .prepare_query(r#"mystream{t="f"}"#, Some(0), Some(1000))
+                .unwrap();
             query_values_assert(fquery, ValueType::Float64, values.clone());
         }
 
         {
-            let mut topquery =
-                connection.prepare_query(r#"bottomk(1, mystream{t="f"})"#, Some(0), Some(1000));
+            let mut topquery = connection
+                .prepare_query(r#"bottomk(1, mystream{t="f"})"#, Some(0), Some(1000))
+                .unwrap();
             assert_eq!(topquery.value_type(), ValueType::Float64);
             assert_eq!(topquery.next_scalar().unwrap().get_float64(), -23.1f64);
             assert!(topquery.next_scalar().is_none());
         }
 
         {
-            let mut avgquery =
-                connection.prepare_query(r#"avg(mystream{t="f"})"#, Some(0), Some(1000));
+            let mut avgquery = connection
+                .prepare_query(r#"avg(mystream{t="f"})"#, Some(0), Some(1000))
+                .unwrap();
             assert_eq!(avgquery.value_type(), ValueType::Float64);
             assert_eq!(
                 avgquery.next_scalar().unwrap().get_float64(),

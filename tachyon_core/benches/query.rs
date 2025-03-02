@@ -25,8 +25,10 @@ fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
 }
 
 fn bench_query(query: &str, start: Option<u64>, end: Option<u64>, conn: &mut Connection) {
-    let mut stmt =
-        black_box(conn.prepare_query(black_box(query), black_box(start), black_box(end)));
+    let mut stmt = black_box(
+        conn.prepare_query(black_box(query), black_box(start), black_box(end))
+            .unwrap(),
+    );
 
     match black_box(stmt.return_type()) {
         ReturnType::Scalar => {
