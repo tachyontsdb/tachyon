@@ -10,7 +10,10 @@ use std::{
     io::Write,
 };
 use std::{os::unix::fs::MetadataExt, path::PathBuf};
-use tachyon_core::{print_error, tachyon_benchmarks::TimeDataFile, PrepareQueryErr};
+use tachyon_core::{
+    error::{print_error, TachyonErr},
+    tachyon_benchmarks::TimeDataFile,
+};
 use tachyon_core::{Connection, Timestamp, ValueType, Vector, FILE_EXTENSION};
 use textplots::{Chart, Plot, Shape};
 use thiserror::Error;
@@ -46,10 +49,10 @@ pub enum CLIErr {
     CSVErr(#[from] csv::Error),
     #[error("Failed to read line.")]
     ReadLineErr(#[from] ReadlineError),
-    #[error(transparent)]
-    PrepareQueryErr(#[from] PrepareQueryErr),
     #[error("IO Error.")]
     FileIOErr(#[from] std::io::Error),
+    #[error(transparent)]
+    TachyonErr(#[from] TachyonErr),
 }
 
 #[derive(Parser)]
@@ -308,11 +311,7 @@ pub fn repl(mut connection: Connection) -> Result<(), CLIErr> {
                 match handle_query_command(&mut connection, &line, None, None, None) {
                     Ok(_) => {}
                     Err(err) => {
-                        if let CLIErr::PrepareQueryErr(prepare_query) = err {
-                            print_error(&prepare_query);
-                        } else {
-                            return Err(err);
-                        }
+                        print_error(&err);
                     }
                 }
             }
