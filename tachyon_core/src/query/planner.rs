@@ -1,9 +1,10 @@
+use crate::error::QueryErr;
 use crate::execution::node::{
     AggregateNode, AggregateType, ArithmeticOp, BinaryOp, BinaryOpNode, ComparisonOp, GetKNode,
     GetKType, NumberLiteralNode, TNode, VectorSelectNode,
 };
 use crate::storage::file::ScanHint;
-use crate::{Connection, PlannerErr, Timestamp, ValueType};
+use crate::{Connection, Timestamp, ValueType};
 use promql_parser::parser::{
     self, AggregateExpr, BinaryExpr, Call, Expr, Extension, MatrixSelector, NumberLiteral,
     ParenExpr, StringLiteral, SubqueryExpr, UnaryExpr, VectorSelector,
@@ -21,7 +22,7 @@ impl<'a> QueryPlanner<'a> {
         Self { ast, start, end }
     }
 
-    pub fn plan(&mut self, conn: &mut Connection) -> Result<TNode, PlannerErr> {
+    pub fn plan(&mut self, conn: &mut Connection) -> Result<TNode, QueryErr> {
         self.handle_expr(self.ast, conn, ScanHint::None)
     }
 
@@ -29,7 +30,7 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         expr: &AggregateExpr,
         conn: &mut Connection,
-    ) -> Result<TNode, PlannerErr> {
+    ) -> Result<TNode, QueryErr> {
         match expr.op.id() {
             parser::token::T_SUM
             | parser::token::T_COUNT
@@ -73,19 +74,15 @@ impl<'a> QueryPlanner<'a> {
                         param,
                     )))
                 } else {
-                    Err(PlannerErr::QuerySyntaxErr)
+                    Err(QueryErr::QuerySyntaxErr)
                 }
             }
-            _ => Err(PlannerErr::QuerySyntaxErr),
+            _ => Err(QueryErr::QuerySyntaxErr),
         }
     }
 
-    fn handle_unary_expr(
-        &mut self,
-        _: &UnaryExpr,
-        _: &mut Connection,
-    ) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr {
+    fn handle_unary_expr(&mut self, _: &UnaryExpr, _: &mut Connection) -> Result<TNode, QueryErr> {
+        Err(QueryErr::UnsupportedErr {
             expr_type: "Unary".to_string(),
         })
     }
@@ -94,7 +91,7 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         expr: &BinaryExpr,
         conn: &mut Connection,
-    ) -> Result<TNode, PlannerErr> {
+    ) -> Result<TNode, QueryErr> {
         let op = match expr.op.id() {
             parser::token::T_ADD => Ok(BinaryOp::Arithmetic(ArithmeticOp::Add)),
             parser::token::T_SUB => Ok(BinaryOp::Arithmetic(ArithmeticOp::Subtract)),
@@ -107,7 +104,7 @@ impl<'a> QueryPlanner<'a> {
             parser::token::T_LSS => Ok(BinaryOp::Comparison(ComparisonOp::Less)),
             parser::token::T_GTE => Ok(BinaryOp::Comparison(ComparisonOp::GreaterEqual)),
             parser::token::T_LTE => Ok(BinaryOp::Comparison(ComparisonOp::LessEqual)),
-            _ => Err(PlannerErr::QuerySyntaxErr),
+            _ => Err(QueryErr::QuerySyntaxErr),
         };
 
         Ok(TNode::BinaryOp(BinaryOpNode::new(
@@ -121,7 +118,7 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         expr: &ParenExpr,
         conn: &mut Connection,
-    ) -> Result<TNode, PlannerErr> {
+    ) -> Result<TNode, QueryErr> {
         self.handle_expr(&expr.expr, conn, ScanHint::None)
     }
 
@@ -129,8 +126,8 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         _: &SubqueryExpr,
         _: &mut Connection,
-    ) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr {
+    ) -> Result<TNode, QueryErr> {
+        Err(QueryErr::UnsupportedErr {
             expr_type: "Subquery".to_string(),
         })
     }
@@ -139,7 +136,7 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         expr: &NumberLiteral,
         _: &mut Connection,
-    ) -> Result<TNode, PlannerErr> {
+    ) -> Result<TNode, QueryErr> {
         Ok(TNode::NumberLiteral(NumberLiteralNode::new(
             ValueType::Float64,
             expr.val.into(),
@@ -150,8 +147,8 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         _: &StringLiteral,
         _: &mut Connection,
-    ) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr {
+    ) -> Result<TNode, QueryErr> {
+        Err(QueryErr::UnsupportedErr {
             expr_type: "String Literal".to_string(),
         })
     }
@@ -161,7 +158,7 @@ impl<'a> QueryPlanner<'a> {
         expr: &VectorSelector,
         conn: &mut Connection,
         hint: ScanHint,
-    ) -> Result<TNode, PlannerErr> {
+    ) -> Result<TNode, QueryErr> {
         let start_opt = if expr.at.is_some() {
             // SAFETY: expr.at is Some from above, unwrapping is safe
             let mut at_res = match expr.at.as_ref().unwrap() {
@@ -194,15 +191,15 @@ impl<'a> QueryPlanner<'a> {
                         hint,
                     )?))
                 } else {
-                    Err(PlannerErr::QuerySyntaxErr)
+                    Err(QueryErr::QuerySyntaxErr)
                 }
             } else {
-                Err(PlannerErr::StartEndTimeErr {
+                Err(QueryErr::StartEndTimeErr {
                     start_or_end: "end".to_string(),
                 })
             }
         } else {
-            Err(PlannerErr::StartEndTimeErr {
+            Err(QueryErr::StartEndTimeErr {
                 start_or_end: "start".to_string(),
             })
         }
@@ -212,14 +209,14 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         _: &MatrixSelector,
         _: &mut Connection,
-    ) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr {
+    ) -> Result<TNode, QueryErr> {
+        Err(QueryErr::UnsupportedErr {
             expr_type: ("Matrix".to_string()),
         })
     }
 
-    fn handle_call_expr(&mut self, _: &Call, _: &mut Connection) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr {
+    fn handle_call_expr(&mut self, _: &Call, _: &mut Connection) -> Result<TNode, QueryErr> {
+        Err(QueryErr::UnsupportedErr {
             expr_type: ("Call".to_string()),
         })
     }
@@ -228,8 +225,8 @@ impl<'a> QueryPlanner<'a> {
         &mut self,
         _: &Extension,
         _: &mut Connection,
-    ) -> Result<TNode, PlannerErr> {
-        Err(PlannerErr::UnsupportedErr {
+    ) -> Result<TNode, QueryErr> {
+        Err(QueryErr::UnsupportedErr {
             expr_type: ("Extension".to_string()),
         })
     }
@@ -239,7 +236,7 @@ impl<'a> QueryPlanner<'a> {
         expr: &Expr,
         conn: &mut Connection,
         hint: ScanHint,
-    ) -> Result<TNode, PlannerErr> {
+    ) -> Result<TNode, QueryErr> {
         match expr {
             Expr::Aggregate(aggregate_expr) => self.handle_aggregate_expr(aggregate_expr, conn),
             Expr::Unary(unary_expr) => self.handle_unary_expr(unary_expr, conn),

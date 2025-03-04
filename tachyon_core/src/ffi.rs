@@ -1,21 +1,23 @@
 use crate::{
-    print_error, Connection, Inserter, Query, ReturnType, TachyonErr, Timestamp, Value, ValueType,
-    Vector,
+    error::{print_error, TachyonErr},
+    Connection, Inserter, Query, ReturnType, Timestamp, Value, ValueType, Vector,
 };
 use std::ffi::{c_char, c_void, CStr};
 
-fn get_error_code(error: &TachyonErr) -> u8 {
-    match error {
-        TachyonErr::TyErr => 1,
-        TachyonErr::InputErr { .. } => 2,
-        TachyonErr::DatabaseCreationErr { .. } => 3,
-        TachyonErr::PrepareQueryErr(_) => 4,
+const FIRST_ERROR_CODE: u8 = 1;
+const LAST_ERROR_CODE: u8 = 3;
+
+fn get_error_code(err: &TachyonErr) -> u8 {
+    match err {
+        TachyonErr::MiscErr { .. } => FIRST_ERROR_CODE,
+        TachyonErr::ConnectionErr(_) => 2,
+        TachyonErr::QueryErr(_) => LAST_ERROR_CODE,
     }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_error_print(code: u8, ptr: *const c_void) {
-    if let 1..=3 = code {
+    if let FIRST_ERROR_CODE..=LAST_ERROR_CODE = code {
         let error_ptr = ptr as *const TachyonErr;
         print_error(&error_ptr.read());
     }
@@ -23,7 +25,7 @@ pub unsafe extern "C" fn tachyon_error_print(code: u8, ptr: *const c_void) {
 
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_error_free(code: u8, ptr: *mut c_void) {
-    if let 1..=3 = code {
+    if let FIRST_ERROR_CODE..=LAST_ERROR_CODE = code {
         let err = Box::from_raw(ptr as *mut TachyonErr);
         drop(err);
     }
@@ -37,8 +39,8 @@ pub unsafe extern "C" fn tachyon_error_free(code: u8, ptr: *mut c_void) {
 pub unsafe extern "C" fn tachyon_open(db_dir: *const c_char, out: *mut *mut c_void) -> u8 {
     let db_dir_res = CStr::from_ptr(db_dir)
         .to_str()
-        .map_err(|err| TachyonErr::InputErr {
-            reason: Box::new(err),
+        .map_err(|err| TachyonErr::MiscErr {
+            inner: Box::new(err),
         });
 
     match db_dir_res {
@@ -47,8 +49,7 @@ pub unsafe extern "C" fn tachyon_open(db_dir: *const c_char, out: *mut *mut c_vo
                 *out = Box::into_raw(Box::new(connection)) as *mut c_void;
                 0u8
             }
-            Err(err) => {
-                let tachyon_err = TachyonErr::from(err);
+            Err(tachyon_err) => {
                 let return_value = get_error_code(&tachyon_err);
                 *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
                 return_value
@@ -80,15 +81,14 @@ pub unsafe extern "C" fn tachyon_stream_create(
 ) -> u8 {
     let stream_res = CStr::from_ptr(stream)
         .to_str()
-        .map_err(|err| TachyonErr::InputErr {
-            reason: Box::new(err),
+        .map_err(|err| TachyonErr::MiscErr {
+            inner: Box::new(err),
         });
 
     match stream_res {
         Ok(stream) => match (*connection).create_stream(stream, value_type) {
             Ok(()) => 0u8,
-            Err(err) => {
-                let tachyon_err = TachyonErr::from(err);
+            Err(tachyon_err) => {
                 let return_value = get_error_code(&tachyon_err);
                 *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
                 return_value
@@ -197,8 +197,7 @@ pub unsafe extern "C" fn tachyon_query_create(
             *out = Box::into_raw(Box::new(query)) as *mut c_void;
             0u8
         }
-        Err(err) => {
-            let tachyon_err = TachyonErr::from(err);
+        Err(tachyon_err) => {
             let return_value = get_error_code(&tachyon_err);
             *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
             return_value

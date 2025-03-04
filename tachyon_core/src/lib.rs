@@ -5,22 +5,20 @@ use crate::query::indexer::Indexer;
 use crate::query::planner::QueryPlanner;
 use crate::storage::page_cache::PageCache;
 use crate::storage::writer::Writer;
-use promql_parser::label::Matchers;
+use error::{ConnectionErr, QueryErr, TachyonErr};
 use promql_parser::parser;
-use query::indexer::IndexerErr;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
-use std::time::SystemTimeError;
 use storage::writer::persistent_writer::PersistentWriter;
-use thiserror::Error;
 use uuid::Uuid;
+
+pub mod error;
 
 mod ffi;
 
@@ -29,36 +27,13 @@ mod query;
 mod storage;
 mod utils;
 
+pub const FILE_EXTENSION: &str = "ty";
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[repr(transparent)]
 pub struct Version(pub u16);
 
-#[derive(Error, Debug)]
-pub enum TachyonErr {
-    #[error("Failed to perform desired operation.")]
-    TyErr,
-    #[error("The provided input was not valid: {reason}")]
-    InputErr { reason: Box<dyn Error> },
-    #[error("Failed to create the directory for the database: {db_dir}.")]
-    DatabaseCreationErr { db_dir: PathBuf },
-    #[error(transparent)]
-    PrepareQueryErr(#[from] PrepareQueryErr),
-}
-
-impl From<ConnectionErr> for TachyonErr {
-    fn from(value: ConnectionErr) -> Self {
-        match value {
-            ConnectionErr::DatabaseCreationErr { db_dir } => {
-                TachyonErr::DatabaseCreationErr { db_dir }
-            }
-            _ => TachyonErr::TyErr,
-        }
-    }
-}
-
-pub fn print_error(err: &impl Error) {
-    eprintln!("Encountered error: {}", err);
-}
+pub const CURRENT_VERSION: Version = Version(2);
 
 /// Encoded as a 128-bit UUID
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -71,11 +46,10 @@ impl From<StreamId> for Uuid {
     }
 }
 
-pub const CURRENT_VERSION: Version = Version(2);
-
-pub const FILE_EXTENSION: &str = "ty";
-
 pub type Timestamp = u64;
+
+/// Contains the Stream ID, a list of matchers and the value type.
+pub type StreamSummaryType = (Uuid, Vec<(String, String)>, ValueType);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -86,6 +60,7 @@ pub enum ValueType {
 }
 
 impl ValueType {
+    /// Gets the resulting type from applying operations between two different value types.
     pub fn get_applied_value_type(lhs_value_type: Self, rhs_value_type: Self) -> Self {
         if lhs_value_type == Self::Float64 || rhs_value_type == Self::Float64 {
             Self::Float64
@@ -125,6 +100,27 @@ impl Display for ValueType {
 pub enum ReturnType {
     Scalar,
     Vector,
+}
+
+impl TryFrom<u8> for ReturnType {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Scalar),
+            1 => Ok(Self::Vector),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Display for ReturnType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Scalar => f.write_str("Scalar"),
+            Self::Vector => f.write_str("Vector"),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -376,54 +372,6 @@ pub struct Vector {
     pub value: Value,
 }
 
-pub type StreamSummaryType = (Uuid, Vec<(String, String)>, ValueType);
-
-#[derive(Error, Debug)]
-pub enum ConnectionErr {
-    #[error("Indexer error.")]
-    IndexerErr(#[from] IndexerErr),
-    #[error("Failed to create the directory for the database: {db_dir}.")]
-    DatabaseCreationErr { db_dir: PathBuf },
-    #[error("Failed to create stream: {stream}.")]
-    StreamCreationErr { stream: String },
-    #[error("Failed to get all streams.")]
-    GetStreamsErr,
-}
-
-#[derive(Error, Debug)]
-pub enum VectorSelectErr {
-    #[error("No streams match selector \"{name}{{{matchers}}}\" from \"{start}\" to \"{end}\".")]
-    NoStreamsMatchedErr {
-        name: String,
-        matchers: Matchers,
-        start: Timestamp,
-        end: Timestamp,
-    },
-}
-
-#[allow(clippy::enum_variant_names)]
-#[derive(Error, Debug)]
-pub enum PlannerErr {
-    #[error("Incorrect query syntax.")]
-    QuerySyntaxErr,
-    #[error("{expr_type} expressions are not supported.")]
-    UnsupportedErr { expr_type: String },
-    #[error("QueryPlanner requires {start_or_end} member to be set.")]
-    StartEndTimeErr { start_or_end: String },
-    #[error("Failed to handle @ modifier due to system time error.")]
-    TimerErr(#[from] SystemTimeError),
-    #[error(transparent)]
-    VectorSelectErr(#[from] VectorSelectErr),
-}
-
-#[derive(Error, Debug)]
-pub enum PrepareQueryErr {
-    #[error("Failed to parse the AST.")]
-    ASTParseErr(String),
-    #[error(transparent)]
-    PlannerErr(#[from] PlannerErr),
-}
-
 /// SAFETY: A connection is only single-threaded
 pub struct Connection {
     page_cache: Rc<RefCell<PageCache>>,
@@ -433,13 +381,21 @@ pub struct Connection {
 
 impl Connection {
     /// Recursively creates the directories to `db_dir` if they do not exist
-    pub fn new(db_dir: impl AsRef<Path>) -> Result<Self, ConnectionErr> {
-        fs::create_dir_all(&db_dir).map_err(|_| ConnectionErr::DatabaseCreationErr {
-            db_dir: db_dir.as_ref().to_path_buf(),
+    pub fn new(db_dir: impl AsRef<Path>) -> Result<Self, TachyonErr> {
+        fs::create_dir_all(&db_dir).map_err(|_| {
+            TachyonErr::ConnectionErr(ConnectionErr::DatabaseCreationErr {
+                db_dir: db_dir.as_ref().to_path_buf(),
+            })
         })?;
 
-        let indexer = Rc::new(RefCell::new(Indexer::new(db_dir.as_ref())?));
-        indexer.borrow_mut().create_store()?;
+        let indexer = Rc::new(RefCell::new(
+            Indexer::new(db_dir.as_ref())
+                .map_err(|err| TachyonErr::ConnectionErr(ConnectionErr::IndexerErr(err)))?,
+        ));
+        indexer
+            .borrow_mut()
+            .create_store()
+            .map_err(|err| TachyonErr::ConnectionErr(ConnectionErr::IndexerErr(err)))?;
 
         Ok(Self {
             page_cache: Rc::new(RefCell::new(PageCache::new(10))),
@@ -474,7 +430,7 @@ impl Connection {
         &mut self,
         stream: impl AsRef<str>,
         value_type: ValueType,
-    ) -> Result<(), ConnectionErr> {
+    ) -> Result<(), TachyonErr> {
         let selector = self.parse_stream(&stream);
 
         if !self.get_stream_ids_for_selector(&selector).is_empty() {
@@ -489,8 +445,10 @@ impl Connection {
                 &selector.matchers,
                 value_type,
             )
-            .map_err(|_| ConnectionErr::StreamCreationErr {
-                stream: stream.as_ref().to_string(),
+            .map_err(|_| {
+                TachyonErr::ConnectionErr(ConnectionErr::StreamCreationErr {
+                    stream: stream.as_ref().to_string(),
+                })
             })?;
         self.writer.borrow_mut().create_stream(stream_id);
 
@@ -507,11 +465,11 @@ impl Connection {
             .is_empty()
     }
 
-    pub fn get_all_streams(&self) -> Result<Vec<StreamSummaryType>, ConnectionErr> {
+    pub fn get_all_streams(&self) -> Result<Vec<StreamSummaryType>, TachyonErr> {
         self.indexer
             .borrow()
             .get_all_streams()
-            .map_err(|_| ConnectionErr::GetStreamsErr)
+            .map_err(|_| TachyonErr::ConnectionErr(ConnectionErr::GetStreamsErr))
     }
 
     pub fn prepare_insert(&mut self, stream: impl AsRef<str>) -> Inserter {
@@ -539,8 +497,9 @@ impl Connection {
         query: impl AsRef<str>,
         start: Option<Timestamp>,
         end: Option<Timestamp>,
-    ) -> Result<Query, PrepareQueryErr> {
-        let ast = parser::parse(query.as_ref()).map_err(PrepareQueryErr::ASTParseErr)?;
+    ) -> Result<Query, TachyonErr> {
+        let ast = parser::parse(query.as_ref())
+            .map_err(|_| TachyonErr::QueryErr(QueryErr::QuerySyntaxErr))?;
         let mut planner = QueryPlanner::new(&ast, start, end);
         let plan = planner.plan(self)?;
 

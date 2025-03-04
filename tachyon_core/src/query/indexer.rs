@@ -1,15 +1,9 @@
+use crate::error::IndexerErr;
 use crate::{StreamSummaryType, Timestamp, ValueType};
 use promql_parser::label::Matchers;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use thiserror::Error;
 use uuid::Uuid;
-
-#[derive(Error, Debug)]
-pub enum IndexerErr {
-    #[error("SQLite Error.")]
-    SQLiteErr(#[from] rusqlite::Error),
-}
 
 trait IndexerStore {
     fn create_store(&mut self) -> Result<(), IndexerErr>;

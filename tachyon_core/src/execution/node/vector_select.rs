@@ -1,8 +1,9 @@
 use super::ExecutorNode;
+use crate::error::QueryErr;
 use crate::query::indexer::Indexer;
 use crate::storage::file::{Cursor, ScanHint};
 use crate::storage::page_cache::PageCache;
-use crate::{Connection, ReturnType, Timestamp, ValueType, Vector, VectorSelectErr};
+use crate::{Connection, ReturnType, Timestamp, ValueType, Vector};
 use promql_parser::label::Matchers;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -27,7 +28,7 @@ impl VectorSelectNode {
         start: Timestamp,
         end: Timestamp,
         hint: ScanHint,
-    ) -> Result<Self, VectorSelectErr> {
+    ) -> Result<Self, QueryErr> {
         let stream_ids: Vec<Uuid> = conn
             .indexer
             .borrow()
@@ -36,7 +37,7 @@ impl VectorSelectNode {
             .collect();
 
         if stream_ids.is_empty() {
-            return Err(VectorSelectErr::NoStreamsMatchedErr {
+            return Err(QueryErr::NoStreamsMatchedErr {
                 name,
                 matchers,
                 start,

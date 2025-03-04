@@ -1,4 +1,5 @@
 use axum::{
+    http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
@@ -23,11 +24,14 @@ struct PerformQueryResponse {
     values_f64: Option<Vec<f64>>,
 }
 
-async fn perform_query(Json(request): Json<PerformQueryRequest>) -> Json<PerformQueryResponse> {
-    let mut connection = Connection::new(request.path).unwrap();
+async fn perform_query(
+    Json(request): Json<PerformQueryRequest>,
+) -> Result<Json<PerformQueryResponse>, (StatusCode, String)> {
+    let mut connection =
+        Connection::new(request.path).map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
     let mut query = connection
         .prepare_query(request.query, request.start, request.end)
-        .unwrap();
+        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
 
     let value_type = query.value_type();
 
@@ -46,7 +50,7 @@ async fn perform_query(Json(request): Json<PerformQueryRequest>) -> Json<Perform
         }
     }
 
-    Json(PerformQueryResponse {
+    Ok(Json(PerformQueryResponse {
         value_type: match value_type {
             ValueType::Integer64 => String::from("Integer64"),
             ValueType::UInteger64 => String::from("UInteger64"),
@@ -68,7 +72,7 @@ async fn perform_query(Json(request): Json<PerformQueryRequest>) -> Json<Perform
         } else {
             None
         },
-    })
+    }))
 }
 
 #[tokio::main]

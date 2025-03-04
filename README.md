@@ -19,7 +19,7 @@ cargo build --locked --release
 
 ### CLI
 ```
-cargo run --locked --release --bin tachyon_cli -- [COMMANDS]
+cargo run --locked --release --bin tachyon_cli -- <commands>
 ```
 
 ### Web Backend
