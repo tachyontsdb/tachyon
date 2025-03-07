@@ -585,7 +585,8 @@ pub mod tachyon_benchmarks {
 #[cfg(test)]
 mod tests {
     use crate::{
-        utils::test::set_up_dirs, Connection, Inserter, Query, Timestamp, Value, ValueType,
+        utils::test::set_up_dirs, Connection, Inserter, Query, ReturnType, Timestamp, Value,
+        ValueType,
     };
     use std::{borrow::Borrow, collections::HashSet, iter::zip, path::PathBuf};
 
@@ -801,290 +802,351 @@ mod tests {
         assert_eq!(i, 4);
     }
 
-    fn binary_op_vector_to_vector_test_helper(
-        root_dir: PathBuf,
-        operation: &str,
-        values_a: &[i64],
-        values_b: &[i64],
-        expected: &[i64],
-    ) {
+    fn execution_test_helper(root_dir: PathBuf, query: &str, expected: &[Value]) {
         let mut conn = Connection::new(root_dir).unwrap();
 
         // Insert dummy values
-        let mut t: Timestamp = 0;
-        let mut inserter_a = create_stream_helper(
-            &mut conn,
-            r#"http_requests_total{service = "web"}"#,
-            ValueType::Integer64,
-        );
-        let mut inserter_b = create_stream_helper(
-            &mut conn,
-            r#"http_requests_total{service = "mobile"}"#,
-            ValueType::Integer64,
-        );
-        for (v_a, v_b) in zip(values_a, values_b) {
-            inserter_a.insert(t, (*v_a).into());
-            inserter_b.insert(t, (*v_b).into());
-            t += 1;
+        let timestamps = [10, 20, 30, 40];
+        let values = [2i64, 4, 6, 8];
+        let mut inserter = create_stream_helper(&mut conn, r#"ints"#, ValueType::Integer64);
+        for (t, v) in zip(timestamps, values) {
+            inserter.insert(t, v.into());
         }
-        inserter_a.flush();
-        inserter_b.flush();
+        inserter.flush();
 
-        // Prepare test query
-        let query = format!(
-            r#"http_requests_total{{service = "web"}} {} http_requests_total{{service = "mobile"}}"#,
-            operation
-        );
-        let mut stmt = conn.prepare_query(query, Some(0), Some(t)).unwrap();
-
-        // Process results
-        let mut i: usize = 0;
-        loop {
-            let res = stmt.next_vector();
-            if res.is_none() {
-                break;
-            }
-            let res = res.unwrap();
-            assert_eq!(expected[i], res.value.get_integer64());
-            i += 1;
+        let timestamps = [10, 20, 30, 40];
+        let values = [1u64, 2, 3, 4];
+        let mut inserter = create_stream_helper(&mut conn, r#"uints"#, ValueType::UInteger64);
+        for (t, v) in zip(timestamps, values) {
+            inserter.insert(t, v.into());
         }
-    }
+        inserter.flush();
 
-    #[test]
-    fn test_e2e_add_vector_to_vector() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_vector_test_helper(root_dir, "+", &[3, 1, -2], &[4, -6, 5], &[7, -5, 3])
-    }
-
-    #[test]
-    fn test_e2e_subtract_vector_to_vector() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_vector_test_helper(
-            root_dir,
-            "-",
-            &[3, 1, -2],
-            &[4, -6, 5],
-            &[-1, 7, -7],
-        )
-    }
-
-    #[test]
-    fn test_e2e_multiply_vector_to_vector() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_vector_test_helper(
-            root_dir,
-            "*",
-            &[3, 1, -2],
-            &[4, -6, 5],
-            &[12, -6, -10],
-        )
-    }
-
-    fn binary_op_vector_to_scalar_test_helper(
-        root_dir: PathBuf,
-        operation: &str,
-        values_a: &[f64],
-        value_b: f64,
-        expected: &[f64],
-    ) {
-        let mut conn = Connection::new(root_dir).unwrap();
-
-        // Insert dummy values
-        let mut t: Timestamp = 0;
-        let mut inserter_a = create_stream_helper(
-            &mut conn,
-            r#"http_requests_total{service = "web"}"#,
-            ValueType::Float64,
-        );
-        for v_a in values_a {
-            inserter_a.insert(t, (*v_a).into());
-            t += 1;
+        let values = [4.1, 3.2, 2.3, 1.4];
+        let mut inserter = create_stream_helper(&mut conn, r#"floats"#, ValueType::Float64);
+        for (t, v) in zip(timestamps, values) {
+            inserter.insert(t, v.into());
         }
-        inserter_a.flush();
+        inserter.flush();
 
-        // Prepare test query
-        let query = format!(
-            r#"http_requests_total{{service = "web"}} {} {}"#,
-            operation, value_b
-        );
-        let mut stmt = conn.prepare_query(query, Some(0), Some(t)).unwrap();
-
-        // Process results
-        let mut i: usize = 0;
-        loop {
-            let res = stmt.next_vector();
-            if res.is_none() {
-                break;
-            }
-            let res = res.unwrap();
-            assert_eq!(expected[i], res.value.get_float64());
-            i += 1;
-        }
-    }
-
-    #[test]
-    fn test_e2e_add_vector_to_scalar() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_scalar_test_helper(
-            root_dir,
-            "+",
-            &[6.0, 2.0, -4.0],
-            -3.0,
-            &[3.0, -1.0, -7.0],
-        )
-    }
-
-    #[test]
-    fn test_e2e_subtract_vector_to_scalar() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_scalar_test_helper(
-            root_dir,
-            "-",
-            &[6.0, 2.0, -4.0],
-            -3.0,
-            &[9.0, 5.0, -1.0],
-        )
-    }
-
-    #[test]
-    fn test_e2e_multiply_vector_to_scalar() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_scalar_test_helper(
-            root_dir,
-            "*",
-            &[6.0, 2.0, -4.0],
-            -3.0,
-            &[-18.0, -6.0, 12.0],
-        )
-    }
-
-    #[test]
-    fn test_e2e_equal_vector_to_scalar() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_scalar_test_helper(
-            root_dir,
-            "==",
-            &[1.0, 2.0, 1.0, 3.0, 1.0],
-            1.0,
-            &[1.0, 1.0, 1.0],
-        )
-    }
-
-    #[test]
-    fn test_e2e_notequal_vector_to_scalar() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_scalar_test_helper(
-            root_dir,
-            "!=",
-            &[1.0, 2.0, 1.0, 3.0, 1.0],
-            1.0,
-            &[2.0, 3.0],
-        )
-    }
-
-    #[test]
-    fn test_e2e_greater_vector_to_scalar() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_scalar_test_helper(
-            root_dir,
-            ">",
-            &[1.0, 2.0, 3.0, 4.0, 5.0],
-            3.0,
-            &[4.0, 5.0],
-        )
-    }
-
-    #[test]
-    fn test_e2e_less_vector_to_scalar() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_scalar_test_helper(
-            root_dir,
-            "<",
-            &[1.0, 2.0, 3.0, 4.0, 5.0],
-            3.0,
-            &[1.0, 2.0],
-        )
-    }
-
-    #[test]
-    fn test_e2e_greaterequal_vector_to_scalar() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_scalar_test_helper(
-            root_dir,
-            ">=",
-            &[1.0, 2.0, 3.0, 4.0, 5.0],
-            3.0,
-            &[3.0, 4.0, 5.0],
-        )
-    }
-
-    #[test]
-    fn test_e2e_lessequal_vector_to_scalar() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_vector_to_scalar_test_helper(
-            root_dir,
-            "<=",
-            &[1.0, 2.0, 3.0, 4.0, 5.0],
-            3.0,
-            &[1.0, 2.0, 3.0],
-        )
-    }
-
-    fn binary_op_scalar_to_scalar_test_helper(
-        root_dir: PathBuf,
-        operation: &str,
-        value_a: i64,
-        value_b: i64,
-        expected: f64,
-    ) {
-        let mut conn = Connection::new(root_dir).unwrap();
-
-        // Prepare test query
-        let query = format!(r#"{} {} {}"#, value_a, operation, value_b);
         let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
 
         // Process results
+        let mut i: usize = 0;
         loop {
-            let res = stmt.next_scalar();
-            if res.is_none() {
-                break;
+            let res = match stmt.return_type() {
+                ReturnType::Vector => stmt.next_vector().map(|next| next.value),
+                ReturnType::Scalar => stmt.next_scalar(),
+            };
+            match res {
+                Some(res) => match stmt.value_type() {
+                    ValueType::Integer64 => {
+                        assert!(expected[i].eq_same(stmt.value_type(), &res))
+                    }
+                    ValueType::UInteger64 => {
+                        assert!(expected[i].eq_same(stmt.value_type(), &res))
+                    }
+                    ValueType::Float64 => {
+                        assert!((expected[i].get_float64() - res.get_float64()).abs() < 0.001)
+                    }
+                },
+                None => {
+                    assert!(i == expected.len());
+                    break;
+                }
             }
-            let res = res.unwrap();
-            assert_eq!(expected, res.get_float64());
+            i += 1;
         }
     }
 
     #[test]
-    fn test_e2e_add_scalar_to_scalar() {
+    fn test_e2e_add_vectors() {
         set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_scalar_to_scalar_test_helper(root_dir, "+", 6, -3, 3.0);
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"ints + floats"#,
+            &[6.1, 7.2, 8.3, 9.4].map(|x| x.into()),
+        );
     }
 
     #[test]
-    fn test_e2e_subtract_scalar_to_scalar() {
+    fn test_e2e_subtract_vectors() {
         set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_scalar_to_scalar_test_helper(root_dir, "-", 6, -3, 9.0);
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"ints - uints"#,
+            &[1i64, 2, 3, 4].map(|x| x.into()),
+        );
     }
 
     #[test]
-    fn test_e2e_multiply_scalar_to_scalar() {
+    fn test_e2e_multiply_vectors() {
         set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        binary_op_scalar_to_scalar_test_helper(root_dir, "*", 6, -3, -18.0);
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"ints * floats"#,
+            &[8.2, 12.8, 13.8, 11.2].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_divide_vectors() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"ints / uints"#,
+            &[2.0, 2.0, 2.0, 2.0].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_modulo_vectors() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"ints % floats"#,
+            &[2.0, 0.8, 1.4, 1.0].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_add_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"ints + 2"#,
+            &[4.0, 6.0, 8.0, 10.0].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_subtract_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"uints - 2.5"#,
+            &[-1.5, -0.5, 0.5, 1.5].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_multiply_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"floats * 11"#,
+            &[45.1, 35.2, 25.3, 15.4].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_divide_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"ints / -4"#,
+            &[-0.5, -1.0, -1.5, -2.0].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_modulo_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"uints % 2"#,
+            &[1.0, 0.0, 1.0, 0.0].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_equal_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"(ints % 4) == 2"#,
+            &[2.0, 2.0].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_notequal_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"uints != 2"#,
+            &[1i64, 3, 4].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_greater_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"floats > 2.3"#,
+            &[4.1, 3.2].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_less_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"floats < 3.2"#,
+            &[2.3, 1.4].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_greaterequal_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"floats >= 2.3"#,
+            &[4.1, 3.2, 2.3].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_lessequal_vector_scalar() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"floats <= 3.2"#,
+            &[3.2, 2.3, 1.4].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_operate_scalars() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"(2 + 3 - 4.5) * (5 / 2.3) % 1"#,
+            &[0.0870].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_sum_vector() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(dirs[0].clone(), r#"sum(ints)"#, &[20i64].map(|x| x.into()));
+    }
+
+    #[test]
+    fn test_e2e_sum_no_values() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(dirs[0].clone(), r#"sum(ints < 0)"#, &[]);
+    }
+
+    #[test]
+    fn test_e2e_count_vector() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"count(uints)"#,
+            &[4i64].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_count_no_values() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"count(ints < 0)"#,
+            &[0i64].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_average_vector() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(dirs[0].clone(), r#"avg(floats)"#, &[2.75].map(|x| x.into()));
+    }
+
+    #[test]
+    fn test_e2e_average_no_values() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(dirs[0].clone(), r#"avg(ints < 0)"#, &[]);
+    }
+
+    #[test]
+    fn test_e2e_min_vector() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(dirs[0].clone(), r#"min(ints)"#, &[2i64].map(|x| x.into()));
+    }
+
+    #[test]
+    fn test_e2e_min_no_values() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(dirs[0].clone(), r#"min(ints < 0)"#, &[]);
+    }
+
+    #[test]
+    fn test_e2e_max_vector() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(dirs[0].clone(), r#"max(uints)"#, &[4u64].map(|x| x.into()));
+    }
+
+    #[test]
+    fn test_e2e_max_no_values() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(dirs[0].clone(), r#"max(ints < 0)"#, &[]);
+    }
+
+    #[test]
+    fn test_e2e_topk_vector() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"topk(2, ints)"#,
+            &[8i64, 6].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_topk_vector_largek() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"topk(100, uints)"#,
+            &[4u64, 3, 2, 1].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_topk_vector_zerok() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(dirs[0].clone(), r#"topk(0, floats)"#, &[]);
+    }
+
+    #[test]
+    fn test_e2e_bottomk_vector() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"bottomk(2, ints)"#,
+            &[2i64, 4].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_bottomk_vector_largek() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"bottomk(100, uints)"#,
+            &[1u64, 2, 3, 4].map(|x| x.into()),
+        );
+    }
+
+    #[test]
+    fn test_e2e_bottomk_vector_zerok() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(dirs[0].clone(), r#"bottomk(0, floats)"#, &[]);
     }
 
     fn aggregate_test_helper(
@@ -1191,215 +1253,6 @@ mod tests {
         set_up_dirs!(dirs, "db");
         let root_dir = dirs[0].clone();
         aggregate_test_helper(root_dir, "max", 29, 40, 47u64.into())
-    }
-
-    fn aggregate_comparison_op_test_helper(
-        root_dir: PathBuf,
-        aggregate_op: &str,
-        binary_op: &str,
-        binary_operand: u64,
-        expected: Option<Value>,
-    ) {
-        let mut conn = Connection::new(root_dir).unwrap();
-
-        let timestamps = [23, 25, 29];
-        let values = [27.0, 31.0, 47.0];
-
-        let mut inserter = create_stream_helper(
-            &mut conn,
-            r#"http_requests_total{service = "web"}"#,
-            ValueType::Float64,
-        );
-
-        // Insert dummy data
-        for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
-        }
-
-        inserter.flush();
-
-        // Prepare test query
-        let query = format!(
-            r#"{}(http_requests_total{{service = "web"}} {} {})"#,
-            aggregate_op, binary_op, binary_operand
-        );
-        let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
-
-        // Process results
-        match expected {
-            Some(expected_val) => {
-                let actual_val = stmt.next_scalar().unwrap();
-                assert!(actual_val.eq_same(stmt.value_type(), &expected_val));
-                assert!(stmt.next_scalar().is_none());
-            }
-            None => {
-                assert!(stmt.next_scalar().is_none());
-            }
-        }
-    }
-
-    #[test]
-    fn test_e2e_sum_of_comparison() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        aggregate_comparison_op_test_helper(root_dir, "sum", ">", 27, Some(78f64.into()))
-    }
-
-    #[test]
-    fn test_e2e_sum_of_no_values() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        aggregate_comparison_op_test_helper(root_dir, "sum", ">", 100, None)
-    }
-
-    #[test]
-    fn test_e2e_count_of_no_values() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        aggregate_comparison_op_test_helper(root_dir, "count", ">", 100, Some(0u64.into()))
-    }
-
-    #[test]
-    fn test_e2e_min_of_no_values() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        aggregate_comparison_op_test_helper(root_dir, "min", ">", 100, None)
-    }
-
-    fn aggregatek_test_helper(
-        root_dir: PathBuf,
-        operation: &str,
-        param: u64,
-        start: u64,
-        end: u64,
-        expected_val: Vec<Value>,
-    ) {
-        let mut conn = Connection::new(root_dir).unwrap();
-
-        let timestamps = [23, 25, 29, 40, 44, 51];
-        let values = [27u64, 31, 47, 23, 31, 48];
-
-        let mut inserter = create_stream_helper(
-            &mut conn,
-            r#"http_requests_total{service = "web"}"#,
-            ValueType::UInteger64,
-        );
-
-        // Insert dummy data
-        for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
-        }
-
-        inserter.flush();
-
-        // Prepare test query
-        let query = format!(
-            r#"{}({}, http_requests_total{{service = "web"}})"#,
-            operation, param
-        );
-        let mut stmt = conn.prepare_query(&query, Some(start), Some(end)).unwrap();
-
-        // Process results
-        let mut i = 0;
-        loop {
-            let res = stmt.next_scalar();
-            if res.is_none() {
-                break;
-            }
-            println!(
-                "Cool: {:#?} {:#?}",
-                res.unwrap().get_uinteger64(),
-                expected_val[i].get_uinteger64()
-            );
-            assert!(res.unwrap().eq_same(stmt.value_type(), &expected_val[i]));
-            i += 1;
-        }
-    }
-
-    #[test]
-    fn test_e2e_bottomk() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        aggregatek_test_helper(
-            root_dir,
-            "bottomk",
-            2,
-            23,
-            51,
-            [23u64.into(), 27u64.into()].to_vec(),
-        )
-    }
-
-    #[test]
-    fn test_e2e_bottomk_zero_k() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        aggregatek_test_helper(root_dir, "bottomk", 0, 23, 51, [].to_vec())
-    }
-
-    #[test]
-    fn test_e2e_bottomk_large_k() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        aggregatek_test_helper(
-            root_dir,
-            "bottomk",
-            10000,
-            23,
-            51,
-            [
-                23u64.into(),
-                27u64.into(),
-                31u64.into(),
-                31u64.into(),
-                47u64.into(),
-                48u64.into(),
-            ]
-            .to_vec(),
-        )
-    }
-
-    #[test]
-    fn test_e2e_topk() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        aggregatek_test_helper(
-            root_dir,
-            "topk",
-            2,
-            23,
-            51,
-            [48u64.into(), 47u64.into()].to_vec(),
-        )
-    }
-
-    #[test]
-    fn test_e2e_topk_zero_k() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        aggregatek_test_helper(root_dir, "topk", 0, 23, 51, [].to_vec())
-    }
-
-    #[test]
-    fn test_e2e_topk_large_k() {
-        set_up_dirs!(dirs, "db");
-        let root_dir = dirs[0].clone();
-        aggregatek_test_helper(
-            root_dir,
-            "topk",
-            10000,
-            23,
-            51,
-            [
-                48u64.into(),
-                47u64.into(),
-                31u64.into(),
-                31u64.into(),
-                27u64.into(),
-                23u64.into(),
-            ]
-            .to_vec(),
-        )
     }
 
     #[test]
