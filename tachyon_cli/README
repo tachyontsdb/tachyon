@@ -1,163 +1,108 @@
 # Tachyon CLI
 
-The Tachyon CLI (`tql`) allows users to interact with their time series databases. It supports querying, writing data, and managing database contexts.
+The Tachyon CLI (`tachyon`) allows users to interact with their time series databases. It supports querying, writing data, and managing database contexts.
 
-## Database Context
-
-TQL keeps track of the database it is running against to avoid repeated specification.
-
-### View Current Database
-```sh
-$ tql db current
-/home/user/application/tachyon_database
+## Running the CLI
+Opens an interactive shell against a Tachyon database. Allows queries and special "dot" commands.
+```c++
+$ tachyon <DB_DIR>
+# <QUERY|COMMAND>
 ```
 
-### List Known Databases
-```sh
-$ tql db list
-/home/user/application/tachyon_database
-/home/user/arduino-controller/temperature
-/home/user/stock_data
+## Running queries
+Once in the shell, any valid query can be passed in to the terminal.
+```c++
+# linear_dataset
+⡁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠁ 1000.0
+⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀
+⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⡁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⡁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⡁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⡁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠄⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠂⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠉⠉⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀ 0.0
+0.0                                                                                 1000.0
 ```
 
-### Switch Database
-```sh
-$ tql db use /home/user/stock_data
+## DOT Commands
+More information and configuration options are available using special "dot" commands with the syntax `.<COMMAND>`
+
+### Create
+Used to create a new stream.
+```c++
+Usage: create <STREAM>
+```
+Example:
+```c++
+# .create linear_dataset
 ```
 
----
+### Write
+Can be used to write a supported file format to a data stream.
+```c++
+Usage: write [OPTIONS] <PATH> <STREAM>
 
-## Queries
+Arguments:
+  <PATH>    
+  <STREAM>  
 
-### Run an Interactive Query Shell
-```sh
-$ tql shell
-```
-#### Example:
-```sh
-$ tql shell
-tachyon$ http_requests{trend="increase"}
---------------------
-Timestamp | Value
-12363621  | 1.0
-12363891  | 2.0
-10967861  | 3.0
+Options:
+  -c, --create  
+  -h, --help
 ```
 
-### Run a One-Off Query
-```sh
-$ tql query <query>
+```c++
+# .write /data/linear.csv linear_dataset
 ```
-#### Example:
-```sh
-$ tql query http_requests{trend="increase"}
+If the stream does not exist the `-c` flag can be used to automatically create it.
+
+### Information Commands
+```c++
+Usage: info <COMMAND>
+
+Commands:
+  stat     
+  streams  
+  help
 ```
 
-### Graphical Query Output
-```sh
-$ tql query <query> -g
-```
-#### Example:
-```sh
-$ tql query temperature -g
-[some graph]
+#### Stat
+```c++
+# .info stat
+Total Streams: 3
+Storage Used: 35 KiB
 ```
 
-### Export Query Results
-```sh
-$ tql query <query> -e <format>
-```
-#### Example:
-```sh
-$ tql query temperature -e json
-```
-```sh
-$ tql query temperature -e csv
-```
-
----
-
-## Writing Data
-
-### Manual Input
-#### General Command Structure:
-```sh
-$ tql write <stream> [(timestamp, value),*]
-```
-#### Example:
-```sh
-$ tql write http_requests{trend="increase"} [(ts, val), (ts, val)]
-2 entries written.
+#### List Streams
+```c++
+# .info streams
+╭──────────────────────────────────────┬────────────────────────┬────────────╮
+│ Stream ID                            │ Stream Name + Matchers │ Value Type │
+├──────────────────────────────────────┼────────────────────────┼────────────┤
+│ b4ef98a4-9476-44d3-a496-dcc14eb06d25 │ "__name" = "voltage"   │ Integer64  │
+├──────────────────────────────────────┼────────────────────────┼────────────┤
+│ 99bad1cc-d72b-48f6-b9dc-3a62c5c08206 │ "__name" = "stock"     │ Float64    │
+├──────────────────────────────────────┼────────────────────────┼────────────┤
+│ 0c8b1d5d-1074-42c5-9c7d-857c0e3e220d │ "__name" = "linear"    │ Float64    │
+╰──────────────────────────────────────┴────────────────────────┴────────────╯
 ```
 
-### File-Based Input
-```sh
-$ tql write <stream> -f <filename>
+### Configuration (Mode)
 ```
-#### Example:
-```sh
-$ tql write http_requests{trend="increase"} -f data.csv
-```
-```sh
-$ tql write http_requests{trend="increase"} -f data.json
-```
+Usage: mode [OPTIONS]
 
-### Streaming Input
-```sh
-$ cat <file> | tql write -
+Options:
+  -o, --output-mode <OUTPUT_MODE>  [possible values: graphical, tabular, file]
+  -p, --path <PATH>                
+  -v, --value-type <VALUE_TYPE>    [possible values: i64, u64, f64]
+  -h, --help     
 ```
-#### Example:
-```sh
-$ cat data.json | tql write -
-```
-
----
-
-## Information Commands
-
-### List Streams
-```sh
-$ tql info streams
-```
-#### Example:
-```sh
-$ tql info streams
---------------------------------
-Stream ID | Stream + Matchers
-1         | http_requests
-2         | temperature{unit="celsius"}
-3         | http_requests{trend="increase"}
-4         | http_requests{trend="decrease"}
-```
-
-### Filter Streams
-```sh
-$ tql info streams -m <matcher>
-```
-#### Example:
-```sh
-$ tql info streams -m http_requests
-```
-
-### Stream Metadata
-```sh
-$ tql info stream <stream_name>
-```
-#### Example:
-```sh
-$ tql info stream http_requests
-Stream: http_requests
-Retention: 30d
-Total Points: 1,230,000
-Size: 12MB
-```
-
-### Database Statistics
-
-```sh
-$ tql info stats
-Total Streams: 34
-Total Data Points: 5,678,901
-Storage Used: 234MB
-Retention Policy: 90d
-```
+Can be used to set output mode, the output path, and the storage type for values (f64 recommended). 

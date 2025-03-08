@@ -17,7 +17,7 @@ const TACHYON_CLI_HEADER: &str = r"
                                       /\___/                              
                                       \/__/                               
 ";
-const PROMPT: &str = "$ ";
+const PROMPT: &str = "# ";
 const COMMAND_PREFIX: &str = ".";
 
 #[derive(Parser)]
