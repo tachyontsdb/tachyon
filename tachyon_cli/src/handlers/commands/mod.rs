@@ -102,7 +102,9 @@ pub fn handle_command(
             connection.create_stream(stream, config.value_type).unwrap();
             Ok(())
         }
-        TachyonCommand::Exit => Ok(()),
+        TachyonCommand::Exit => {
+            std::process::exit(0);
+        },
         TachyonCommand::Mode {
             output_mode,
             path: output_path,
