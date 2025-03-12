@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{command, Parser, ValueEnum};
 use rustyline::{error::ReadlineError, history::FileHistory, DefaultEditor};
-use tachyon_core::{print_error, Connection, ValueType};
+use tachyon_core::{error::print_error, Connection, ValueType};
 
 use crate::{handlers, CLIErr};
 

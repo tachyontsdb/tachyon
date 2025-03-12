@@ -18,7 +18,7 @@ pub fn handle_query(
         .as_millis() as u64;
 
     let mut query =
-        connection.prepare_query(query, start.or(Some(start_time)), end.or(Some(end_time)));
+        connection.prepare_query(query, start.or(Some(start_time)), end.or(Some(end_time)))?;
 
     let query_value_type = query.value_type();
 

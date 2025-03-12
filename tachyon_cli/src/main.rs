@@ -6,7 +6,7 @@ pub mod output;
 use clap::Parser;
 use cli::{EntryArgs, TachyonCli};
 use rustyline::error::ReadlineError;
-use tachyon_core::{Connection, ValueType};
+use tachyon_core::{error::TachyonErr, Connection, ValueType};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
