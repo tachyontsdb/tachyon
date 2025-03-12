@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{cmp, time::Duration};
 
 use crate::{Connection, ReturnType, Timestamp, Value, ValueType, Vector};
 
@@ -16,13 +16,14 @@ pub enum AggregateType {
 struct AggregateChild {
     node: Box<TNode>,
     peeked_vector: Option<Vector>, // Next vector is stored here if looked at but not returned
-    end_timestamp: Timestamp,      // End timestamp of aggregation (sub)period
+    end: Timestamp,                // End timestamp of aggregation (sub)period
     done: bool,
 }
 
 pub struct AggregateNode {
     pub aggregate_type: AggregateType,
     subperiod: Option<Duration>,
+    end: Timestamp,
     child: AggregateChild,
     other_child: Option<AggregateChild>,
 }
@@ -45,16 +46,17 @@ impl AggregateNode {
         Self {
             aggregate_type,
             subperiod,
+            end,
             child: AggregateChild {
                 node: child,
                 peeked_vector: None,
-                end_timestamp: curr_end,
+                end: curr_end,
                 done: false,
             },
             other_child: other_child.map(|other_child| AggregateChild {
                 node: other_child,
                 peeked_vector: None,
-                end_timestamp: curr_end,
+                end: curr_end,
                 done: false,
             }),
         }
@@ -72,8 +74,12 @@ impl AggregateNode {
         subperiod: Option<Duration>,
         conn: &mut Connection,
     ) -> Option<Vector> {
+        // Retrieve peeked vector; else, get next vector
         let next_vector = if let Some(vector) = child.peeked_vector {
             child.peeked_vector = None;
+            if let Some(subperiod) = subperiod {
+                child.end += subperiod.as_millis() as u64;
+            }
             Some(vector)
         } else {
             child.node.next_vector(conn)
@@ -81,11 +87,8 @@ impl AggregateNode {
 
         if let Some(vector) = next_vector {
             // Return None if next vector is past subperiod; next call will return it
-            if vector.timestamp > child.end_timestamp {
-                child.peeked_vector = Some(vector);
-                if let Some(subperiod) = subperiod {
-                    child.end_timestamp += subperiod.as_millis() as u64;
-                }
+            if vector.timestamp > child.end {
+                child.peeked_vector = Some(vector); // Store peeked vector
                 None
             } else {
                 Some(vector)
@@ -218,10 +221,8 @@ impl ExecutorNode for AggregateNode {
     fn next_vector(&mut self, conn: &mut Connection) -> Option<Vector> {
         while !self.child.done {
             if let Some(value) = self.next_scalar(conn) {
-                return Some(Vector {
-                    timestamp: self.child.end_timestamp,
-                    value,
-                });
+                let timestamp = cmp::min(self.child.end, self.end); // Bound by end timestamp
+                return Some(Vector { timestamp, value });
             }
         }
         None

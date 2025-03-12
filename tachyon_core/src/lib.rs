@@ -595,7 +595,7 @@ pub mod tachyon_benchmarks {
 mod tests {
     use crate::{
         utils::test::set_up_dirs, Connection, Inserter, Query, ReturnType, Timestamp, Value,
-        ValueType,
+        ValueType, Vector,
     };
     use std::{borrow::Borrow, collections::HashSet, iter::zip, path::PathBuf};
 
@@ -820,7 +820,12 @@ mod tests {
         assert_eq!(i, 4);
     }
 
-    fn execution_test_helper(root_dir: PathBuf, query: &str, expected: &[Value]) {
+    fn execution_test_helper(
+        root_dir: PathBuf,
+        query: &str,
+        expected: &[Value],
+        expected_timestamps: Option<&[Timestamp]>,
+    ) {
         let mut conn = Connection::new(root_dir).unwrap();
 
         // Insert dummy values
@@ -847,16 +852,22 @@ mod tests {
         }
         inserter.flush().unwrap();
 
-        let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
+        let mut stmt = conn.prepare_query(query, Some(0), Some(40)).unwrap();
 
         // Process results
         let mut i: usize = 0;
         loop {
-            let res = match stmt.return_type() {
-                ReturnType::Vector => stmt.next_vector().map(|next| next.value),
-                ReturnType::Scalar => stmt.next_scalar(),
+            let (value, timestamp) = match stmt.return_type() {
+                ReturnType::Vector => {
+                    if let Some(Vector { value, timestamp }) = stmt.next_vector() {
+                        (Some(value), Some(timestamp))
+                    } else {
+                        (None, None)
+                    }
+                }
+                ReturnType::Scalar => (stmt.next_scalar(), None),
             };
-            match res {
+            match value {
                 Some(res) => match stmt.value_type() {
                     ValueType::Integer64 => {
                         assert!(expected[i].eq_same(stmt.value_type(), &res))
@@ -873,6 +884,9 @@ mod tests {
                     break;
                 }
             }
+            if let Some(expected_timestamps) = expected_timestamps {
+                assert!(timestamp.is_some_and(|x| x == expected_timestamps[i]));
+            }
             i += 1;
         }
     }
@@ -884,6 +898,7 @@ mod tests {
             dirs[0].clone(),
             r#"ints + floats"#,
             &[6.1, 7.2, 8.3, 9.4].map(|x| x.into()),
+            None,
         );
     }
 
@@ -894,6 +909,7 @@ mod tests {
             dirs[0].clone(),
             r#"ints - uints"#,
             &[1i64, 2, 3, 4].map(|x| x.into()),
+            None,
         );
     }
 
@@ -904,6 +920,7 @@ mod tests {
             dirs[0].clone(),
             r#"ints * floats"#,
             &[8.2, 12.8, 13.8, 11.2].map(|x| x.into()),
+            None,
         );
     }
 
@@ -914,6 +931,7 @@ mod tests {
             dirs[0].clone(),
             r#"ints / uints"#,
             &[2.0, 2.0, 2.0, 2.0].map(|x| x.into()),
+            None,
         );
     }
 
@@ -924,6 +942,7 @@ mod tests {
             dirs[0].clone(),
             r#"ints % floats"#,
             &[2.0, 0.8, 1.4, 1.0].map(|x| x.into()),
+            None,
         );
     }
 
@@ -934,6 +953,7 @@ mod tests {
             dirs[0].clone(),
             r#"ints + 2"#,
             &[4.0, 6.0, 8.0, 10.0].map(|x| x.into()),
+            None,
         );
     }
 
@@ -944,6 +964,7 @@ mod tests {
             dirs[0].clone(),
             r#"uints - 2.5"#,
             &[-1.5, -0.5, 0.5, 1.5].map(|x| x.into()),
+            None,
         );
     }
 
@@ -954,6 +975,7 @@ mod tests {
             dirs[0].clone(),
             r#"floats * 11"#,
             &[45.1, 35.2, 25.3, 15.4].map(|x| x.into()),
+            None,
         );
     }
 
@@ -964,6 +986,7 @@ mod tests {
             dirs[0].clone(),
             r#"ints / -4"#,
             &[-0.5, -1.0, -1.5, -2.0].map(|x| x.into()),
+            None,
         );
     }
 
@@ -974,6 +997,7 @@ mod tests {
             dirs[0].clone(),
             r#"uints % 2"#,
             &[1.0, 0.0, 1.0, 0.0].map(|x| x.into()),
+            None,
         );
     }
 
@@ -984,6 +1008,7 @@ mod tests {
             dirs[0].clone(),
             r#"(ints % 4) == 2"#,
             &[2.0, 2.0].map(|x| x.into()),
+            None,
         );
     }
 
@@ -994,6 +1019,7 @@ mod tests {
             dirs[0].clone(),
             r#"uints != 2"#,
             &[1i64, 3, 4].map(|x| x.into()),
+            None,
         );
     }
 
@@ -1004,6 +1030,7 @@ mod tests {
             dirs[0].clone(),
             r#"floats > 2.3"#,
             &[4.1, 3.2].map(|x| x.into()),
+            None,
         );
     }
 
@@ -1014,6 +1041,7 @@ mod tests {
             dirs[0].clone(),
             r#"floats < 3.2"#,
             &[2.3, 1.4].map(|x| x.into()),
+            None,
         );
     }
 
@@ -1024,6 +1052,7 @@ mod tests {
             dirs[0].clone(),
             r#"floats >= 2.3"#,
             &[4.1, 3.2, 2.3].map(|x| x.into()),
+            None,
         );
     }
 
@@ -1034,29 +1063,47 @@ mod tests {
             dirs[0].clone(),
             r#"floats <= 3.2"#,
             &[3.2, 2.3, 1.4].map(|x| x.into()),
+            None,
         );
     }
 
     #[test]
-    fn test_e2e_operate_scalars() {
+    fn test_e2e_operations_scalars() {
         set_up_dirs!(dirs, "db");
         execution_test_helper(
             dirs[0].clone(),
             r#"(2 + 3 - 4.5) * (5 / 2.3) % 1"#,
             &[0.0870].map(|x| x.into()),
+            None,
         );
     }
 
     #[test]
     fn test_e2e_sum_vector() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"sum(ints)"#, &[20i64].map(|x| x.into()));
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"sum(ints)"#,
+            &[20i64].map(|x| x.into()),
+            None,
+        );
     }
 
     #[test]
     fn test_e2e_sum_no_values() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"sum(ints < 0)"#, &[]);
+        execution_test_helper(dirs[0].clone(), r#"sum(ints < 0)"#, &[], None);
+    }
+
+    #[test]
+    fn test_e2e_sum_over_subperiod() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"sum(ints)[15ms]"#,
+            &[2i64, 10, 8].map(|x| x.into()),
+            Some(&[15u64, 30, 40]),
+        );
     }
 
     #[test]
@@ -1066,49 +1113,131 @@ mod tests {
             dirs[0].clone(),
             r#"count(uints)"#,
             &[4i64].map(|x| x.into()),
+            None,
         );
     }
 
     #[test]
     fn test_e2e_count_no_values() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"count(ints < 0)"#, &[]);
+        execution_test_helper(dirs[0].clone(), r#"count(ints < 0)"#, &[], None);
+    }
+
+    #[test]
+    fn test_e2e_count_over_subperiod() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"count(ints)[15ms]"#,
+            &[1i64, 2, 1].map(|x| x.into()),
+            Some(&[15u64, 30, 40]),
+        );
     }
 
     #[test]
     fn test_e2e_average_vector() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"avg(floats)"#, &[2.75].map(|x| x.into()));
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"avg(floats)"#,
+            &[2.75].map(|x| x.into()),
+            None,
+        );
     }
 
     #[test]
     fn test_e2e_average_no_values() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"avg(ints < 0)"#, &[]);
+        execution_test_helper(dirs[0].clone(), r#"avg(ints < 0)"#, &[], None);
+    }
+
+    #[test]
+    fn test_e2e_average_over_subperiod() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"avg(ints)[15ms]"#,
+            &[2.0, 5.0, 8.0].map(|x| x.into()),
+            Some(&[15u64, 30, 40]),
+        );
     }
 
     #[test]
     fn test_e2e_min_vector() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"min(ints)"#, &[2i64].map(|x| x.into()));
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"min(ints)"#,
+            &[2i64].map(|x| x.into()),
+            None,
+        );
     }
 
     #[test]
     fn test_e2e_min_no_values() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"min(ints < 0)"#, &[]);
+        execution_test_helper(dirs[0].clone(), r#"min(ints < 0)"#, &[], None);
+    }
+
+    #[test]
+    fn test_e2e_min_over_subperiod() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"min(ints)[15ms]"#,
+            &[2i64, 4, 8].map(|x| x.into()),
+            Some(&[15u64, 30, 40]),
+        );
     }
 
     #[test]
     fn test_e2e_max_vector() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"max(uints)"#, &[4u64].map(|x| x.into()));
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"max(uints)"#,
+            &[4u64].map(|x| x.into()),
+            None,
+        );
     }
 
     #[test]
     fn test_e2e_max_no_values() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"max(ints < 0)"#, &[]);
+        execution_test_helper(dirs[0].clone(), r#"max(ints < 0)"#, &[], None);
+    }
+
+    #[test]
+    fn test_e2e_max_over_subperiod() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"max(ints)[15ms]"#,
+            &[2i64, 6, 8].map(|x| x.into()),
+            Some(&[15u64, 30, 40]),
+        );
+    }
+
+    #[test]
+    fn test_e2e_aggregate_empty_subperiods() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"min(ints)[4ms]"#,
+            &[2i64, 4, 6, 8].map(|x| x.into()),
+            Some(&[12u64, 20, 32, 40]),
+        );
+    }
+
+    #[test]
+    fn test_e2e_aggregate_aggregate() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"sum(count(ints)[4ms])"#,
+            &[4i64].map(|x| x.into()),
+            None,
+        );
     }
 
     #[test]
@@ -1118,6 +1247,7 @@ mod tests {
             dirs[0].clone(),
             r#"topk(2, ints)"#,
             &[8i64, 6].map(|x| x.into()),
+            None,
         );
     }
 
@@ -1128,13 +1258,14 @@ mod tests {
             dirs[0].clone(),
             r#"topk(100, uints)"#,
             &[4u64, 3, 2, 1].map(|x| x.into()),
+            None,
         );
     }
 
     #[test]
     fn test_e2e_topk_vector_zerok() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"topk(0, floats)"#, &[]);
+        execution_test_helper(dirs[0].clone(), r#"topk(0, floats)"#, &[], None);
     }
 
     #[test]
@@ -1144,6 +1275,7 @@ mod tests {
             dirs[0].clone(),
             r#"bottomk(2, ints)"#,
             &[2i64, 4].map(|x| x.into()),
+            None,
         );
     }
 
@@ -1154,13 +1286,14 @@ mod tests {
             dirs[0].clone(),
             r#"bottomk(100, uints)"#,
             &[1u64, 2, 3, 4].map(|x| x.into()),
+            None,
         );
     }
 
     #[test]
     fn test_e2e_bottomk_vector_zerok() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(dirs[0].clone(), r#"bottomk(0, floats)"#, &[]);
+        execution_test_helper(dirs[0].clone(), r#"bottomk(0, floats)"#, &[], None);
     }
 
     fn aggregate_test_helper(
