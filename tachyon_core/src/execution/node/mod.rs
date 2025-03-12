@@ -87,6 +87,7 @@ impl ExecutorNode for TNode {
             TNode::VectorToVector(sel) => sel.next_vector(conn),
             TNode::VectorToScalar(sel) => sel.next_vector(conn),
             TNode::BinaryOp(sel) => sel.next_vector(conn),
+            TNode::Aggregate(sel) => sel.next_vector(conn),
             _ => panic!("next_vector not implemented for this node!"),
         }
     }

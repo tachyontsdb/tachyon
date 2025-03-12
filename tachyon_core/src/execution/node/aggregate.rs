@@ -67,7 +67,7 @@ impl AggregateNode {
         )
     }
 
-    fn child_next_vector(
+    fn next_child_vector(
         child: &mut AggregateChild,
         subperiod: Option<Duration>,
         conn: &mut Connection,
@@ -80,6 +80,7 @@ impl AggregateNode {
         };
 
         if let Some(vector) = next_vector {
+            // Return None if next vector is past subperiod; next call will return it
             if vector.timestamp > child.end_timestamp {
                 child.peeked_vector = Some(vector);
                 if let Some(subperiod) = subperiod {
@@ -100,19 +101,11 @@ impl AggregateNode {
         subperiod: Option<Duration>,
         conn: &mut Connection,
     ) -> Option<Value> {
-        if child.done {
-            return None;
-        }
         let value_type = child.node.value_type();
-
-        let mut sum = if subperiod.is_some() {
-            Value::get_default(value_type)
-        } else {
-            child.node.next_vector(conn)?.value
-        };
+        let mut sum = AggregateNode::next_child_vector(child, subperiod, conn)?.value;
 
         while let Some(Vector { value, .. }) =
-            AggregateNode::child_next_vector(child, subperiod, conn)
+            AggregateNode::next_child_vector(child, subperiod, conn)
         {
             sum = sum.add_same(value_type, &value);
         }
@@ -124,22 +117,20 @@ impl AggregateNode {
         subperiod: Option<Duration>,
         conn: &mut Connection,
     ) -> Option<Value> {
-        if child.done {
-            return None;
-        }
         let value_type = child.node.value_type();
+        let first_vector = AggregateNode::next_child_vector(child, subperiod, conn)?;
 
         if AggregateNode::using_scanhint(child, subperiod) {
-            let mut count = Value::get_default(value_type);
+            let mut count = first_vector.value;
             while let Some(Vector { value, .. }) =
-                AggregateNode::child_next_vector(child, subperiod, conn)
+                AggregateNode::next_child_vector(child, subperiod, conn)
             {
                 count = count.add_same(value_type, &value);
             }
             Some(count)
         } else {
-            let mut count = 0u64;
-            while AggregateNode::child_next_vector(child, subperiod, conn).is_some() {
+            let mut count = 1u64;
+            while AggregateNode::next_child_vector(child, subperiod, conn).is_some() {
                 count += 1;
             }
             Some(count.into())
@@ -165,7 +156,11 @@ impl ExecutorNode for AggregateNode {
     }
 
     fn return_type(&self) -> ReturnType {
-        ReturnType::Scalar
+        if self.subperiod.is_some() {
+            ReturnType::Vector
+        } else {
+            ReturnType::Scalar
+        }
     }
 
     fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
@@ -178,7 +173,7 @@ impl ExecutorNode for AggregateNode {
                 let sum_value_type = self.child.node.value_type();
                 let sum_opt = AggregateNode::next_sum(&mut self.child, self.subperiod, conn);
 
-                // SAFETY: we always create other_child when AggregateType is Average
+                // SAFETY: we create other_child when AggregateType is Average
                 let count_value_type = if AggregateNode::using_scanhint(
                     self.other_child.as_ref().unwrap(),
                     self.subperiod,
@@ -203,10 +198,10 @@ impl ExecutorNode for AggregateNode {
             AggregateType::Min | AggregateType::Max => {
                 let value_type = self.value_type();
                 let mut val =
-                    AggregateNode::child_next_vector(&mut self.child, self.subperiod, conn)?.value;
+                    AggregateNode::next_child_vector(&mut self.child, self.subperiod, conn)?.value;
 
                 while let Some(Vector { value, .. }) =
-                    AggregateNode::child_next_vector(&mut self.child, self.subperiod, conn)
+                    AggregateNode::next_child_vector(&mut self.child, self.subperiod, conn)
                 {
                     if self.aggregate_type == AggregateType::Min {
                         val = val.min_same(value_type, &value);
@@ -218,5 +213,17 @@ impl ExecutorNode for AggregateNode {
                 Some(val)
             }
         }
+    }
+
+    fn next_vector(&mut self, conn: &mut Connection) -> Option<Vector> {
+        while !self.child.done {
+            if let Some(value) = self.next_scalar(conn) {
+                return Some(Vector {
+                    timestamp: self.child.end_timestamp,
+                    value,
+                });
+            }
+        }
+        None
     }
 }

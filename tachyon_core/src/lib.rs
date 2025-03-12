@@ -1072,11 +1072,7 @@ mod tests {
     #[test]
     fn test_e2e_count_no_values() {
         set_up_dirs!(dirs, "db");
-        execution_test_helper(
-            dirs[0].clone(),
-            r#"count(ints < 0)"#,
-            &[0i64].map(|x| x.into()),
-        );
+        execution_test_helper(dirs[0].clone(), r#"count(ints < 0)"#, &[]);
     }
 
     #[test]

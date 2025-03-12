@@ -52,6 +52,7 @@ impl<'a> QueryPlanner<'a> {
                     Box::new(self.handle_expr(
                         &expr.expr,
                         conn,
+                        // Cannot use scanhint when aggregating over subperiods
                         if expr.subperiod.is_some() {
                             ScanHint::None
                         } else {
@@ -69,6 +70,7 @@ impl<'a> QueryPlanner<'a> {
                 Box::new(self.handle_expr(
                     &expr.expr,
                     conn,
+                    // Cannot use scanhint when aggregating over subperiods
                     if expr.subperiod.is_some() {
                         ScanHint::None
                     } else {
@@ -78,6 +80,7 @@ impl<'a> QueryPlanner<'a> {
                 Some(Box::new(self.handle_expr(
                     &expr.expr,
                     conn,
+                    // Cannot use scanhint when aggregating over subperiods
                     if expr.subperiod.is_some() {
                         ScanHint::None
                     } else {
