@@ -31,6 +31,21 @@ impl<'a> QueryPlanner<'a> {
         expr: &AggregateExpr,
         conn: &mut Connection,
     ) -> Result<TNode, QueryErr> {
+        let start = if let Some(start) = self.start {
+            start
+        } else {
+            return Err(QueryErr::StartEndTimeErr {
+                start_or_end: "start".to_string(),
+            });
+        };
+        let end = if let Some(end) = self.end {
+            end
+        } else {
+            return Err(QueryErr::StartEndTimeErr {
+                start_or_end: "end".to_string(),
+            });
+        };
+
         match expr.op.id() {
             parser::token::T_SUM
             | parser::token::T_COUNT
@@ -47,8 +62,8 @@ impl<'a> QueryPlanner<'a> {
                 Ok(TNode::Aggregate(AggregateNode::new(
                     aggregate_type,
                     expr.subperiod,
-                    self.start.unwrap(),
-                    self.end.unwrap(),
+                    start,
+                    end,
                     Box::new(self.handle_expr(
                         &expr.expr,
                         conn,
@@ -65,8 +80,8 @@ impl<'a> QueryPlanner<'a> {
             parser::token::T_AVG => Ok(TNode::Aggregate(AggregateNode::new(
                 AggregateType::Average,
                 expr.subperiod,
-                self.start.unwrap(),
-                self.end.unwrap(),
+                start,
+                end,
                 Box::new(self.handle_expr(
                     &expr.expr,
                     conn,

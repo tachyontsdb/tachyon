@@ -15,8 +15,10 @@ pub enum AggregateType {
 
 struct AggregateChild {
     node: Box<TNode>,
-    peeked_vector: Option<Vector>, // Next vector is stored here if looked at but not returned
-    end: Timestamp,                // End timestamp of aggregation (sub)period
+    /// Next vector is stored here if looked at but not returned
+    peeked_vector: Option<Vector>,
+    /// End timestamp of aggregation (sub)period
+    end: Timestamp,
     done: bool,
 }
 
