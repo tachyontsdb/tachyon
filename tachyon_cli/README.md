@@ -101,4 +101,4 @@ Options:
   -v, --value-type <VALUE_TYPE>    [possible values: i64, u64, f64]
   -h, --help     
 ```
-Can be used to set output mode, the output path, and the storage type for values (f64 recommended). 
+Can be used to set output mode, the output path, and the storage type for values (f64 recommended).
