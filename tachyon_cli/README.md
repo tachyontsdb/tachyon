@@ -3,15 +3,19 @@
 The Tachyon CLI (`tachyon`) allows users to interact with their time series databases. It supports querying, writing data, and managing database contexts.
 
 ## Running the CLI
-Opens an interactive shell against a Tachyon database. Allows queries and special "dot" commands.
-```c++
+
+Opens an interactive shell against Tachyon DB. Allows queries and special "dot" commands.
+
+```
 $ tachyon <DB_DIR>
 # <QUERY|COMMAND>
 ```
 
-## Running queries
-Once in the shell, any valid query can be passed in to the terminal.
-```c++
+## Running Queries
+
+Once in the shell, any valid query can be passed in to the terminal:
+
+```
 # linear_dataset 
 ⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀500.0⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
@@ -25,25 +29,34 @@ Once in the shell, any valid query can be passed in to the terminal.
 ⠄⠀⠀⠀⠀⠀⠀⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠂⢀⣀⠤⠔⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠉⠉⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈⠀⠁⠈ 0.0
-0.0                                                                               1000.0
+0.0                                                                          1000.0
 ```
 
-## DOT Commands
-More information and configuration options are available using special "dot" commands with the syntax `.<COMMAND>`
+## "DOT" Commands
+
+More information and configuration options are available using special "dot" commands with the syntax `.<COMMAND>`.
 
 ### Create
+
 Used to create a new stream.
-```c++
+
+```
 Usage: create <STREAM>
 ```
+
 Example:
-```c++
+
+```
 # .create linear_dataset
 ```
 
+> Note: The value type of the created stream is set by the `.mode -v` command.
+
 ### Write
+
 Can be used to write a supported file format to a data stream.
-```c++
+
+```
 Usage: write [OPTIONS] <PATH> <STREAM>
 
 Arguments:
@@ -55,13 +68,17 @@ Options:
   -h, --help
 ```
 
-```c++
+Example:
+
+```
 # .write /data/linear.csv linear_dataset
 ```
-If the stream does not exist the `-c` flag can be used to automatically create it.
+
+> Note: If the stream does not exist the `-c` flag can be used to automatically create it. The value type of the created stream is set by the `.mode -v` command.
 
 ### Information Commands
-```c++
+
+```
 Usage: info <COMMAND>
 
 Commands:
@@ -71,14 +88,16 @@ Commands:
 ```
 
 #### Stat
-```c++
+
+```
 # .info stat
 Total Streams: 3
 Storage Used: 35 KiB
 ```
 
 #### List Streams
-```c++
+
+```
 # .info streams
 ╭──────────────────────────────────────┬────────────────────────┬────────────╮
 │ Stream ID                            │ Stream Name + Matchers │ Value Type │
@@ -92,6 +111,7 @@ Storage Used: 35 KiB
 ```
 
 ### Configuration (Mode)
+
 ```
 Usage: mode [OPTIONS]
 
@@ -101,4 +121,5 @@ Options:
   -v, --value-type <VALUE_TYPE>    [possible values: i64, u64, f64]
   -h, --help     
 ```
-Can be used to set output mode, the output path, and the storage type for values (f64 recommended).
+
+Can be used to set output mode, the output path, and the storage type for values (`f64` recommended).
