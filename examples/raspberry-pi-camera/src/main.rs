@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Result};
-use nokhwa::pixel_format::{RgbFormat, YuyvFormat};
-use nokhwa::utils::{
-    CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
+use image::{ImageBuffer, Rgb};
+use libcamera::{
+    Camera, CameraConfiguration, CameraManager, FrameBuffer, FrameBufferAllocator, PixelFormat,
+    Rectangle, Stream,
 };
-use nokhwa::Camera;
 use std::path::Path;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tachyon_core::{Connection, Timestamp, ValueType};
@@ -46,40 +47,74 @@ fn main() -> Result<()> {
     println!("Tachyon database initialized successfully");
 
     // Set some reasonable default values for camera
-    let width = 1296;
-    let height = 972;
-    let fps = 30;
+    let width = 640;
+    let height = 480;
 
-    // Try to open the default camera (index 0)
-    let camera_index = CameraIndex::Index(0);
-    // let requested_format = RequestedFormat::new::<YuyvFormat>(RequestedFormatType::Exact(
-    //     CameraFormat::new(Resolution::new(width, height), FrameFormat::MJPEG, fps),
-    // ));
-    let requested_format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(
-        CameraFormat::new(Resolution::new(width, height), FrameFormat::RAWRGB, fps),
-    ));
+    // Initialize the libcamera manager
+    let manager =
+        CameraManager::new().map_err(|e| anyhow!("Failed to initialize camera manager: {}", e))?;
 
-    // Initialize the camera with libcamera backend
-    let mut camera = Camera::new(camera_index, requested_format).map_err(|e| {
-        anyhow!(
-            "Failed to initialize camera. Make sure libcamera is properly installed: {}",
-            e
-        )
-    })?;
+    // Start the camera manager
+    manager
+        .start()
+        .map_err(|e| anyhow!("Failed to start camera manager: {}", e))?;
 
-    // Print camera information
-    let camera_info = camera.info();
-    println!("Camera info: {}", camera_info);
+    // Get available cameras
+    let cameras = manager.cameras();
+    if cameras.is_empty() {
+        return Err(anyhow!("No cameras available"));
+    }
 
-    let camera_resolution = camera.resolution();
-    println!("Camera resolution: {}", camera_resolution);
+    println!("Found {} camera(s)", cameras.len());
+    for (i, camera) in cameras.iter().enumerate() {
+        println!("Camera {}: {}", i, camera.id());
+    }
 
-    // Open camera stream
+    // Acquire the first camera
+    let camera = cameras[0]
+        .acquire()
+        .map_err(|e| anyhow!("Failed to acquire camera: {}", e))?;
+    println!("Using camera: {}", camera.id());
+
+    // Configure the camera
+    let mut config = camera
+        .generate_configuration(&[Rectangle::new(0, 0, width, height)])
+        .map_err(|e| anyhow!("Failed to generate camera configuration: {}", e))?;
+
+    // Configure streams - in this case we have only one stream (index 0)
+    let stream_config = config.get_stream_config_mut(0);
+    stream_config.set_pixel_format(PixelFormat::new(b"RGB3")); // RGB24 format
+    stream_config.set_size(width, height);
+
+    // Validate and apply the configuration
+    config
+        .validate()
+        .map_err(|e| anyhow!("Failed to validate camera configuration: {}", e))?;
+    config = camera
+        .configure(config)
+        .map_err(|e| anyhow!("Failed to configure camera: {}", e))?;
+
+    // Create a frame buffer allocator
+    let allocator = FrameBufferAllocator::new(&camera);
+
+    // Allocate frame buffers for our stream
+    let stream = config.get_stream(0);
+    let mut buffers = allocator
+        .alloc(stream)
+        .map_err(|e| anyhow!("Failed to allocate frame buffers: {}", e))?;
+
+    // Start the camera
     camera
-        .open_stream()
-        .map_err(|e| anyhow!("Failed to open camera stream: {}", e))?;
+        .start()
+        .map_err(|e| anyhow!("Failed to start camera: {}", e))?;
+    println!("Camera started successfully");
 
-    println!("Camera stream opened successfully");
+    // Queue all available buffers
+    for buffer in &buffers {
+        camera
+            .queue_request(buffer)
+            .map_err(|e| anyhow!("Failed to queue request: {}", e))?;
+    }
 
     // Variables to track brightness changes
     let mut last_brightness = 0.0;
@@ -88,79 +123,104 @@ fn main() -> Result<()> {
     println!("Starting brightness monitoring loop...");
 
     // Main monitoring loop
-    loop {
-        // Capture a frame
-        match camera.frame() {
-            Ok(frame) => {
-                // Convert frame to image for processing
-                let image = frame
-                    .decode_image::<RgbFormat>()
-                    .map_err(|e| anyhow!("Failed to decode image: {}", e))?;
+    for _ in 0..100 {
+        // Capture 100 frames for testing
+        // Wait for a completed request (this blocks until a frame is available)
+        let request = camera
+            .get_completed_request()
+            .map_err(|e| anyhow!("Failed to get completed request: {}", e))?;
 
-                // Calculate brightness
-                let current_brightness = {
-                    let mut sum: u64 = 0;
-                    let mut pixel_count = 0;
+        // Get the frame buffer from the request
+        let buffer = request
+            .get_buffer(stream)
+            .map_err(|e| anyhow!("Failed to get buffer from request: {}", e))?;
 
-                    // Get dimensions of the image
-                    let (width, height) = image.dimensions();
-
-                    // Sum up all pixel values (RGB)
-                    for y in 0..height {
-                        for x in 0..width {
-                            let pixel = image.get_pixel(x, y);
-                            // Average the RGB channels for each pixel
-                            sum += (pixel[0] as u64 + pixel[1] as u64 + pixel[2] as u64) / 3;
-                            pixel_count += 1;
-                        }
-                    }
-
-                    if pixel_count == 0 {
-                        0.0
-                    } else {
-                        // Calculate average brightness (0-255)
-                        (sum as f64) / (pixel_count as f64)
-                    }
-                };
-
-                // Get current timestamp (microseconds since Unix epoch)
-                let timestamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_micros() as Timestamp;
-
-                // Insert brightness data into Tachyon
-                inserter.insert_float64(timestamp, current_brightness);
-
-                // Periodically flush the data to disk
-                // This ensures data is written even if the program exits unexpectedly
-                if timestamp % 10 == 0 {
-                    inserter.flush();
-                }
-
-                // Log current brightness level
-                println!(
-                    "Current brightness: {:.2} (stored to Tachyon at timestamp {})",
-                    current_brightness, timestamp
-                );
-
-                // Check for significant brightness change
-                let brightness_diff = (current_brightness - last_brightness).abs();
-                if brightness_diff > brightness_threshold {
-                    println!(
-                        "Significant brightness change detected: {:.2} -> {:.2} (diff: {:.2})",
-                        last_brightness, current_brightness, brightness_diff
-                    );
-                }
-
-                last_brightness = current_brightness;
-            }
-            Err(e) => {
-                eprintln!("Error capturing frame: {}", e);
-            }
+        // Get the buffer data
+        let planes = buffer.get_planes();
+        if planes.is_empty() {
+            return Err(anyhow!("No planes in buffer"));
         }
+
+        // Get the first plane (for RGB format, there's typically only one plane)
+        let plane = &planes[0];
+        let data = plane.data();
+
+        // Create an RGB image from the buffer data
+        // The data layout is expected to be RGB24 (3 bytes per pixel)
+        let image: ImageBuffer<Rgb<u8>, Vec<u8>> =
+            match ImageBuffer::from_raw(width, height, data.to_vec()) {
+                Some(img) => img,
+                None => return Err(anyhow!("Failed to create image from buffer data")),
+            };
+
+        // Calculate brightness
+        let current_brightness = {
+            let mut sum: u64 = 0;
+            let mut pixel_count = 0;
+
+            // Sum up all pixel values (RGB)
+            for (_, _, pixel) in image.enumerate_pixels() {
+                // Average the RGB channels for each pixel
+                sum += (pixel[0] as u64 + pixel[1] as u64 + pixel[2] as u64) / 3;
+                pixel_count += 1;
+            }
+
+            if pixel_count == 0 {
+                0.0
+            } else {
+                // Calculate average brightness (0-255)
+                (sum as f64) / (pixel_count as f64)
+            }
+        };
+
+        // Get current timestamp (microseconds since Unix epoch)
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as Timestamp;
+
+        // Insert brightness data into Tachyon
+        inserter.insert_float64(timestamp, current_brightness);
+
+        // Periodically flush the data to disk
+        // This ensures data is written even if the program exits unexpectedly
+        if timestamp % 10 == 0 {
+            inserter.flush();
+        }
+
+        // Log current brightness level
+        println!(
+            "Current brightness: {:.2} (stored to Tachyon at timestamp {})",
+            current_brightness, timestamp
+        );
+
+        // Check for significant brightness change
+        let brightness_diff = (current_brightness - last_brightness).abs();
+        if brightness_diff > brightness_threshold {
+            println!(
+                "Significant brightness change detected: {:.2} -> {:.2} (diff: {:.2})",
+                last_brightness, current_brightness, brightness_diff
+            );
+        }
+
+        last_brightness = current_brightness;
+
+        // Queue the buffer again for reuse
+        camera
+            .queue_request(&[buffer])
+            .map_err(|e| anyhow!("Failed to requeue buffer: {}", e))?;
 
         // Sleep for a short period to avoid excessive CPU usage
         thread::sleep(Duration::from_millis(500));
     }
+
+    // Stop the camera
+    camera
+        .stop()
+        .map_err(|e| anyhow!("Failed to stop camera: {}", e))?;
+
+    // Flush any remaining data
+    inserter.flush();
+
+    Ok(())
 }
