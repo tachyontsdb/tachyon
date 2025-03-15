@@ -94,7 +94,7 @@ pub fn handle_command(
             println!(
                 "Successfully wrote {} entries to {:#?}",
                 vectors.len(),
-                path
+                stream
             );
             Ok(())
         }
