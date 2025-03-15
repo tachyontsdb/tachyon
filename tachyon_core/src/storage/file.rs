@@ -1,5 +1,4 @@
-use super::compression::int::{IntCompressor, IntDecompressor};
-use super::compression::CompressionEngine;
+use super::compression::{CompressionEngine, Compressor, Decompressor};
 use super::page_cache::{FileId, PageCache, SeqPageRead};
 use super::{FileReaderUtils, MAX_NUM_ENTRIES};
 use crate::error::WriterErr;
@@ -188,7 +187,7 @@ struct CursorImpl {
     file_paths: Vec<PathBuf>,
 
     page_cache: Rc<RefCell<PageCache>>,
-    decomp_engine: IntDecompressor<SeqPageRead>,
+    decomp_engine: Decompressor<SeqPageRead>,
 
     scan_hint: ScanHint,
 
@@ -214,7 +213,7 @@ impl CursorImpl {
 
         drop(page_cache_ref);
 
-        let decomp_engine = IntDecompressor::new(
+        let decomp_engine = Decompressor::new(
             page_cache_sequential_read(page_cache.clone(), file_id, MAGIC_SIZE + HEADER_SIZE),
             &header,
         );
@@ -305,7 +304,7 @@ impl CursorImpl {
         self.current_timestamp = self.header.min_timestamp;
         self.value = self.header.first_value;
         self.values_read = 1;
-        self.decomp_engine = IntDecompressor::new(
+        self.decomp_engine = Decompressor::new(
             page_cache_sequential_read(
                 self.page_cache.clone(),
                 self.file_id,
@@ -343,7 +342,7 @@ impl CursorImpl {
 
         let current = self.decomp_engine.next();
         self.current_timestamp = current.0;
-        self.value = current.1.into();
+        self.value = current.1;
         self.use_query_hint_for_value(self.value);
 
         if self.current_timestamp > self.end {
@@ -458,13 +457,12 @@ impl TimeDataFile {
         let mut file = File::create(path).unwrap();
 
         let header_bytes = self.header.write(&mut file).unwrap();
-        let mut comp_engine = IntCompressor::new(file, &self.header);
+        let mut comp_engine = Compressor::new(file, &self.header);
 
         let mut compressed_bytes = 0;
 
         for i in 1usize..(self.header.count as usize) {
-            compressed_bytes +=
-                comp_engine.consume(self.timestamps[i], self.values[i].get_uinteger64());
+            compressed_bytes += comp_engine.consume(self.timestamps[i], self.values[i]);
         }
 
         compressed_bytes += comp_engine.flush_all();
@@ -528,7 +526,7 @@ impl TimeDataFile {
 pub struct PartiallyPersistentDataFile {
     pub header: Rc<RefCell<Header>>,
     pub path: PathBuf,
-    compressor: Option<IntCompressor<PartiallyPersistentDataFileWriter>>,
+    compressor: Option<Compressor<PartiallyPersistentDataFileWriter>>,
 }
 
 impl PartiallyPersistentDataFile {
@@ -550,7 +548,7 @@ impl PartiallyPersistentDataFile {
     pub fn lazy_init(mut self, ts: Timestamp, v: Value) -> Result<Self, WriterErr> {
         self.update_header(ts, v);
         let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
-        self.compressor = Option::Some(IntCompressor::new(writer, &self.header.borrow().clone()));
+        self.compressor = Option::Some(Compressor::new(writer, &self.header.borrow().clone()));
 
         Ok(self)
     }
@@ -567,7 +565,7 @@ impl PartiallyPersistentDataFile {
         }
 
         let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
-        self.compressor = Option::Some(IntCompressor::new_from_partial(writer, data_file));
+        self.compressor = Some(Compressor::new_from_partial(writer, data_file));
 
         self.write(ts, v)?;
         Ok(self)
@@ -608,7 +606,7 @@ impl PartiallyPersistentDataFile {
 
         match self.compressor {
             Some(ref mut compressor) => {
-                compressor.consume(ts, v.get_uinteger64());
+                compressor.consume(ts, v);
                 Ok(())
             }
             None => Err(WriterErr::CompressorNotInitialized),

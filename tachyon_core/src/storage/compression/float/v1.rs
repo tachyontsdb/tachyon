@@ -125,11 +125,32 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
         self.result.len()
     }
 
-    fn new_from_partial(_writer: T, _data_file: TimeDataFile) -> Self
+    fn new_from_partial(writer: T, data_file: TimeDataFile) -> Self
     where
         Self: Sized,
     {
-        todo!()
+        Self {
+            writer,
+            last_timestamp: *data_file.timestamps.last().unwrap(),
+            last_value: data_file.values.last().unwrap().get_uinteger64(),
+            last_ts_delta: if data_file.num_entries() < 2 {
+                0
+            } else {
+                data_file.timestamps[data_file.num_entries() - 1] as i64
+                    - data_file.timestamps[data_file.num_entries() - 2] as i64
+            },
+            entries_written: 0,
+
+            ts_d_deltas: [0; V1_CHUNK_SIZE],
+            v_xors: [0; V1_CHUNK_SIZE],
+            buffer_idx: 0,
+            chunk_idx: 0,
+            encoded_length_header: 0,
+            encoded_xor_info_header: 0,
+
+            result: Vec::new(),
+            temp_buffer: Vec::new(),
+        }
     }
 }
 
