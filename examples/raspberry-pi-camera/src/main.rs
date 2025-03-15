@@ -52,9 +52,8 @@ fn main() -> Result<()> {
 
     // Try to open the default camera (index 0)
     let camera_index = CameraIndex::Index(0);
-    let requested_format = RequestedFormat::new::<YuyvFormat>(RequestedFormatType::Exact(
-        CameraFormat::new(Resolution::new(width, height), FrameFormat::YUYV, fps),
-    ));
+    let requested_format =
+        RequestedFormat::new::<YuyvFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
     // let requested_format = RequestedFormat::new::<YuyvFormat>(requested_format_type);
 
     // Initialize the camera with libcamera backend
