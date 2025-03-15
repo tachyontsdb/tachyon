@@ -52,10 +52,10 @@ fn main() -> Result<()> {
 
     // Try to open the default camera (index 0)
     let camera_index = CameraIndex::Index(0);
-    let requested_format = RequestedFormat::new::<YuyvFormat>(RequestedFormatType::Exact(
-        CameraFormat::new(Resolution::new(width, height), FrameFormat::YUYV, fps),
-    ));
-    // let requested_format = RequestedFormat::new::<YuyvFormat>(requested_format_type);
+    // let requested_format = RequestedFormat::new::<YuyvFormat>(RequestedFormatType::Exact(
+    //     CameraFormat::new(Resolution::new(width, height), FrameFormat::MJPEG, fps),
+    // ));
+    let requested_format = RequestedFormat::new::<YuyvFormat>(RequestedFormatType::None);
 
     // Initialize the camera with libcamera backend
     let mut camera = Camera::new(camera_index, requested_format).map_err(|e| {
