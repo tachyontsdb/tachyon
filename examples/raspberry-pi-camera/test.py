@@ -1,33 +1,51 @@
 import cv2
+from picamera import PiCamera
+from picamera.array import PiRGBArray
 
-def main():
-    # Open the camera (0 for the default camera, change if using a USB camera)
-    cap = cv2.VideoCapture(0)
-    
-    # Set resolution (optional)
-    cap.set(3, 640)  # Width
-    cap.set(4, 480)  # Height
-    
-    if not cap.isOpened():
-        print("Error: Could not open camera.")
-        return
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Error: Failed to capture image.")
-            break
-        
-        # Display the frame
-        cv2.imshow("Camera Stream", frame)
-        
-        # Press 'q' to exit
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-    
-    # Release resources
-    cap.release()
-    cv2.destroyAllWindows()
+CAMERA_RESOLUTION = (640, 480)
+
+
+def capture_video():
+    # Press 'q' to stop the program.
+    try:
+        # Setup
+        camera = PiCamera()
+        camera.resolution = CAMERA_RESOLUTION
+        output = PiRGBArray(camera)
+        # Update and draw
+        is_running = True
+        while is_running:
+            camera.capture(output, "bgr", use_video_port=True)
+            image = output.array
+            output.truncate(0)
+            # Display on screen
+            cv2.imshow("frame", image)
+            # Exit the loop on event
+            key = cv2.waitKey(10) & 0xFF
+            if key == ord("q"):
+                is_running = False
+    finally:
+        # Release resources
+        output.close()
+        camera.close()
+
+
+def capture_still():
+    try:
+        # Setup
+        camera = PiCamera()
+        output = PiRGBArray(camera)
+        # Capture
+        camera.capture(output, format="bgr", use_video_port=False)
+        frame = output.array
+        # Save the image to disk.
+        cv2.imwrite("frame.jpg", frame)
+    finally:
+        # Release resources
+        output.close()
+        camera.close()
+
 
 if __name__ == "__main__":
-    main()
+    # capture_still()
+    capture_video()
