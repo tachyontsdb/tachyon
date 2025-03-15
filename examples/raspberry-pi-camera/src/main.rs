@@ -55,7 +55,9 @@ fn main() -> Result<()> {
     // let requested_format = RequestedFormat::new::<YuyvFormat>(RequestedFormatType::Exact(
     //     CameraFormat::new(Resolution::new(width, height), FrameFormat::MJPEG, fps),
     // ));
-    let requested_format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::None);
+    let requested_format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(
+        CameraFormat::new(Resolution::new(width, height), FrameFormat::RAWRGB, fps),
+    ));
 
     // Initialize the camera with libcamera backend
     let mut camera = Camera::new(camera_index, requested_format).map_err(|e| {
