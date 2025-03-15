@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 use nokhwa::pixel_format::{RgbFormat, YuyvFormat};
-use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType, Resolution};
+use nokhwa::utils::{
+    CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
+};
 use nokhwa::Camera;
 use std::path::Path;
 use std::thread;
@@ -50,9 +52,10 @@ fn main() -> Result<()> {
 
     // Try to open the default camera (index 0)
     let camera_index = CameraIndex::Index(0);
-    let requested_format_type =
-        RequestedFormatType::HighestResolution(Resolution::new(width, height));
-    let requested_format = RequestedFormat::new::<YuyvFormat>(requested_format_type);
+    let requested_format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(
+        CameraFormat::new(Resolution::new(width, height), FrameFormat::RAWRGB, fps),
+    ));
+    // let requested_format = RequestedFormat::new::<YuyvFormat>(requested_format_type);
 
     // Initialize the camera with libcamera backend
     let mut camera = Camera::new(camera_index, requested_format).map_err(|e| {
