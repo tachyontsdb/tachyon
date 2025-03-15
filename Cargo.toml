@@ -3,7 +3,7 @@ members = [
     "tachyondb-promql-parser",
     "tachyon_core",
     "tachyon_cli",
-    "tachyon_web_backend",
+    "tachyon_web_backend", "examples/raspberry-pi-camera",
 ]
 resolver = "2"
 
