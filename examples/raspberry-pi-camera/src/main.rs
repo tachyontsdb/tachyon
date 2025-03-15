@@ -44,8 +44,8 @@ fn main() -> Result<()> {
     println!("Tachyon database initialized successfully");
 
     // Set some reasonable default values for camera
-    let width = 640;
-    let height = 480;
+    let width = 1296;
+    let height = 972;
     let fps = 30;
 
     // Try to open the default camera (index 0)
