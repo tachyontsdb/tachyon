@@ -15,6 +15,8 @@ pub enum TachyonErr {
     ConnectionErr(#[from] ConnectionErr),
     #[error(transparent)]
     QueryErr(#[from] QueryErr),
+    #[error(transparent)]
+    InserterErr(#[from] WriterErr),
 }
 
 #[derive(Error, Debug)]
@@ -52,4 +54,12 @@ pub enum ConnectionErr {
     StreamCreationErr { stream: String },
     #[error("Failed to get all streams.")]
     GetStreamsErr,
+}
+
+#[derive(Error, Debug)]
+pub enum WriterErr {
+    #[error("Compressor not initialized.")]
+    CompressorNotInitialized,
+    #[error("Write out of order.")]
+    OutOfOrderErr,
 }

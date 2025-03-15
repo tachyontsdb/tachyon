@@ -1,6 +1,7 @@
 use super::super::file::TimeDataFile;
 use super::super::MAX_NUM_ENTRIES;
 use super::Writer;
+use crate::error::WriterErr;
 use crate::query::indexer::Indexer;
 use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version, FILE_EXTENSION};
 use std::cell::RefCell;
@@ -71,7 +72,13 @@ impl Writer for InMemoryWriter {
         }
     }
 
-    fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value, value_type: ValueType) {
+    fn write(
+        &mut self,
+        stream_id: Uuid,
+        ts: Timestamp,
+        v: Value,
+        value_type: ValueType,
+    ) -> Result<(), WriterErr> {
         let file = self
             .open_data_files
             .entry(stream_id)
@@ -97,6 +104,7 @@ impl Writer for InMemoryWriter {
                 .unwrap();
             self.open_data_files.remove_entry(&stream_id);
         }
+        Ok(())
     }
 
     fn create_stream(&self, stream_id: Uuid) {
@@ -194,7 +202,9 @@ mod tests {
         for i in 0..MAX_NUM_ENTRIES as u64 {
             let ts = i as Timestamp;
             let v = (i * 1000).into();
-            writer.write(stream_id, ts, v, ValueType::UInteger64);
+            writer
+                .write(stream_id, ts, v, ValueType::UInteger64)
+                .unwrap();
             timestamps.push(ts);
             values.push(v);
         }
@@ -233,7 +243,9 @@ mod tests {
             for (j, stream_id) in stream_ids.iter().enumerate() {
                 let ts = i as Timestamp;
                 let v = (i * 1000).into();
-                writer.write(*stream_id, ts, v, ValueType::UInteger64);
+                writer
+                    .write(*stream_id, ts, v, ValueType::UInteger64)
+                    .unwrap();
                 timestamps[j].push(ts);
                 values[j].push(v);
             }

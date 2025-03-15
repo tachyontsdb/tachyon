@@ -5,13 +5,14 @@ use crate::{
 use std::ffi::{c_char, c_void, CStr};
 
 const FIRST_ERROR_CODE: u8 = 1;
-const LAST_ERROR_CODE: u8 = 3;
+const LAST_ERROR_CODE: u8 = 4;
 
 fn get_error_code(err: &TachyonErr) -> u8 {
     match err {
         TachyonErr::MiscErr { .. } => FIRST_ERROR_CODE,
         TachyonErr::ConnectionErr(_) => 2,
-        TachyonErr::QueryErr(_) => LAST_ERROR_CODE,
+        TachyonErr::QueryErr(_) => 3,
+        TachyonErr::InserterErr(_) => LAST_ERROR_CODE,
     }
 }
 
@@ -145,8 +146,18 @@ pub unsafe extern "C" fn tachyon_inserter_insert_integer64(
     inserter: *mut Inserter,
     timestamp: Timestamp,
     value: i64,
-) {
-    (*inserter).insert_integer64(timestamp, value);
+) -> u8 {
+    let result = (*inserter).insert_integer64(timestamp, value);
+
+    match result {
+        Ok(_) => {
+            0u8
+        }
+        Err(tachyon_err) => {
+            let return_value = get_error_code(&tachyon_err);
+            return_value
+        }
+    }
 }
 
 /// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
@@ -155,8 +166,18 @@ pub unsafe extern "C" fn tachyon_inserter_insert_uinteger64(
     inserter: *mut Inserter,
     timestamp: Timestamp,
     value: u64,
-) {
-    (*inserter).insert_uinteger64(timestamp, value);
+) -> u8 {
+    let result = (*inserter).insert_uinteger64(timestamp, value);
+
+    match result {
+        Ok(_) => {
+            0u8
+        }
+        Err(tachyon_err) => {
+            let return_value = get_error_code(&tachyon_err);
+            return_value
+        }
+    }
 }
 
 /// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
@@ -165,8 +186,18 @@ pub unsafe extern "C" fn tachyon_inserter_insert_float64(
     inserter: *mut Inserter,
     timestamp: Timestamp,
     value: f64,
-) {
-    (*inserter).insert_float64(timestamp, value);
+) -> u8 {
+    let result = (*inserter).insert_float64(timestamp, value);
+
+    match result {
+        Ok(_) => {
+            0u8
+        }
+        Err(tachyon_err) => {
+            let return_value = get_error_code(&tachyon_err);
+            return_value
+        }
+    }
 }
 
 #[no_mangle]

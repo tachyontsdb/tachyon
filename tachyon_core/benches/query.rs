@@ -71,7 +71,7 @@ fn vector_selector_benchmark(c: &mut Criterion) {
     let mut inserter = conn.prepare_insert(STREAM);
 
     for i in 0..timestamps.len() {
-        inserter.insert_uinteger64(timestamps[i], values[i]);
+        inserter.insert_uinteger64(timestamps[i], values[i]).unwrap();
     }
 
     inserter.flush();

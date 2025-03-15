@@ -518,7 +518,7 @@ pub struct Inserter {
 
 macro_rules! create_inserter_insert {
     ($function_name: ident, $type: ty, $value_type: expr, $value_field: ident) => {
-        pub fn $function_name(&mut self, timestamp: crate::Timestamp, value: $type) {
+        pub fn $function_name(&mut self, timestamp: crate::Timestamp, value: $type) -> Result<(), crate::error::TachyonErr> {
             if self.value_type != $value_type {
                 panic!("Invalid value type on insert!");
             }
@@ -528,7 +528,9 @@ macro_rules! create_inserter_insert {
                 crate::Value {
                     $value_field: value,
                 },
-            );
+            )?;
+
+            Ok(())
         }
     };
 }
@@ -538,10 +540,11 @@ impl Inserter {
         self.value_type
     }
 
-    fn insert(&mut self, timestamp: Timestamp, value: Value) {
+    fn insert(&mut self, timestamp: Timestamp, value: Value) -> Result<(), TachyonErr> {
         self.writer
             .borrow_mut()
-            .write(self.stream_id, timestamp, value, self.value_type);
+            .write(self.stream_id, timestamp, value, self.value_type)?;
+        Ok(())
     }
 
     create_inserter_insert!(insert_integer64, i64, ValueType::Integer64, integer64);
@@ -622,7 +625,7 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
+            inserter.insert(t, v.into()).unwrap();
         }
 
         inserter.flush();
@@ -666,7 +669,7 @@ mod tests {
         for i in 0..100000u64 {
             timestamps.push(i);
             values.push(i.into());
-            inserter.insert(timestamps[i as usize], values[i as usize]);
+            inserter.insert(timestamps[i as usize], values[i as usize]).unwrap();
         }
 
         inserter.flush();
@@ -736,7 +739,7 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps, values) {
-            inserter1.insert(t, v.into());
+            inserter1.insert(t, v.into()).unwrap();
         }
 
         inserter1.flush();
@@ -751,7 +754,7 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps_2, values_2) {
-            inserter2.insert(t, v.into());
+            inserter2.insert(t, v.into()).unwrap();
         }
 
         inserter2.flush();
@@ -810,7 +813,7 @@ mod tests {
         let values = [2i64, 4, 6, 8];
         let mut inserter = create_stream_helper(&mut conn, r#"ints"#, ValueType::Integer64);
         for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
+            inserter.insert(t, v.into()).unwrap();
         }
         inserter.flush();
 
@@ -818,14 +821,14 @@ mod tests {
         let values = [1u64, 2, 3, 4];
         let mut inserter = create_stream_helper(&mut conn, r#"uints"#, ValueType::UInteger64);
         for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
+            inserter.insert(t, v.into()).unwrap();
         }
         inserter.flush();
 
         let values = [4.1, 3.2, 2.3, 1.4];
         let mut inserter = create_stream_helper(&mut conn, r#"floats"#, ValueType::Float64);
         for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
+            inserter.insert(t, v.into()).unwrap();
         }
         inserter.flush();
 
@@ -1169,7 +1172,7 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
+            inserter.insert(t, v.into()).unwrap();
         }
 
         inserter.flush();
@@ -1275,7 +1278,7 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values_a) {
-            inserter1.insert(t, v.into());
+            inserter1.insert(t, v.into()).unwrap();
         }
 
         inserter1.flush();
@@ -1287,7 +1290,7 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps, values_b) {
-            inserter2.insert(t, v.into());
+            inserter2.insert(t, v.into()).unwrap();
         }
 
         inserter2.flush();
@@ -1348,7 +1351,7 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps_a, values_a) {
-            inserter1.insert(t, v.into());
+            inserter1.insert(t, v.into()).unwrap();
         }
 
         inserter1.flush();
@@ -1360,7 +1363,7 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps_b, values_b) {
-            inserter2.insert(t, v.into());
+            inserter2.insert(t, v.into()).unwrap();
         }
 
         inserter2.flush();
@@ -1489,7 +1492,7 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values_a) {
-            inserter1.insert(t, v.into());
+            inserter1.insert(t, v.into()).unwrap();
         }
 
         inserter1.flush();
@@ -1501,7 +1504,7 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps, values_b) {
-            inserter2.insert(t, v.into());
+            inserter2.insert(t, v.into()).unwrap();
         }
 
         inserter2.flush();
@@ -1546,7 +1549,7 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values_a) {
-            inserter1.insert(t, v.into());
+            inserter1.insert(t, v.into()).unwrap();
         }
 
         inserter1.flush();
@@ -1558,7 +1561,7 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps, values_b) {
-            inserter2.insert(t, v.into());
+            inserter2.insert(t, v.into()).unwrap();
         }
 
         inserter2.flush();
@@ -1594,7 +1597,7 @@ mod tests {
         ) -> Inserter {
             let mut inserter = create_stream_helper(conn, stream, Self::VALUE_TYPE);
             for (t, v) in zip(timestamps, values) {
-                inserter.insert(t, v.into());
+                inserter.insert(t, v.into()).unwrap();
             }
             inserter.flush();
 

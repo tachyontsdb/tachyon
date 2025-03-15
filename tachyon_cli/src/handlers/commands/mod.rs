@@ -82,12 +82,14 @@ pub fn handle_command(
             for Vector { timestamp, value } in &vectors {
                 match inserter.value_type() {
                     ValueType::Integer64 => {
-                        inserter.insert_integer64(*timestamp, value.get_integer64())
+                        inserter.insert_integer64(*timestamp, value.get_integer64())?;
                     }
                     ValueType::UInteger64 => {
-                        inserter.insert_uinteger64(*timestamp, value.get_uinteger64())
+                        inserter.insert_uinteger64(*timestamp, value.get_uinteger64())?;
                     }
-                    ValueType::Float64 => inserter.insert_float64(*timestamp, value.get_float64()),
+                    ValueType::Float64 => {
+                        inserter.insert_float64(*timestamp, value.get_float64())?;
+                    }
                 }
             }
             inserter.flush();

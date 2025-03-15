@@ -41,6 +41,7 @@ trait IndexerStore {
         end: Timestamp,
     ) -> Result<Vec<PathBuf>, IndexerErr>;
     fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Result<Vec<PathBuf>, IndexerErr>;
+    fn get_max_timestamp(&self, stream_id: Uuid) -> Result<Option<Timestamp>, IndexerErr>;
 }
 
 mod sqlite {
@@ -429,6 +430,20 @@ mod sqlite {
 
             Ok(file_paths)
         }
+
+        fn get_max_timestamp(&self, stream_id: Uuid) -> Result<Option<u64>, IndexerErr> {
+            let sql = format!(
+                "SELECT MAX(end) FROM {} WHERE id = ? AND end IS NOT NULL",
+                Self::SQLITE_ID_TO_FILENAME_TABLE
+            );
+            let mut stmt = self.conn.prepare_cached(&sql)?;
+
+            // If the column or the row is NULL, .optional() converts it to None.
+            let max_value: Option<u64> =
+                stmt.query_row([stream_id], |row| row.get::<_, Option<u64>>(0))?;
+
+            Ok(max_value)
+        }
     }
 }
 
@@ -493,6 +508,10 @@ impl Indexer {
     pub fn get_stream_ids(&self, stream: &str, matchers: &Matchers) -> HashSet<Uuid> {
         let mut id_lists = self.store.get_stream_and_matcher_ids(stream, matchers);
         self.compute_intersection(&mut id_lists)
+    }
+
+    pub fn get_max_timestamp(&self, id: Uuid) -> Result<Option<Timestamp>, IndexerErr> {
+        self.store.get_max_timestamp(id)
     }
 
     fn compute_intersection(&self, id_lists: &mut [HashSet<Uuid>]) -> HashSet<Uuid> {
