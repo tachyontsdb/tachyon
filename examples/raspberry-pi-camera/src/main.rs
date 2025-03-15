@@ -1,38 +1,11 @@
 use anyhow::{anyhow, Result};
-use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
 use nokhwa::pixel_format::RgbFormat;
-use nokhwa::utils::{CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution};
+use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType, Resolution};
 use nokhwa::Camera;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
 use tachyon_core::{Connection, Timestamp, ValueType};
-
-// Calculate the average brightness of an image
-fn calculate_brightness(image: &ImageBuffer<Rgb<u8>, Vec<u8>>) -> f64 {
-    let mut sum: u64 = 0;
-    let mut pixel_count = 0;
-
-    // Get dimensions of the image
-    let (width, height) = image.dimensions();
-
-    // Sum up all pixel values (RGB)
-    for y in 0..height {
-        for x in 0..width {
-            let pixel = image.get_pixel(x, y);
-            // Average the RGB channels for each pixel
-            sum += (pixel[0] as u64 + pixel[1] as u64 + pixel[2] as u64) / 3;
-            pixel_count += 1;
-        }
-    }
-
-    if pixel_count == 0 {
-        return 0.0;
-    }
-
-    // Calculate average brightness (0-255)
-    (sum as f64) / (pixel_count as f64)
-}
 
 fn main() -> Result<()> {
     println!("Initializing camera brightness monitor using libcamera...");
@@ -90,14 +63,10 @@ fn main() -> Result<()> {
     })?;
 
     // Print camera information
-    let camera_info = camera
-        .info()
-        .map_err(|e| anyhow!("Failed to get camera info: {}", e))?;
+    let camera_info = camera.info();
     println!("Camera info: {}", camera_info);
 
-    let camera_resolution = camera
-        .resolution()
-        .map_err(|e| anyhow!("Failed to get camera resolution: {}", e))?;
+    let camera_resolution = camera.resolution();
     println!("Camera resolution: {}", camera_resolution);
 
     // Open camera stream
@@ -124,7 +93,30 @@ fn main() -> Result<()> {
                     .map_err(|e| anyhow!("Failed to decode image: {}", e))?;
 
                 // Calculate brightness
-                let current_brightness = calculate_brightness(&image);
+                let current_brightness = {
+                    let mut sum: u64 = 0;
+                    let mut pixel_count = 0;
+
+                    // Get dimensions of the image
+                    let (width, height) = image.dimensions();
+
+                    // Sum up all pixel values (RGB)
+                    for y in 0..height {
+                        for x in 0..width {
+                            let pixel = image.get_pixel(x, y);
+                            // Average the RGB channels for each pixel
+                            sum += (pixel[0] as u64 + pixel[1] as u64 + pixel[2] as u64) / 3;
+                            pixel_count += 1;
+                        }
+                    }
+
+                    if pixel_count == 0 {
+                        0.0
+                    } else {
+                        // Calculate average brightness (0-255)
+                        (sum as f64) / (pixel_count as f64)
+                    }
+                };
 
                 // Get current timestamp (microseconds since Unix epoch)
                 let timestamp = std::time::SystemTime::now()
