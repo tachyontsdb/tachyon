@@ -518,7 +518,11 @@ pub struct Inserter {
 
 macro_rules! create_inserter_insert {
     ($function_name: ident, $type: ty, $value_type: expr, $value_field: ident) => {
-        pub fn $function_name(&mut self, timestamp: crate::Timestamp, value: $type) -> Result<(), crate::error::TachyonErr> {
+        pub fn $function_name(
+            &mut self,
+            timestamp: crate::Timestamp,
+            value: $type,
+        ) -> Result<(), crate::error::TachyonErr> {
             if self.value_type != $value_type {
                 panic!("Invalid value type on insert!");
             }
@@ -669,7 +673,9 @@ mod tests {
         for i in 0..100000u64 {
             timestamps.push(i);
             values.push(i.into());
-            inserter.insert(timestamps[i as usize], values[i as usize]).unwrap();
+            inserter
+                .insert(timestamps[i as usize], values[i as usize])
+                .unwrap();
         }
 
         inserter.flush();
