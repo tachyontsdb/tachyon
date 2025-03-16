@@ -152,8 +152,7 @@ pub unsafe extern "C" fn tachyon_inserter_insert_integer64(
     match result {
         Ok(_) => 0u8,
         Err(tachyon_err) => {
-            let return_value = get_error_code(&tachyon_err);
-            return_value
+            get_error_code(&tachyon_err)
         }
     }
 }
@@ -170,8 +169,7 @@ pub unsafe extern "C" fn tachyon_inserter_insert_uinteger64(
     match result {
         Ok(_) => 0u8,
         Err(tachyon_err) => {
-            let return_value = get_error_code(&tachyon_err);
-            return_value
+            get_error_code(&tachyon_err)
         }
     }
 }
@@ -188,8 +186,7 @@ pub unsafe extern "C" fn tachyon_inserter_insert_float64(
     match result {
         Ok(_) => 0u8,
         Err(tachyon_err) => {
-            let return_value = get_error_code(&tachyon_err);
-            return_value
+            get_error_code(&tachyon_err)
         }
     }
 }

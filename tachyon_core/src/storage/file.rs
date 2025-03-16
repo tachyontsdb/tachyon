@@ -532,7 +532,6 @@ impl PartiallyPersistentDataFile {
     }
 
     pub fn lazy_init(mut self, ts: Timestamp, v: Value) -> Result<Self, WriterErr> {
-        // we need to see if there is
         self.update_header(ts, v);
         let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
         self.compressor = Option::Some(IntCompressor::new(writer, &self.header.borrow().clone()));

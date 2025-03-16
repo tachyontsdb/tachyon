@@ -18,14 +18,6 @@ pub struct PersistentWriter {
     version: Version,
 }
 
-// CASES FOR WRITES
-// we are writing in progress
-// need to assert that the timestamp is in order for the in progress file
-
-// WE are making a new file
-// need to check if there exists a previous file...
-// if there is we need the max timestamp
-
 impl PersistentWriter {
     fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, ts: Timestamp) -> PathBuf {
         root.as_ref()
@@ -434,7 +426,7 @@ mod tests {
 
         writer.create_stream(stream_id);
 
-        for i in 0..100 as u64 {
+        for i in 0..100_u64 {
             let ts = i as Timestamp;
             let v = (i * 1000).into();
             writer
@@ -445,7 +437,7 @@ mod tests {
         }
 
         let ts = 50 as Timestamp;
-        let v = 50 as u64;
+        let v = 50_u64;
 
         let result = writer.write(stream_id, ts, v.into(), ValueType::UInteger64);
 
@@ -474,7 +466,7 @@ mod tests {
                 .unwrap();
         } // the file should be persisted here
 
-        for i in 1..100 as u64 {
+        for i in 1..100_u64 {
             let ts = base + i;
             let v = (i * 1000).into();
             writer
@@ -483,7 +475,7 @@ mod tests {
         }
 
         let ts = 50 as Timestamp;
-        let v = 50 as u64;
+        let v = 50_u64;
 
         let result = writer.write(stream_id, ts, v.into(), ValueType::UInteger64);
 
@@ -535,7 +527,7 @@ mod tests {
             let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
 
             let ts = 50 as Timestamp;
-            let v = 50 as u64;
+            let v = 50_u64;
 
             let result = writer.write(stream_id, ts, v.into(), ValueType::UInteger64);
 
