@@ -19,7 +19,7 @@ use tachyon_core::{Connection, Timestamp, ValueType};
 // Since your camera supports only YUYV, we define the pixel format for YUYV.
 // Note: While the constant name below is PIXEL_FORMAT_YUYV, you can rename it as needed.
 const PIXEL_FORMAT_YUYV: PixelFormat =
-    PixelFormat::new(u32::from_le_bytes([b'R', b'G', b'B', b'3']), 0);
+    PixelFormat::new(u32::from_le_bytes([b'R', b'G', b'B', b'A']), 0);
 
 fn main() -> Result<()> {
     // Initialize Tachyon database connection
