@@ -112,11 +112,11 @@ fn main() {
         let mut req = rx
             .recv_timeout(Duration::from_secs(2))
             .expect("Timeout waiting for frame");
-        println!(
-            "Frame {} captured, metadata: {:#?}",
-            frame_index,
-            req.metadata()
-        );
+        // println!(
+        //     "Frame {} captured, metadata: {:#?}",
+        //     frame_index,
+        //     req.metadata()
+        // );
 
         // Retrieve the framebuffer for our stream.
         let framebuffer: &MemoryMappedFrameBuffer<FrameBuffer> = req.buffer(&stream).unwrap();
