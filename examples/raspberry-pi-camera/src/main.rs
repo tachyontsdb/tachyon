@@ -170,6 +170,8 @@ fn main() -> Result<()> {
             .unwrap()
             .bytes_used as usize;
 
+        println!("YAYYAYYAYAY: {:?}", fdata);
+
         let current_brightness = {
             let mut sum: u64 = 0;
             let mut pixel_count = 0;
