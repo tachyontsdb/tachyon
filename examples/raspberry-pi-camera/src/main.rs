@@ -144,7 +144,7 @@ fn main() -> Result<()> {
         .expect("Unable to create output file");
 
     // Capture a set number of frames (here 60 frames, adjust as needed).
-    for frame_index in 0..60 {
+    for frame_index in 0..10 {
         println!("Waiting for frame {}", frame_index);
         let mut req = rx
             .recv_timeout(Duration::from_secs(2))
@@ -170,7 +170,7 @@ fn main() -> Result<()> {
             .unwrap()
             .bytes_used as usize;
 
-        println!("FDATA: {}", fdata.len());
+        println!("FDATA: {} {:?}", fdata.len(), frame_data.len());
 
         let current_brightness = {
             let mut sum: u64 = 0;
