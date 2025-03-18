@@ -19,7 +19,7 @@ use tachyon_core::{Connection, Timestamp, ValueType};
 // Since your camera supports only YUYV, we define the pixel format for YUYV.
 // Note: While the constant name below is PIXEL_FORMAT_YUYV, you can rename it as needed.
 const PIXEL_FORMAT_YUYV: PixelFormat =
-    PixelFormat::new(u32::from_le_bytes([b'R', b'G', b'B', b'A']), 0);
+    PixelFormat::new(u32::from_le_bytes([b'Y', b'U', b'Y', b'V']), 0);
 
 fn main() -> Result<()> {
     // Initialize Tachyon database connection
@@ -177,9 +177,10 @@ fn main() -> Result<()> {
             let mut pixel_count = 0;
 
             // Sum up all pixel values (RGB)
-            for ((&r, &g), &b) in fdata.get(0).unwrap().iter().zip(fdata.get(1).unwrap().iter()).zip(fdata.get(2).unwrap().iter()) {
+            for p in frame_data.iter() {
                 // Average the RGB channels for each pixel
-                sum += (r as u64 + g as u64 + b as u64) / 3;
+                // sum += (r as u64 + g as u64 + b as u64) / 3;
+                sum += *p as u64;
                 pixel_count += 1;
             }
 
