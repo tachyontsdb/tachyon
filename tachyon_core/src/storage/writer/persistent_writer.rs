@@ -55,7 +55,10 @@ impl PersistentWriter {
 
             if let Some(max_ts) = max_ts_opt {
                 if ts < max_ts {
-                    return Err(WriterErr::OutOfOrderErr{ts: ts, prev_ts: max_ts});
+                    return Err(WriterErr::OutOfOrderErr {
+                        ts,
+                        prev_ts: max_ts,
+                    });
                 }
             }
 

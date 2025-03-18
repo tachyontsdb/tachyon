@@ -544,7 +544,10 @@ impl PartiallyPersistentDataFile {
         self.header = Rc::new(RefCell::new(data_file.header.clone()));
 
         if ts < self.header.borrow().max_timestamp {
-            return Err(WriterErr::OutOfOrderErr{ts: ts, prev_ts: self.header.borrow().max_timestamp});
+            return Err(WriterErr::OutOfOrderErr {
+                ts,
+                prev_ts: self.header.borrow().max_timestamp,
+            });
         }
 
         let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
@@ -579,7 +582,10 @@ impl PartiallyPersistentDataFile {
 
     pub fn write(&mut self, ts: Timestamp, v: Value) -> Result<(), WriterErr> {
         if ts < self.header.borrow().max_timestamp {
-            return Err(WriterErr::OutOfOrderErr{ts: ts, prev_ts: self.header.borrow().max_timestamp});
+            return Err(WriterErr::OutOfOrderErr {
+                ts,
+                prev_ts: self.header.borrow().max_timestamp,
+            });
         }
 
         self.update_header(ts, v);
