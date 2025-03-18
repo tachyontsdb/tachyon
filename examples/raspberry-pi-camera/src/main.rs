@@ -1,226 +1,137 @@
-use anyhow::{anyhow, Result};
-use image::{ImageBuffer, Rgb};
+use std::{fs::OpenOptions, io::Write, process::exit, time::Duration};
+
 use libcamera::{
-    Camera, CameraConfiguration, CameraManager, FrameBuffer, FrameBufferAllocator, PixelFormat,
-    Rectangle, Stream,
+    camera::CameraConfigurationStatus,
+    camera_manager::CameraManager,
+    framebuffer::AsFrameBuffer,
+    framebuffer_allocator::{FrameBuffer, FrameBufferAllocator},
+    framebuffer_map::MemoryMappedFrameBuffer,
+    pixel_format::PixelFormat,
+    properties,
+    request::ReuseFlag,
+    stream::StreamRole,
 };
-use std::path::Path;
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
-use tachyon_core::{Connection, Timestamp, ValueType};
 
-fn main() -> Result<()> {
-    println!("Initializing camera brightness monitor using libcamera...");
+// drm-fourcc does not have MJPEG type yet, construct it from raw fourcc identifier
+const PIXEL_FORMAT_MJPEG: PixelFormat = PixelFormat::new(u32::from_le_bytes([b'M', b'J', b'P', b'G']), 0);
 
-    // Initialize Tachyon database connection
-    let db_dir = Path::new("./data/brightness_db");
-    println!("Connecting to Tachyon database at: {:?}", db_dir);
-
-    // Create db_dir if it doesn't exist
-    if !db_dir.exists() {
-        std::fs::create_dir_all(db_dir)
-            .map_err(|e| anyhow!("Failed to create database directory: {}", e))?;
-    }
-
-    let mut connection = Connection::new(db_dir)
-        .map_err(|e| anyhow!("Failed to initialize Tachyon database connection: {}", e))?;
-
-    // Stream name for brightness data
-    let stream_name = "camera_brightness";
-
-    // Create the stream if it doesn't exist
-    if !connection.check_stream_exists(stream_name) {
-        println!("Creating stream '{}' for brightness data", stream_name);
-        connection
-            .create_stream(stream_name, ValueType::Float64)
-            .map_err(|e| anyhow!("Failed to create stream: {}", e))?;
-    } else {
-        println!(
-            "Using existing stream '{}' for brightness data",
-            stream_name
-        );
-    }
-
-    // Prepare inserter for the stream
-    let mut inserter = connection.prepare_insert(stream_name);
-    println!("Tachyon database initialized successfully");
-
-    // Set some reasonable default values for camera
-    let width = 640;
-    let height = 480;
-
-    // Initialize the libcamera manager
-    let manager =
-        CameraManager::new().map_err(|e| anyhow!("Failed to initialize camera manager: {}", e))?;
-
-    // Start the camera manager
-    manager
-        .start()
-        .map_err(|e| anyhow!("Failed to start camera manager: {}", e))?;
-
-    // Get available cameras
-    let cameras = manager.cameras();
-    if cameras.is_empty() {
-        return Err(anyhow!("No cameras available"));
-    }
-
-    println!("Found {} camera(s)", cameras.len());
-    for (i, camera) in cameras.iter().enumerate() {
-        println!("Camera {}: {}", i, camera.id());
-    }
-
-    // Acquire the first camera
-    let camera = cameras[0]
-        .acquire()
-        .map_err(|e| anyhow!("Failed to acquire camera: {}", e))?;
-    println!("Using camera: {}", camera.id());
-
-    // Configure the camera
-    let mut config = camera
-        .generate_configuration(&[Rectangle::new(0, 0, width, height)])
-        .map_err(|e| anyhow!("Failed to generate camera configuration: {}", e))?;
-
-    // Configure streams - in this case we have only one stream (index 0)
-    let stream_config = config.get_stream_config_mut(0);
-    stream_config.set_pixel_format(PixelFormat::new(b"RGB3")); // RGB24 format
-    stream_config.set_size(width, height);
-
-    // Validate and apply the configuration
-    config
-        .validate()
-        .map_err(|e| anyhow!("Failed to validate camera configuration: {}", e))?;
-    config = camera
-        .configure(config)
-        .map_err(|e| anyhow!("Failed to configure camera: {}", e))?;
-
-    // Create a frame buffer allocator
-    let allocator = FrameBufferAllocator::new(&camera);
-
-    // Allocate frame buffers for our stream
-    let stream = config.get_stream(0);
-    let mut buffers = allocator
-        .alloc(stream)
-        .map_err(|e| anyhow!("Failed to allocate frame buffers: {}", e))?;
-
-    // Start the camera
-    camera
-        .start()
-        .map_err(|e| anyhow!("Failed to start camera: {}", e))?;
-    println!("Camera started successfully");
-
-    // Queue all available buffers
-    for buffer in &buffers {
-        camera
-            .queue_request(buffer)
-            .map_err(|e| anyhow!("Failed to queue request: {}", e))?;
-    }
-
-    // Variables to track brightness changes
-    let mut last_brightness = 0.0;
-    let brightness_threshold = 10.0; // Threshold for significant brightness change
-
-    println!("Starting brightness monitoring loop...");
-
-    // Main monitoring loop
-    for _ in 0..100 {
-        // Capture 100 frames for testing
-        // Wait for a completed request (this blocks until a frame is available)
-        let request = camera
-            .get_completed_request()
-            .map_err(|e| anyhow!("Failed to get completed request: {}", e))?;
-
-        // Get the frame buffer from the request
-        let buffer = request
-            .get_buffer(stream)
-            .map_err(|e| anyhow!("Failed to get buffer from request: {}", e))?;
-
-        // Get the buffer data
-        let planes = buffer.get_planes();
-        if planes.is_empty() {
-            return Err(anyhow!("No planes in buffer"));
+fn main() {
+    let filename = match std::env::args().nth(1) {
+        Some(f) => f,
+        None => {
+            println!("Error: missing file output parameter");
+            println!("Usage: ./video_capture </path/to/output.mjpeg>");
+            exit(1);
         }
+    };
 
-        // Get the first plane (for RGB format, there's typically only one plane)
-        let plane = &planes[0];
-        let data = plane.data();
+    let mgr = CameraManager::new().unwrap();
 
-        // Create an RGB image from the buffer data
-        // The data layout is expected to be RGB24 (3 bytes per pixel)
-        let image: ImageBuffer<Rgb<u8>, Vec<u8>> =
-            match ImageBuffer::from_raw(width, height, data.to_vec()) {
-                Some(img) => img,
-                None => return Err(anyhow!("Failed to create image from buffer data")),
-            };
+    let cameras = mgr.cameras();
 
-        // Calculate brightness
-        let current_brightness = {
-            let mut sum: u64 = 0;
-            let mut pixel_count = 0;
+    let cam = cameras.get(0).expect("No cameras found");
 
-            // Sum up all pixel values (RGB)
-            for (_, _, pixel) in image.enumerate_pixels() {
-                // Average the RGB channels for each pixel
-                sum += (pixel[0] as u64 + pixel[1] as u64 + pixel[2] as u64) / 3;
-                pixel_count += 1;
-            }
+    println!(
+        "Using camera: {}",
+        *cam.properties().get::<properties::Model>().unwrap()
+    );
 
-            if pixel_count == 0 {
-                0.0
-            } else {
-                // Calculate average brightness (0-255)
-                (sum as f64) / (pixel_count as f64)
-            }
-        };
+    let mut cam = cam.acquire().expect("Unable to acquire camera");
 
-        // Get current timestamp (microseconds since Unix epoch)
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_micros() as Timestamp;
+    // This will generate default configuration for each specified role
+    let mut cfgs = cam.generate_configuration(&[StreamRole::VideoRecording]).unwrap();
 
-        // Insert brightness data into Tachyon
-        inserter.insert_float64(timestamp, current_brightness);
+    cfgs.get_mut(0).unwrap().set_pixel_format(PIXEL_FORMAT_MJPEG);
 
-        // Periodically flush the data to disk
-        // This ensures data is written even if the program exits unexpectedly
-        if timestamp % 10 == 0 {
-            inserter.flush();
-        }
+    println!("Generated config: {:#?}", cfgs);
 
-        // Log current brightness level
-        println!(
-            "Current brightness: {:.2} (stored to Tachyon at timestamp {})",
-            current_brightness, timestamp
-        );
-
-        // Check for significant brightness change
-        let brightness_diff = (current_brightness - last_brightness).abs();
-        if brightness_diff > brightness_threshold {
-            println!(
-                "Significant brightness change detected: {:.2} -> {:.2} (diff: {:.2})",
-                last_brightness, current_brightness, brightness_diff
-            );
-        }
-
-        last_brightness = current_brightness;
-
-        // Queue the buffer again for reuse
-        camera
-            .queue_request(&[buffer])
-            .map_err(|e| anyhow!("Failed to requeue buffer: {}", e))?;
-
-        // Sleep for a short period to avoid excessive CPU usage
-        thread::sleep(Duration::from_millis(500));
+    match cfgs.validate() {
+        CameraConfigurationStatus::Valid => println!("Camera configuration valid!"),
+        CameraConfigurationStatus::Adjusted => println!("Camera configuration was adjusted: {:#?}", cfgs),
+        CameraConfigurationStatus::Invalid => panic!("Error validating camera configuration"),
     }
 
-    // Stop the camera
-    camera
-        .stop()
-        .map_err(|e| anyhow!("Failed to stop camera: {}", e))?;
+    // Ensure that pixel format was unchanged
+    assert_eq!(
+        cfgs.get(0).unwrap().get_pixel_format(),
+        PIXEL_FORMAT_MJPEG,
+        "MJPEG is not supported by the camera"
+    );
 
-    // Flush any remaining data
-    inserter.flush();
+    cam.configure(&mut cfgs).expect("Unable to configure camera");
 
-    Ok(())
+    let mut alloc = FrameBufferAllocator::new(&cam);
+
+    // Allocate frame buffers for the stream
+    let cfg = cfgs.get(0).unwrap();
+    let stream = cfg.stream().unwrap();
+    let buffers = alloc.alloc(&stream).unwrap();
+    println!("Allocated {} buffers", buffers.len());
+
+    // Convert FrameBuffer to MemoryMappedFrameBuffer, which allows reading &[u8]
+    let buffers = buffers
+        .into_iter()
+        .map(|buf| MemoryMappedFrameBuffer::new(buf).unwrap())
+        .collect::<Vec<_>>();
+
+    // Create capture requests and attach buffers
+    let reqs = buffers
+        .into_iter()
+        .enumerate()
+        .map(|(i, buf)| {
+            let mut req = cam.create_request(Some(i as u64)).unwrap();
+            req.add_buffer(&stream, buf).unwrap();
+            req
+        })
+        .collect::<Vec<_>>();
+
+    // Completed capture requests are returned as a callback
+    let (tx, rx) = std::sync::mpsc::channel();
+    cam.on_request_completed(move |req| {
+        tx.send(req).unwrap();
+    });
+
+    // TODO: Set `Control::FrameDuration()` here. Blocked on https://github.com/lit-robotics/libcamera-rs/issues/2
+    cam.start(None).unwrap();
+
+    // Enqueue all requests to the camera
+    for req in reqs {
+        println!("Request queued for execution: {req:#?}");
+        cam.queue_request(req).unwrap();
+    }
+
+    let mut file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&filename)
+        .expect("Unable to create output file");
+    let mut count = 0;
+    while count < 60 {
+        println!("Waiting for camera request execution");
+        let mut req = rx.recv_timeout(Duration::from_secs(2)).expect("Camera request failed");
+
+        println!("Camera request {:?} completed!", req);
+        println!("Metadata: {:#?}", req.metadata());
+
+        // Get framebuffer for our stream
+        let framebuffer: &MemoryMappedFrameBuffer<FrameBuffer> = req.buffer(&stream).unwrap();
+        println!("FrameBuffer metadata: {:#?}", framebuffer.metadata());
+
+        // MJPEG format has only one data plane containing encoded jpeg data with all the headers
+        let planes = framebuffer.data();
+        let frame_data = planes.get(0).unwrap();
+        // Actual encoded data will be smalled than framebuffer size, its length can be obtained from metadata.
+        let bytes_used = framebuffer.metadata().unwrap().planes().get(0).unwrap().bytes_used as usize;
+
+        file.write(&frame_data[..bytes_used]).unwrap();
+        println!("Written {} bytes to {}", bytes_used, &filename);
+
+        // Recycle the request back to the camera for execution
+        req.reuse(ReuseFlag::REUSE_BUFFERS);
+        cam.queue_request(req).unwrap();
+
+        count += 1;
+    }
+
+    // Everything is cleaned up automatically by Drop implementations
 }
