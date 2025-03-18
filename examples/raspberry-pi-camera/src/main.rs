@@ -1,5 +1,4 @@
-use std::{fs::OpenOptions, io::Write, process::exit, time::Duration};
-
+use anyhow::{anyhow, Result};
 use libcamera::{
     camera::CameraConfigurationStatus,
     camera_manager::CameraManager,
@@ -11,13 +10,51 @@ use libcamera::{
     request::ReuseFlag,
     stream::StreamRole,
 };
+use std::{path::Path, time::{Instant, SystemTime, UNIX_EPOCH}};
+use std::sync::Arc;
+use std::thread;
+use std::{fs::OpenOptions, io::Write, process::exit, time::Duration};
+use tachyon_core::{Connection, Timestamp, ValueType};
 
 // Since your camera supports only YUYV, we define the pixel format for YUYV.
 // Note: While the constant name below is PIXEL_FORMAT_YUYV, you can rename it as needed.
 const PIXEL_FORMAT_YUYV: PixelFormat =
     PixelFormat::new(u32::from_le_bytes([b'Y', b'U', b'Y', b'V']), 0);
 
-fn main() {
+fn main() -> Result<()> {
+    // Initialize Tachyon database connection
+    let db_dir = Path::new("./data/brightness_db");
+    println!("Connecting to Tachyon database at: {:?}", db_dir);
+
+    // Create db_dir if it doesn't exist
+    if !db_dir.exists() {
+        std::fs::create_dir_all(db_dir)
+            .map_err(|e| anyhow!("Failed to create database directory: {}", e))?;
+    }
+
+    let mut connection = Connection::new(db_dir)
+        .map_err(|e| anyhow!("Failed to initialize Tachyon database connection: {}", e))?;
+
+    // Stream name for brightness data
+    let stream_name = "camera_brightness";
+
+    // Create the stream if it doesn't exist
+    if !connection.check_stream_exists(stream_name) {
+        println!("Creating stream '{}' for brightness data", stream_name);
+        connection
+            .create_stream(stream_name, ValueType::Float64)
+            .map_err(|e| anyhow!("Failed to create stream: {}", e))?;
+    } else {
+        println!(
+            "Using existing stream '{}' for brightness data",
+            stream_name
+        );
+    }
+
+    // Prepare inserter for the stream
+    let mut inserter = connection.prepare_insert(stream_name);
+    println!("Tachyon database initialized successfully");
+
     // Get the output filename from the command-line arguments.
     let filename = std::env::args().nth(1).unwrap_or_else(|| {
         eprintln!("Error: missing file output parameter");
@@ -121,7 +158,6 @@ fn main() {
         // Retrieve the framebuffer for our stream.
         let framebuffer: &MemoryMappedFrameBuffer<FrameBuffer> = req.buffer(&stream).unwrap();
 
-
         // Since we mapped the buffer, we can access its data.
         let fdata = framebuffer.data();
         let frame_data = fdata.get(0).expect("No data plane available");
@@ -133,6 +169,27 @@ fn main() {
             .get(0)
             .unwrap()
             .bytes_used as usize;
+
+        let current_brightness = {
+            let mut sum: u64 = 0;
+            let mut pixel_count = 0;
+
+            // Sum up all pixel values (RGB)
+            for ((&r, &g), &b) in fdata.get(0).unwrap().iter().zip(fdata.get(1).unwrap().iter()).zip(fdata.get(2).unwrap().iter()) {
+                // Average the RGB channels for each pixel
+                sum += (r as u64 + g as u64 + b as u64) / 3;
+                pixel_count += 1;
+            }
+
+            if pixel_count == 0 {
+                0.0
+            } else {
+                // Calculate average brightness (0-255)
+                (sum as f64) / (pixel_count as f64)
+            }
+        };
+
+        inserter.insert_float64(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis().try_into().unwrap(), current_brightness);
 
         // Write the valid frame data to the output file.
         file.write_all(&frame_data[..bytes_used])
@@ -148,4 +205,6 @@ fn main() {
     }
 
     println!("Video capture complete. Output saved to {}", filename);
+
+    Ok(())
 }
