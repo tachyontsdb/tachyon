@@ -10,10 +10,13 @@ use libcamera::{
     request::ReuseFlag,
     stream::StreamRole,
 };
-use std::{path::Path, time::{Instant, SystemTime, UNIX_EPOCH}};
 use std::sync::Arc;
 use std::thread;
 use std::{fs::OpenOptions, io::Write, process::exit, time::Duration};
+use std::{
+    path::Path,
+    time::{Instant, SystemTime, UNIX_EPOCH},
+};
 use tachyon_core::{Connection, Timestamp, ValueType};
 
 // Since your camera supports only YUYV, we define the pixel format for YUYV.
@@ -174,25 +177,49 @@ fn main() -> Result<()> {
 
         let current_brightness = {
             let mut sum: u64 = 0;
-            let mut pixel_count = 0;
+            let mut y_pixel_count = 0;
 
-            // Sum up all pixel values (RGB)
-            for p in frame_data.iter() {
-                // Average the RGB channels for each pixel
-                // sum += (r as u64 + g as u64 + b as u64) / 3;
-                sum += *p as u64;
-                pixel_count += 1;
+            // In YUYV format, bytes are arranged as Y1 U Y2 V Y3 U Y4 V ...
+            // For every 4 bytes, we have: [Y1 U Y2 V]
+            // We only want the Y (luminance) components which represent brightness
+            // These are at positions 0, 2, 4, 6, etc. in the byte array
+            for i in (0..bytes_used).step_by(4) {
+                // Extract Y1 (position 0 in the group)
+                if i < bytes_used {
+                    sum += frame_data[i] as u64;
+                    y_pixel_count += 1;
+                }
+
+                // Extract Y2 (position 2 in the group)
+                if i + 2 < bytes_used {
+                    sum += frame_data[i + 2] as u64;
+                    y_pixel_count += 1;
+                }
             }
 
-            if pixel_count == 0 {
+            if y_pixel_count == 0 {
                 0.0
             } else {
-                // Calculate average brightness (0-255)
-                (sum as f64) / (pixel_count as f64)
+                // Calculate average luminance/brightness (0-255)
+                (sum as f64) / (y_pixel_count as f64)
             }
         };
 
-        inserter.insert_float64(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis().try_into().unwrap(), current_brightness);
+        // Output current brightness value to the command line
+        println!(
+            "Current camera luminance (brightness): {:.2} (0-255 scale)",
+            current_brightness
+        );
+
+        inserter.insert_float64(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                .try_into()
+                .unwrap(),
+            current_brightness,
+        );
 
         // Write the valid frame data to the output file.
         file.write_all(&frame_data[..bytes_used])
