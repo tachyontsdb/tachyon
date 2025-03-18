@@ -209,5 +209,7 @@ fn main() -> Result<()> {
 
     println!("Video capture complete. Output saved to {}", filename);
 
+    inserter.flush();
+
     Ok(())
 }
