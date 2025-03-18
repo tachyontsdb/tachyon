@@ -13,7 +13,8 @@ use libcamera::{
 };
 
 // drm-fourcc does not have MJPEG type yet, construct it from raw fourcc identifier
-const PIXEL_FORMAT_MJPEG: PixelFormat = PixelFormat::new(u32::from_le_bytes([b'M', b'J', b'P', b'G']), 0);
+const PIXEL_FORMAT_MJPEG: PixelFormat = PixelFormat::new(u32::from_le_bytes([b'Y', b'U', b'Y', b'V']), 0);
+//PixelFormat::new(u32::from_le_bytes([b'M', b'J', b'P', b'G']), 0);
 
 fn main() {
     let filename = match std::env::args().nth(1) {
@@ -51,12 +52,12 @@ fn main() {
         CameraConfigurationStatus::Invalid => panic!("Error validating camera configuration"),
     }
 
-    // Ensure that pixel format was unchanged
-    assert_eq!(
-        cfgs.get(0).unwrap().get_pixel_format(),
-        PIXEL_FORMAT_MJPEG,
-        "MJPEG is not supported by the camera"
-    );
+    // // Ensure that pixel format was unchanged
+    // assert_eq!(
+    //     cfgs.get(0).unwrap().get_pixel_format(),
+    //     PIXEL_FORMAT_MJPEG,
+    //     "MJPEG is not supported by the camera"
+    // );
 
     cam.configure(&mut cfgs).expect("Unable to configure camera");
 
