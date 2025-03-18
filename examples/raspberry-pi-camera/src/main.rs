@@ -31,10 +31,10 @@ fn main() {
 
     let cam = cameras.get(0).expect("No cameras found");
 
-    println!(
-        "Using camera: {}",
-        *cam.properties().get::<properties::Model>().unwrap()
-    );
+    // println!(
+    //     "Using camera: {}",
+    //     *cam.properties().get::<properties::Model>().unwrap()
+    // );
 
     let mut cam = cam.acquire().expect("Unable to acquire camera");
 
