@@ -60,6 +60,6 @@ pub enum ConnectionErr {
 pub enum WriterErr {
     #[error("Compressor not initialized.")]
     CompressorNotInitialized,
-    #[error("Write out of order.")]
-    OutOfOrderErr,
+    #[error("Write out of order. Tried to insert at {ts} when last entry is at timestamp {prev_ts}.")]
+    OutOfOrderErr {ts: Timestamp, prev_ts: Timestamp},
 }
