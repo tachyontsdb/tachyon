@@ -6,27 +6,25 @@ use libcamera::{
     framebuffer_allocator::{FrameBuffer, FrameBufferAllocator},
     framebuffer_map::MemoryMappedFrameBuffer,
     pixel_format::PixelFormat,
-    properties,
     request::ReuseFlag,
     stream::StreamRole,
 };
-use std::sync::Arc;
-use std::thread;
-use std::{fs::OpenOptions, io::Write, process::exit, time::Duration};
 use std::{
+    fs::OpenOptions,
+    io::Write,
     path::Path,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    process::exit,
+    time::Duration,
+    time::{SystemTime, UNIX_EPOCH},
 };
-use tachyon_core::{Connection, Timestamp, ValueType};
+use tachyon_core::{Connection, ValueType};
 
-// Since your camera supports only YUYV, we define the pixel format for YUYV.
-// Note: While the constant name below is PIXEL_FORMAT_YUYV, you can rename it as needed.
 const PIXEL_FORMAT_YUYV: PixelFormat =
     PixelFormat::new(u32::from_le_bytes([b'Y', b'U', b'Y', b'V']), 0);
 
 fn main() -> Result<()> {
     // Initialize Tachyon database connection
-    let db_dir = Path::new("./data/brightness_db");
+    let db_dir = Path::new("./tmp/brightness_db");
     println!("Connecting to Tachyon database at: {:?}", db_dir);
 
     // Create db_dir if it doesn't exist
@@ -152,11 +150,6 @@ fn main() -> Result<()> {
         let mut req = rx
             .recv_timeout(Duration::from_secs(2))
             .expect("Timeout waiting for frame");
-        // println!(
-        //     "Frame {} captured, metadata: {:#?}",
-        //     frame_index,
-        //     req.metadata()
-        // );
 
         // Retrieve the framebuffer for our stream.
         let framebuffer: &MemoryMappedFrameBuffer<FrameBuffer> = req.buffer(&stream).unwrap();
@@ -172,8 +165,6 @@ fn main() -> Result<()> {
             .get(0)
             .unwrap()
             .bytes_used as usize;
-
-        println!("FDATA: {} {:?}", fdata.len(), frame_data.len());
 
         let current_brightness = {
             let mut sum: u64 = 0;
