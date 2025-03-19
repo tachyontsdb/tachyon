@@ -1,6 +1,9 @@
 use std::io::{Read, Write};
 
-use crate::{storage::file::Header, tachyon_benchmarks::TimeDataFile, Timestamp};
+use crate::{
+    storage::file::{Header, TimeDataFile},
+    Timestamp,
+};
 
 use super::{CompressionEngine, DecompressionEngine};
 
