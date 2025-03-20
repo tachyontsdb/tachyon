@@ -147,6 +147,7 @@ impl Header {
     fn write_from_path(&self, path: &PathBuf) -> Result<usize, io::Error> {
         let mut file = OpenOptions::new()
             .create(true)
+            .truncate(true) // may be the case that this file already exists due to previous panic!
             .write(true)
             .open(path)
             .unwrap();
