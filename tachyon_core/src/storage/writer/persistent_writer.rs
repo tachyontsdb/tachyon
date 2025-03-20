@@ -20,8 +20,14 @@ pub struct PersistentWriter {
 
 impl PersistentWriter {
     fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, ts: Timestamp) -> PathBuf {
-        root.as_ref()
-            .join(format!("{}/{}.{}", stream_id, ts, FILE_EXTENSION))
+        let uuid = Uuid::new_v4();
+        root.as_ref().join(format!(
+            "{}/{}-{}.{}",
+            stream_id,
+            ts,
+            uuid,
+            FILE_EXTENSION
+        ))
     }
 
     fn create_or_open_file(
@@ -64,9 +70,6 @@ impl PersistentWriter {
             }
 
             let file_path = PersistentWriter::derive_file_path(&self.root, stream_id, ts);
-            self.indexer
-                .borrow_mut()
-                .insert_new_file(stream_id, &file_path, ts, None)?;
 
             let file = PartiallyPersistentDataFile::new(
                 self.version,
@@ -78,8 +81,7 @@ impl PersistentWriter {
 
             self.indexer
                 .borrow_mut()
-                .insert_new_file(stream_id, &file_path, ts, None)
-                .unwrap();
+                .insert_new_file(stream_id, &file_path, ts, None)?;
 
             file
         }
@@ -175,10 +177,15 @@ mod tests {
                 .into_string()
                 .unwrap();
 
-            let suffix_opt = path
-                .rsplit('/')
-                .next()
-                .and_then(|num_str| num_str.split('.').next().unwrap().parse::<u32>().ok());
+            let suffix_opt = path.rsplit('/').next().and_then(|num_str| {
+                num_str
+                    .split('.')
+                    .next()
+                    .and_then(|num_str| num_str.split('-').next())
+                    .unwrap()
+                    .parse::<u32>()
+                    .ok()
+            });
 
             suffix_opt.expect("Expected file suffix to be u32")
         }

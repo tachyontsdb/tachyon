@@ -1830,7 +1830,7 @@ mod tests {
                 create_stream_helper(&mut conn, r#"http_requests_total"#, ValueType::Float64);
 
             for i in 0..mid {
-                inserter.insert_float64(i, i as f64);
+                inserter.insert_float64(i, i as f64).unwrap();
             }
 
             panic!("Intentional panic to prevent Drop from running for inserter");
@@ -1843,9 +1843,9 @@ mod tests {
             let mut inserter = conn.prepare_insert(r#"http_requests_total"#);
 
             for i in mid..end {
-                inserter.insert_float64(i, i as f64);
+                inserter.insert_float64(i, i as f64).unwrap();
             }
-            inserter.flush();
+            inserter.flush().unwrap();
         }
     }
 }
