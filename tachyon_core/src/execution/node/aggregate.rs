@@ -235,7 +235,9 @@ impl ExecutorNode for AggregateNode {
     }
 
     fn next_vector(&mut self, conn: &mut Connection) -> Option<Vector> {
+        // While there are still more vectors to be read
         while !self.child.done {
+            // If the current subperiod has an aggregate result, return it
             if let Some(value) = self.next_scalar(conn) {
                 let timestamp = cmp::min(self.child.end, self.end); // Bound by end timestamp
                 return Some(Vector { timestamp, value });
