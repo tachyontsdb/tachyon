@@ -1,6 +1,7 @@
 use super::super::file::TimeDataFile;
 use super::super::MAX_NUM_ENTRIES;
 use super::Writer;
+use crate::error::WriterErr;
 use crate::query::indexer::Indexer;
 use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version, FILE_EXTENSION};
 use std::cell::RefCell;
@@ -71,7 +72,13 @@ impl Writer for InMemoryWriter {
         }
     }
 
-    fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value, value_type: ValueType) {
+    fn write(
+        &mut self,
+        stream_id: Uuid,
+        ts: Timestamp,
+        v: Value,
+        value_type: ValueType,
+    ) -> Result<(), WriterErr> {
         let file = self
             .open_data_files
             .entry(stream_id)
@@ -86,48 +93,46 @@ impl Writer for InMemoryWriter {
             let file_path = InMemoryWriter::derive_file_path(&self.root, stream_id, file);
             file.write(file_path.clone());
             // TODO: remove unwrap
-            self.indexer
-                .borrow_mut()
-                .insert_new_file(
-                    stream_id,
-                    &file_path,
-                    file.header.min_timestamp,
-                    Some(file.header.max_timestamp),
-                )
-                .unwrap();
+            self.indexer.borrow_mut().insert_new_file(
+                stream_id,
+                &file_path,
+                file.header.min_timestamp,
+                Some(file.header.max_timestamp),
+            )?;
             self.open_data_files.remove_entry(&stream_id);
         }
+        Ok(())
     }
 
-    fn create_stream(&self, stream_id: Uuid) {
+    fn create_stream(&self, stream_id: Uuid) -> Result<(), WriterErr> {
         let stream = self.root.join(stream_id.to_string());
         if !stream.exists() {
-            fs::create_dir(stream).unwrap();
+            fs::create_dir(stream)?;
         }
+        Ok(())
     }
 
-    fn flush_all(&mut self) {
+    fn flush_all(&mut self) -> Result<(), WriterErr> {
         for (stream_id, file) in self.open_data_files.iter_mut() {
             let file_path = InMemoryWriter::derive_file_path(&self.root, *stream_id, file);
             file.write(file_path.clone());
             // TODO: remove unwrap
-            self.indexer
-                .borrow_mut()
-                .insert_new_file(
-                    *stream_id,
-                    &file_path,
-                    file.header.min_timestamp,
-                    Some(file.header.max_timestamp),
-                )
-                .unwrap()
+            self.indexer.borrow_mut().insert_new_file(
+                *stream_id,
+                &file_path,
+                file.header.min_timestamp,
+                Some(file.header.max_timestamp),
+            )?;
         }
         self.open_data_files.clear();
+
+        Ok(())
     }
 }
 
 impl Drop for InMemoryWriter {
     fn drop(&mut self) {
-        self.flush_all();
+        let _ = self.flush_all();
     }
 }
 
@@ -189,12 +194,14 @@ mod tests {
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
-        writer.create_stream(stream_id);
+        writer.create_stream(stream_id).unwrap();
 
         for i in 0..MAX_NUM_ENTRIES as u64 {
             let ts = i as Timestamp;
             let v = (i * 1000).into();
-            writer.write(stream_id, ts, v, ValueType::UInteger64);
+            writer
+                .write(stream_id, ts, v, ValueType::UInteger64)
+                .unwrap();
             timestamps.push(ts);
             values.push(v);
         }
@@ -226,14 +233,16 @@ mod tests {
         let mut values = [Vec::<Value>::new(), Vec::<Value>::new()];
 
         for stream_id in stream_ids {
-            writer.create_stream(stream_id);
+            writer.create_stream(stream_id).unwrap();
         }
 
         for i in 0..MAX_NUM_ENTRIES as u64 {
             for (j, stream_id) in stream_ids.iter().enumerate() {
                 let ts = i as Timestamp;
                 let v = (i * 1000).into();
-                writer.write(*stream_id, ts, v, ValueType::UInteger64);
+                writer
+                    .write(*stream_id, ts, v, ValueType::UInteger64)
+                    .unwrap();
                 timestamps[j].push(ts);
                 values[j].push(v);
             }
@@ -294,7 +303,7 @@ mod tests {
             writer.batch_write(stream_id, &entries, ValueType::UInteger64);
         }
 
-        writer.create_stream(stream_id);
+        writer.create_stream(stream_id).unwrap();
 
         for _ in 0..2 {
             create_and_write_batch(

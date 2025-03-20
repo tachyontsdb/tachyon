@@ -1,6 +1,7 @@
 use super::super::file::PartiallyPersistentDataFile;
 use super::super::MAX_NUM_ENTRIES;
 use super::Writer;
+use crate::error::WriterErr;
 use crate::query::indexer::Indexer;
 use crate::{StreamId, Timestamp, Value, ValueType, Version, FILE_EXTENSION};
 use std::cell::RefCell;
@@ -29,12 +30,17 @@ impl PersistentWriter {
         ts: Timestamp,
         v: Value,
         value_type: ValueType,
-    ) -> PartiallyPersistentDataFile {
+    ) -> Result<PartiallyPersistentDataFile, WriterErr> {
         let open_file = self
             .indexer
             .borrow()
-            .get_open_files_for_stream_id(stream_id)
-            .unwrap();
+            .get_open_files_for_stream_id(stream_id)?;
+
+        assert!(
+            open_file.len() <= 1,
+            "Invalid state! Multiple open files for the stream {}.",
+            stream_id
+        );
 
         if open_file.len() == 1 {
             let file_path = &open_file[0];
@@ -46,11 +52,21 @@ impl PersistentWriter {
             )
             .partial_init(ts, v)
         } else {
+            let max_ts_opt = self.indexer.borrow_mut().get_max_timestamp(stream_id)?;
+
+            if let Some(max_ts) = max_ts_opt {
+                if ts < max_ts {
+                    return Err(WriterErr::OutOfOrderErr {
+                        ts,
+                        prev_ts: max_ts,
+                    });
+                }
+            }
+
             let file_path = PersistentWriter::derive_file_path(&self.root, stream_id, ts);
             self.indexer
                 .borrow_mut()
-                .insert_new_file(stream_id, &file_path, ts, None)
-                .unwrap();
+                .insert_new_file(stream_id, &file_path, ts, None)?;
 
             PartiallyPersistentDataFile::new(
                 self.version,
@@ -73,53 +89,57 @@ impl Writer for PersistentWriter {
         }
     }
 
-    fn write(&mut self, stream_id: Uuid, ts: Timestamp, v: Value, value_type: ValueType) {
+    fn write(
+        &mut self,
+        stream_id: Uuid,
+        ts: Timestamp,
+        v: Value,
+        value_type: ValueType,
+    ) -> Result<(), WriterErr> {
         if let Some(file) = self.open_data_files.get_mut(&stream_id) {
             // Use the existing file if available
-            file.write(ts, v).unwrap();
+            file.write(ts, v)?; // will return err if out of order
             if file.num_entries() >= MAX_NUM_ENTRIES {
-                file.flush().unwrap();
-                self.indexer
-                    .borrow_mut()
-                    .insert_or_replace_file(
-                        stream_id,
-                        &file.path,
-                        file.header.borrow().min_timestamp,
-                        file.header.borrow().max_timestamp,
-                    )
-                    .unwrap();
-                self.open_data_files.remove_entry(&stream_id);
-            }
-        } else {
-            let file: PartiallyPersistentDataFile =
-                self.create_or_open_file(stream_id, ts, v, value_type);
-            self.open_data_files.insert(stream_id, file);
-        }
-    }
-
-    fn flush_all(&mut self) {
-        for (stream_id, file) in self.open_data_files.iter_mut() {
-            file.flush().unwrap();
-            // TODO: we can have files that aren't the max number of entries
-            // We need to decompress the partial file and then do some logic to complete any unfinished chunk at the end of the file
-            self.indexer
-                .borrow_mut()
-                .insert_or_replace_file(
-                    *stream_id,
+                file.flush()?;
+                self.indexer.borrow_mut().insert_or_replace_file(
+                    stream_id,
                     &file.path,
                     file.header.borrow().min_timestamp,
                     file.header.borrow().max_timestamp,
-                )
-                .unwrap();
+                )?;
+                self.open_data_files.remove_entry(&stream_id);
+            }
+            Ok(())
+        } else {
+            let file: PartiallyPersistentDataFile =
+                self.create_or_open_file(stream_id, ts, v, value_type)?;
+            self.open_data_files.insert(stream_id, file);
+            Ok(())
         }
-        self.open_data_files.clear();
     }
 
-    fn create_stream(&self, stream_id: Uuid) {
+    fn flush_all(&mut self) -> Result<(), WriterErr> {
+        for (stream_id, file) in self.open_data_files.iter_mut() {
+            file.flush()?;
+            // TODO: we can have files that aren't the max number of entries
+            // We need to decompress the partial file and then do some logic to complete any unfinished chunk at the end of the file
+            self.indexer.borrow_mut().insert_or_replace_file(
+                *stream_id,
+                &file.path,
+                file.header.borrow().min_timestamp,
+                file.header.borrow().max_timestamp,
+            )?;
+        }
+        self.open_data_files.clear();
+        Ok(())
+    }
+
+    fn create_stream(&self, stream_id: Uuid) -> Result<(), WriterErr> {
         let stream = self.root.join(stream_id.to_string());
         if !stream.exists() {
-            fs::create_dir(stream).unwrap();
+            fs::create_dir(stream)?;
         }
+        Ok(())
     }
 }
 
@@ -182,12 +202,14 @@ mod tests {
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
-        writer.create_stream(stream_id);
+        writer.create_stream(stream_id).unwrap();
 
         for i in 0..MAX_NUM_ENTRIES as u64 {
             let ts = i as Timestamp;
             let v = (i * 1000).into();
-            writer.write(stream_id, ts, v, ValueType::UInteger64);
+            writer
+                .write(stream_id, ts, v, ValueType::UInteger64)
+                .unwrap();
             timestamps.push(ts);
             values.push(v);
         }
@@ -221,12 +243,14 @@ mod tests {
 
         {
             let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
-            writer.create_stream(stream_id);
+            writer.create_stream(stream_id).unwrap();
 
             for i in 0..batch_size {
                 let ts = i as Timestamp;
                 let v = (i * 1000).into();
-                writer.write(stream_id, ts, v, ValueType::UInteger64);
+                writer
+                    .write(stream_id, ts, v, ValueType::UInteger64)
+                    .unwrap();
                 timestamps.push(ts);
                 values.push(v);
             }
@@ -247,12 +271,14 @@ mod tests {
 
         {
             let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
-            writer.create_stream(stream_id);
+            writer.create_stream(stream_id).unwrap();
 
             for i in batch_size..MAX_NUM_ENTRIES as u64 {
                 let ts = i as Timestamp;
                 let v = (i * 1000).into();
-                writer.write(stream_id, ts, v, ValueType::UInteger64);
+                writer
+                    .write(stream_id, ts, v, ValueType::UInteger64)
+                    .unwrap();
                 timestamps.push(ts);
                 values.push(v);
             }
@@ -285,14 +311,16 @@ mod tests {
         let mut values = [Vec::<Value>::new(), Vec::<Value>::new()];
 
         for stream_id in stream_ids {
-            writer.create_stream(stream_id);
+            writer.create_stream(stream_id).unwrap();
         }
 
         for i in 0..MAX_NUM_ENTRIES as u64 {
             for (j, stream_id) in stream_ids.iter().enumerate() {
                 let ts = i as Timestamp;
                 let v = (i * 1000).into();
-                writer.write(*stream_id, ts, v, ValueType::UInteger64);
+                writer
+                    .write(*stream_id, ts, v, ValueType::UInteger64)
+                    .unwrap();
                 timestamps[j].push(ts);
                 values[j].push(v);
             }
@@ -350,11 +378,13 @@ mod tests {
                 timestamps_per_file[*count / MAX_NUM_ENTRIES].push(timestamp);
                 values_per_file[*count / MAX_NUM_ENTRIES].push(value);
                 *count += 1;
-                writer.write(stream_id, timestamp, value, ValueType::UInteger64);
+                writer
+                    .write(stream_id, timestamp, value, ValueType::UInteger64)
+                    .unwrap();
             }
         }
 
-        writer.create_stream(stream_id);
+        writer.create_stream(stream_id).unwrap();
 
         for _ in 0..2 {
             create_and_write_batch(
@@ -378,6 +408,129 @@ mod tests {
             for j in 0..values_per_file[i].len() {
                 assert!(files[i].values[j].eq_same(ValueType::UInteger64, &values_per_file[i][j]));
             }
+        }
+    }
+
+    #[test]
+    fn test_write_single_complete_file_persistent_out_of_order() {
+        set_up_dirs!(dirs, "db");
+        let stream_id = Uuid::new_v4();
+
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
+        indexer.borrow_mut().create_store().unwrap();
+
+        let mut writer = PersistentWriter::new(dirs[0].clone(), indexer, Version(0));
+        let mut timestamps = Vec::<Timestamp>::new();
+        let mut values = Vec::<Value>::new();
+
+        writer.create_stream(stream_id).unwrap();
+
+        for i in 0..100_u64 {
+            let ts = i as Timestamp;
+            let v = (i * 1000).into();
+            writer
+                .write(stream_id, ts, v, ValueType::UInteger64)
+                .unwrap();
+            timestamps.push(ts);
+            values.push(v);
+        }
+
+        let ts = 50 as Timestamp;
+        let v = 50_u64;
+
+        let result = writer.write(stream_id, ts, v.into(), ValueType::UInteger64);
+
+        assert!(result.is_err(), "Expected an error, but got {:?}", result);
+    }
+
+    #[test]
+    fn test_write_two_complete_files_persistent_out_of_order() {
+        set_up_dirs!(dirs, "db");
+        let stream_id = Uuid::new_v4();
+
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
+        indexer.borrow_mut().create_store().unwrap();
+
+        let mut writer = PersistentWriter::new(dirs[0].clone(), indexer, Version(0));
+
+        writer.create_stream(stream_id).unwrap();
+
+        let mut base = 0;
+        for i in 0..MAX_NUM_ENTRIES as u64 {
+            let ts = base;
+            let v = (i * 1000).into();
+            base = i;
+            writer
+                .write(stream_id, ts, v, ValueType::UInteger64)
+                .unwrap();
+        } // the file should be persisted here
+
+        for i in 1..100_u64 {
+            let ts = base + i;
+            let v = (i * 1000).into();
+            writer
+                .write(stream_id, ts, v, ValueType::UInteger64)
+                .unwrap();
+        }
+
+        let ts = 50 as Timestamp;
+        let v = 50_u64;
+
+        let result = writer.write(stream_id, ts, v.into(), ValueType::UInteger64);
+
+        assert!(result.is_err(), "Expected an error, but got {:?}", result);
+    }
+
+    #[test]
+    fn test_write_single_complete_file_persistent_in_steps_out_of_order() {
+        set_up_dirs!(dirs, "db");
+        let stream_id = Uuid::new_v4();
+
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
+        indexer.borrow_mut().create_store().unwrap();
+
+        let mut timestamps = Vec::<Timestamp>::new();
+        let mut values = Vec::<Value>::new();
+
+        let batch_size: u64 = 12801; // a multiple 128 + 1 to match the compression engine.
+
+        {
+            let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
+            writer.create_stream(stream_id).unwrap();
+
+            for i in 0..batch_size {
+                let ts = i as Timestamp;
+                let v = (i * 1000).into();
+                writer
+                    .write(stream_id, ts, v, ValueType::UInteger64)
+                    .unwrap();
+                timestamps.push(ts);
+                values.push(v);
+            }
+        } // writer drops
+
+        let files = get_files(&dirs[0].join(stream_id.to_string()));
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].timestamps, timestamps);
+        assert_eq!(files[0].values.len(), values.len());
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..values.len() {
+            assert!(files[0].values[i].eq_same(ValueType::UInteger64, &values[i]));
+        }
+        for (i, timestamp) in timestamps.iter().enumerate() {
+            assert!(files[0].timestamps[i] == *timestamp);
+        }
+
+        {
+            let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
+
+            let ts = 50 as Timestamp;
+            let v = 50_u64;
+
+            let result = writer.write(stream_id, ts, v.into(), ValueType::UInteger64);
+
+            assert!(result.is_err(), "Expected an error, but got {:?}", result);
         }
     }
 }

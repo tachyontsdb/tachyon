@@ -450,7 +450,7 @@ impl Connection {
                     stream: stream.as_ref().to_string(),
                 })
             })?;
-        self.writer.borrow_mut().create_stream(stream_id);
+        self.writer.borrow_mut().create_stream(stream_id)?;
 
         Ok(())
     }
@@ -518,7 +518,11 @@ pub struct Inserter {
 
 macro_rules! create_inserter_insert {
     ($function_name: ident, $type: ty, $value_type: expr, $value_field: ident) => {
-        pub fn $function_name(&mut self, timestamp: crate::Timestamp, value: $type) {
+        pub fn $function_name(
+            &mut self,
+            timestamp: crate::Timestamp,
+            value: $type,
+        ) -> Result<(), crate::error::TachyonErr> {
             if self.value_type != $value_type {
                 panic!("Invalid value type on insert!");
             }
@@ -528,7 +532,9 @@ macro_rules! create_inserter_insert {
                 crate::Value {
                     $value_field: value,
                 },
-            );
+            )?;
+
+            Ok(())
         }
     };
 }
@@ -538,18 +544,20 @@ impl Inserter {
         self.value_type
     }
 
-    fn insert(&mut self, timestamp: Timestamp, value: Value) {
+    fn insert(&mut self, timestamp: Timestamp, value: Value) -> Result<(), TachyonErr> {
         self.writer
             .borrow_mut()
-            .write(self.stream_id, timestamp, value, self.value_type);
+            .write(self.stream_id, timestamp, value, self.value_type)?;
+        Ok(())
     }
 
     create_inserter_insert!(insert_integer64, i64, ValueType::Integer64, integer64);
     create_inserter_insert!(insert_uinteger64, u64, ValueType::UInteger64, uinteger64);
     create_inserter_insert!(insert_float64, f64, ValueType::Float64, float64);
 
-    pub fn flush(&mut self) {
-        self.writer.borrow_mut().flush_all();
+    pub fn flush(&mut self) -> Result<(), TachyonErr> {
+        self.writer.borrow_mut().flush_all()?;
+        Ok(())
     }
 }
 
@@ -622,10 +630,10 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
+            inserter.insert(t, v.into()).unwrap();
         }
 
-        inserter.flush();
+        inserter.flush().unwrap();
 
         // Prepare test query
         let query = r#"http_requests_total{service = "web"}"#;
@@ -666,10 +674,12 @@ mod tests {
         for i in 0..100000u64 {
             timestamps.push(i);
             values.push(i.into());
-            inserter.insert(timestamps[i as usize], values[i as usize]);
+            inserter
+                .insert(timestamps[i as usize], values[i as usize])
+                .unwrap();
         }
 
-        inserter.flush();
+        inserter.flush().unwrap();
 
         // Prepare test query
         let query = r#"http_requests_total{service = "web"}"#;
@@ -736,10 +746,10 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps, values) {
-            inserter1.insert(t, v.into());
+            inserter1.insert(t, v.into()).unwrap();
         }
 
-        inserter1.flush();
+        inserter1.flush().unwrap();
 
         let timestamps_2 = [12, 15, 30, 67];
         let values_2 = [1, 5, 40, 20];
@@ -751,10 +761,10 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps_2, values_2) {
-            inserter2.insert(t, v.into());
+            inserter2.insert(t, v.into()).unwrap();
         }
 
-        inserter2.flush();
+        inserter2.flush().unwrap();
 
         let mut stmt = conn
             .prepare_query(
@@ -810,24 +820,24 @@ mod tests {
         let values = [2i64, 4, 6, 8];
         let mut inserter = create_stream_helper(&mut conn, r#"ints"#, ValueType::Integer64);
         for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
+            inserter.insert(t, v.into()).unwrap();
         }
-        inserter.flush();
+        inserter.flush().unwrap();
 
         let timestamps = [10, 20, 30, 40];
         let values = [1u64, 2, 3, 4];
         let mut inserter = create_stream_helper(&mut conn, r#"uints"#, ValueType::UInteger64);
         for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
+            inserter.insert(t, v.into()).unwrap();
         }
-        inserter.flush();
+        inserter.flush().unwrap();
 
         let values = [4.1, 3.2, 2.3, 1.4];
         let mut inserter = create_stream_helper(&mut conn, r#"floats"#, ValueType::Float64);
         for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
+            inserter.insert(t, v.into()).unwrap();
         }
-        inserter.flush();
+        inserter.flush().unwrap();
 
         let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
 
@@ -1169,10 +1179,10 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values) {
-            inserter.insert(t, v.into());
+            inserter.insert(t, v.into()).unwrap();
         }
 
-        inserter.flush();
+        inserter.flush().unwrap();
 
         // Prepare test query
         let query = format!(r#"{}(http_requests_total{{service = "web"}})"#, operation);
@@ -1275,10 +1285,10 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values_a) {
-            inserter1.insert(t, v.into());
+            inserter1.insert(t, v.into()).unwrap();
         }
 
-        inserter1.flush();
+        inserter1.flush().unwrap();
 
         let mut inserter2 = create_stream_helper(
             &mut conn,
@@ -1287,10 +1297,10 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps, values_b) {
-            inserter2.insert(t, v.into());
+            inserter2.insert(t, v.into()).unwrap();
         }
 
-        inserter2.flush();
+        inserter2.flush().unwrap();
 
         // Prepare test query
         let query =
@@ -1348,10 +1358,10 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps_a, values_a) {
-            inserter1.insert(t, v.into());
+            inserter1.insert(t, v.into()).unwrap();
         }
 
-        inserter1.flush();
+        inserter1.flush().unwrap();
 
         let mut inserter2 = create_stream_helper(
             &mut conn,
@@ -1360,10 +1370,10 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps_b, values_b) {
-            inserter2.insert(t, v.into());
+            inserter2.insert(t, v.into()).unwrap();
         }
 
-        inserter2.flush();
+        inserter2.flush().unwrap();
 
         // Prepare test query
         let query =
@@ -1489,10 +1499,10 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values_a) {
-            inserter1.insert(t, v.into());
+            inserter1.insert(t, v.into()).unwrap();
         }
 
-        inserter1.flush();
+        inserter1.flush().unwrap();
 
         let mut inserter2 = create_stream_helper(
             &mut conn,
@@ -1501,10 +1511,10 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps, values_b) {
-            inserter2.insert(t, v.into());
+            inserter2.insert(t, v.into()).unwrap();
         }
 
-        inserter2.flush();
+        inserter2.flush().unwrap();
 
         // Prepare test query
         let query = r#"http_requests_total{service = "web"} + sum(http_requests_total{service = "mobile"})"#;
@@ -1546,10 +1556,10 @@ mod tests {
 
         // Insert dummy data
         for (t, v) in zip(timestamps, values_a) {
-            inserter1.insert(t, v.into());
+            inserter1.insert(t, v.into()).unwrap();
         }
 
-        inserter1.flush();
+        inserter1.flush().unwrap();
 
         let mut inserter2 = create_stream_helper(
             &mut conn,
@@ -1558,10 +1568,10 @@ mod tests {
         );
 
         for (t, v) in zip(timestamps, values_b) {
-            inserter2.insert(t, v.into());
+            inserter2.insert(t, v.into()).unwrap();
         }
 
-        inserter2.flush();
+        inserter2.flush().unwrap();
 
         // Prepare test query
         let query = r#"sum(http_requests_total{service = "web"}) / sum(http_requests_total{service = "mobile"})"#;
@@ -1594,9 +1604,9 @@ mod tests {
         ) -> Inserter {
             let mut inserter = create_stream_helper(conn, stream, Self::VALUE_TYPE);
             for (t, v) in zip(timestamps, values) {
-                inserter.insert(t, v.into());
+                inserter.insert(t, v.into()).unwrap();
             }
-            inserter.flush();
+            inserter.flush().unwrap();
 
             inserter
         }

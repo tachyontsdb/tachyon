@@ -125,7 +125,7 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
         self.result.len()
     }
 
-    fn new_from_partial(_writer: T, _data_file: crate::tachyon_benchmarks::TimeDataFile) -> Self
+    fn new_from_partial(_writer: T, _data_file: crate::storage::file::TimeDataFile) -> Self
     where
         Self: Sized,
     {

@@ -1,6 +1,6 @@
 use crate::Timestamp;
 use promql_parser::label::Matchers;
-use std::{error::Error, path::PathBuf, time::SystemTimeError};
+use std::{error::Error, io, path::PathBuf, time::SystemTimeError};
 use thiserror::Error;
 
 pub fn print_error(err: &impl Error) {
@@ -15,6 +15,8 @@ pub enum TachyonErr {
     ConnectionErr(#[from] ConnectionErr),
     #[error(transparent)]
     QueryErr(#[from] QueryErr),
+    #[error(transparent)]
+    WriterErr(#[from] WriterErr),
 }
 
 #[derive(Error, Debug)]
@@ -52,4 +54,18 @@ pub enum ConnectionErr {
     StreamCreationErr { stream: String },
     #[error("Failed to get all streams.")]
     GetStreamsErr,
+}
+
+#[derive(Error, Debug)]
+pub enum WriterErr {
+    #[error("Compressor not initialized.")]
+    CompressorNotInitialized,
+    #[error(
+        "Write out of order. Tried to insert at {ts} when last entry is at timestamp {prev_ts}."
+    )]
+    OutOfOrderErr { ts: Timestamp, prev_ts: Timestamp },
+    #[error(transparent)]
+    IndexerErr(#[from] IndexerErr),
+    #[error(transparent)]
+    IOErr(#[from] io::Error),
 }

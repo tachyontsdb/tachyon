@@ -2,6 +2,7 @@ use super::compression::int::{IntCompressor, IntDecompressor};
 use super::compression::CompressionEngine;
 use super::page_cache::{FileId, PageCache, SeqPageRead};
 use super::{FileReaderUtils, MAX_NUM_ENTRIES};
+use crate::error::WriterErr;
 use crate::storage::compression::DecompressionEngine;
 use crate::storage::page_cache::page_cache_sequential_read;
 use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version};
@@ -530,23 +531,30 @@ impl PartiallyPersistentDataFile {
         }
     }
 
-    pub fn lazy_init(mut self, ts: Timestamp, v: Value) -> Self {
+    pub fn lazy_init(mut self, ts: Timestamp, v: Value) -> Result<Self, WriterErr> {
         self.update_header(ts, v);
         let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
         self.compressor = Option::Some(IntCompressor::new(writer, &self.header.borrow().clone()));
 
-        self
+        Ok(self)
     }
 
-    pub fn partial_init(mut self, ts: Timestamp, v: Value) -> Self {
+    pub fn partial_init(mut self, ts: Timestamp, v: Value) -> Result<Self, WriterErr> {
         let data_file = TimeDataFile::read_data_file(self.path.clone());
         self.header = Rc::new(RefCell::new(data_file.header.clone()));
+
+        if ts < self.header.borrow().max_timestamp {
+            return Err(WriterErr::OutOfOrderErr {
+                ts,
+                prev_ts: self.header.borrow().max_timestamp,
+            });
+        }
 
         let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
         self.compressor = Option::Some(IntCompressor::new_from_partial(writer, data_file));
 
-        self.write(ts, v).unwrap();
-        self
+        self.write(ts, v)?;
+        Ok(self)
     }
 
     fn update_header(&mut self, timestamp: Timestamp, value: Value) {
@@ -572,7 +580,14 @@ impl PartiallyPersistentDataFile {
         header.min_value = header.min_value.min_same(header.value_type, &value);
     }
 
-    pub fn write(&mut self, ts: Timestamp, v: Value) -> Result<(), String> {
+    pub fn write(&mut self, ts: Timestamp, v: Value) -> Result<(), WriterErr> {
+        if ts < self.header.borrow().max_timestamp {
+            return Err(WriterErr::OutOfOrderErr {
+                ts,
+                prev_ts: self.header.borrow().max_timestamp,
+            });
+        }
+
         self.update_header(ts, v);
 
         match self.compressor {
@@ -580,17 +595,17 @@ impl PartiallyPersistentDataFile {
                 compressor.consume(ts, v.get_uinteger64());
                 Ok(())
             }
-            None => Err("Compressor not initialized".to_string()),
+            None => Err(WriterErr::CompressorNotInitialized),
         }
     }
 
-    pub fn flush(&mut self) -> Result<(), String> {
+    pub fn flush(&mut self) -> Result<(), WriterErr> {
         match self.compressor {
             Some(ref mut compressor) => {
                 compressor.flush_all();
                 Ok(())
             }
-            None => Err("Compressor not initialized".to_string()),
+            None => Err(WriterErr::CompressorNotInitialized),
         }
     }
 
