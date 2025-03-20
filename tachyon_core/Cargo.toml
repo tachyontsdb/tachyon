@@ -18,6 +18,10 @@ name = "query"
 harness = false
 
 [[bench]]
+name = "insert"
+harness = false
+
+[[bench]]
 name = "read"
 harness = false
 
