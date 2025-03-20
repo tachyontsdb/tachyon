@@ -21,13 +21,8 @@ pub struct PersistentWriter {
 impl PersistentWriter {
     fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, ts: Timestamp) -> PathBuf {
         let uuid = Uuid::new_v4();
-        root.as_ref().join(format!(
-            "{}/{}-{}.{}",
-            stream_id,
-            ts,
-            uuid,
-            FILE_EXTENSION
-        ))
+        root.as_ref()
+            .join(format!("{}/{}-{}.{}", stream_id, ts, uuid, FILE_EXTENSION))
     }
 
     fn create_or_open_file(
@@ -77,13 +72,13 @@ impl PersistentWriter {
                 value_type,
                 file_path.clone(),
             )
-            .lazy_init(ts, v);
+            .lazy_init(ts, v)?;
 
             self.indexer
                 .borrow_mut()
                 .insert_new_file(stream_id, &file_path, ts, None)?;
 
-            file
+            Ok(file)
         }
     }
 }
