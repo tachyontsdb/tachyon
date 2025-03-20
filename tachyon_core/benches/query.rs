@@ -76,7 +76,7 @@ fn vector_selector_benchmark(c: &mut Criterion) {
             .unwrap();
     }
 
-    inserter.flush();
+    inserter.flush().unwrap();
 
     for query in queries {
         c.bench_function(&format!("tachyon: query benchmark for: {}", query), |b| {

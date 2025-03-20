@@ -12,7 +12,7 @@ fn get_error_code(err: &TachyonErr) -> u8 {
         TachyonErr::MiscErr { .. } => FIRST_ERROR_CODE,
         TachyonErr::ConnectionErr(_) => 2,
         TachyonErr::QueryErr(_) => 3,
-        TachyonErr::InserterErr(_) => LAST_ERROR_CODE,
+        TachyonErr::WriterErr(_) => LAST_ERROR_CODE,
     }
 }
 
@@ -141,53 +141,92 @@ pub unsafe extern "C" fn tachyon_inserter_value_type(inserter: *const Inserter) 
 }
 
 /// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
+/// On error (not code 0), this returns an error in the `out` parameter.
+/// The caller is responsible for freeing the returned pointer in `out`.
+/// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_inserter_insert_integer64(
     inserter: *mut Inserter,
     timestamp: Timestamp,
     value: i64,
+    out: *mut *mut c_void,
 ) -> u8 {
     let result = (*inserter).insert_integer64(timestamp, value);
 
     match result {
         Ok(_) => 0u8,
-        Err(tachyon_err) => get_error_code(&tachyon_err),
+        Err(tachyon_err) => {
+            let return_value = get_error_code(&tachyon_err);
+            *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+            return_value
+        }
     }
 }
 
 /// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
+/// On error (not code 0), this returns an error in the `out` parameter.
+/// The caller is responsible for freeing the returned pointer in `out`.
+/// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_inserter_insert_uinteger64(
     inserter: *mut Inserter,
     timestamp: Timestamp,
     value: u64,
+    out: *mut *mut c_void,
 ) -> u8 {
     let result = (*inserter).insert_uinteger64(timestamp, value);
 
     match result {
         Ok(_) => 0u8,
-        Err(tachyon_err) => get_error_code(&tachyon_err),
+        Err(tachyon_err) => {
+            let return_value = get_error_code(&tachyon_err);
+            *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+            return_value
+        }
     }
 }
 
 /// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
+/// On error (not code 0), this returns an error in the `out` parameter.
+/// The caller is responsible for freeing the returned pointer in `out`.
+/// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_inserter_insert_float64(
     inserter: *mut Inserter,
     timestamp: Timestamp,
     value: f64,
+    out: *mut *mut c_void,
 ) -> u8 {
     let result = (*inserter).insert_float64(timestamp, value);
 
     match result {
         Ok(_) => 0u8,
-        Err(tachyon_err) => get_error_code(&tachyon_err),
+        Err(tachyon_err) => {
+            let return_value = get_error_code(&tachyon_err);
+            *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+            return_value
+        }
     }
 }
 
+// SAFETY: On error (not code 0), this returns an error in the `out` parameter.
+/// The caller is responsible for freeing the returned pointer in `out`.
+/// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_inserter_flush(inserter: *mut Inserter) {
-    (*inserter).flush();
+pub unsafe extern "C" fn tachyon_inserter_flush(
+    inserter: *mut Inserter,
+    out: *mut *mut c_void,
+) -> u8 {
+    let result = (*inserter).flush();
+
+    match result {
+        Ok(_) => 0u8,
+        Err(tachyon_err) => {
+            let return_value = get_error_code(&tachyon_err);
+            *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+            return_value
+        }
+    }
 }
 
 /// SAFETY: On success (code 0), this returns a `Query *` in the `out` parameter. Otherwise, it returns an error.

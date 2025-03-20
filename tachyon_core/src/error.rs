@@ -1,6 +1,6 @@
 use crate::Timestamp;
 use promql_parser::label::Matchers;
-use std::{error::Error, path::PathBuf, time::SystemTimeError};
+use std::{error::Error, io, path::PathBuf, time::SystemTimeError};
 use thiserror::Error;
 
 pub fn print_error(err: &impl Error) {
@@ -16,7 +16,7 @@ pub enum TachyonErr {
     #[error(transparent)]
     QueryErr(#[from] QueryErr),
     #[error(transparent)]
-    InserterErr(#[from] WriterErr),
+    WriterErr(#[from] WriterErr),
 }
 
 #[derive(Error, Debug)]
@@ -64,4 +64,8 @@ pub enum WriterErr {
         "Write out of order. Tried to insert at {ts} when last entry is at timestamp {prev_ts}."
     )]
     OutOfOrderErr { ts: Timestamp, prev_ts: Timestamp },
+    #[error(transparent)]
+    IndexerErr(#[from] IndexerErr),
+    #[error(transparent)]
+    IOErr(#[from] io::Error),
 }

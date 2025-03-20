@@ -18,6 +18,6 @@ pub trait Writer {
         v: Value,
         value_type: ValueType,
     ) -> Result<(), WriterErr>;
-    fn flush_all(&mut self);
-    fn create_stream(&self, stream_id: Uuid);
+    fn flush_all(&mut self) -> Result<(), WriterErr>;
+    fn create_stream(&self, stream_id: Uuid) -> Result<(), WriterErr>;
 }

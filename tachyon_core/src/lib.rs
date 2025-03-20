@@ -450,7 +450,7 @@ impl Connection {
                     stream: stream.as_ref().to_string(),
                 })
             })?;
-        self.writer.borrow_mut().create_stream(stream_id);
+        self.writer.borrow_mut().create_stream(stream_id)?;
 
         Ok(())
     }
@@ -555,8 +555,9 @@ impl Inserter {
     create_inserter_insert!(insert_uinteger64, u64, ValueType::UInteger64, uinteger64);
     create_inserter_insert!(insert_float64, f64, ValueType::Float64, float64);
 
-    pub fn flush(&mut self) {
-        self.writer.borrow_mut().flush_all();
+    pub fn flush(&mut self) -> Result<(), TachyonErr> {
+        self.writer.borrow_mut().flush_all()?;
+        Ok(())
     }
 }
 
@@ -632,7 +633,7 @@ mod tests {
             inserter.insert(t, v.into()).unwrap();
         }
 
-        inserter.flush();
+        inserter.flush().unwrap();
 
         // Prepare test query
         let query = r#"http_requests_total{service = "web"}"#;
@@ -678,7 +679,7 @@ mod tests {
                 .unwrap();
         }
 
-        inserter.flush();
+        inserter.flush().unwrap();
 
         // Prepare test query
         let query = r#"http_requests_total{service = "web"}"#;
@@ -748,7 +749,7 @@ mod tests {
             inserter1.insert(t, v.into()).unwrap();
         }
 
-        inserter1.flush();
+        inserter1.flush().unwrap();
 
         let timestamps_2 = [12, 15, 30, 67];
         let values_2 = [1, 5, 40, 20];
@@ -763,7 +764,7 @@ mod tests {
             inserter2.insert(t, v.into()).unwrap();
         }
 
-        inserter2.flush();
+        inserter2.flush().unwrap();
 
         let mut stmt = conn
             .prepare_query(
@@ -821,7 +822,7 @@ mod tests {
         for (t, v) in zip(timestamps, values) {
             inserter.insert(t, v.into()).unwrap();
         }
-        inserter.flush();
+        inserter.flush().unwrap();
 
         let timestamps = [10, 20, 30, 40];
         let values = [1u64, 2, 3, 4];
@@ -829,14 +830,14 @@ mod tests {
         for (t, v) in zip(timestamps, values) {
             inserter.insert(t, v.into()).unwrap();
         }
-        inserter.flush();
+        inserter.flush().unwrap();
 
         let values = [4.1, 3.2, 2.3, 1.4];
         let mut inserter = create_stream_helper(&mut conn, r#"floats"#, ValueType::Float64);
         for (t, v) in zip(timestamps, values) {
             inserter.insert(t, v.into()).unwrap();
         }
-        inserter.flush();
+        inserter.flush().unwrap();
 
         let mut stmt = conn.prepare_query(query, Some(0), Some(100)).unwrap();
 
@@ -1181,7 +1182,7 @@ mod tests {
             inserter.insert(t, v.into()).unwrap();
         }
 
-        inserter.flush();
+        inserter.flush().unwrap();
 
         // Prepare test query
         let query = format!(r#"{}(http_requests_total{{service = "web"}})"#, operation);
@@ -1287,7 +1288,7 @@ mod tests {
             inserter1.insert(t, v.into()).unwrap();
         }
 
-        inserter1.flush();
+        inserter1.flush().unwrap();
 
         let mut inserter2 = create_stream_helper(
             &mut conn,
@@ -1299,7 +1300,7 @@ mod tests {
             inserter2.insert(t, v.into()).unwrap();
         }
 
-        inserter2.flush();
+        inserter2.flush().unwrap();
 
         // Prepare test query
         let query =
@@ -1360,7 +1361,7 @@ mod tests {
             inserter1.insert(t, v.into()).unwrap();
         }
 
-        inserter1.flush();
+        inserter1.flush().unwrap();
 
         let mut inserter2 = create_stream_helper(
             &mut conn,
@@ -1372,7 +1373,7 @@ mod tests {
             inserter2.insert(t, v.into()).unwrap();
         }
 
-        inserter2.flush();
+        inserter2.flush().unwrap();
 
         // Prepare test query
         let query =
@@ -1501,7 +1502,7 @@ mod tests {
             inserter1.insert(t, v.into()).unwrap();
         }
 
-        inserter1.flush();
+        inserter1.flush().unwrap();
 
         let mut inserter2 = create_stream_helper(
             &mut conn,
@@ -1513,7 +1514,7 @@ mod tests {
             inserter2.insert(t, v.into()).unwrap();
         }
 
-        inserter2.flush();
+        inserter2.flush().unwrap();
 
         // Prepare test query
         let query = r#"http_requests_total{service = "web"} + sum(http_requests_total{service = "mobile"})"#;
@@ -1558,7 +1559,7 @@ mod tests {
             inserter1.insert(t, v.into()).unwrap();
         }
 
-        inserter1.flush();
+        inserter1.flush().unwrap();
 
         let mut inserter2 = create_stream_helper(
             &mut conn,
@@ -1570,7 +1571,7 @@ mod tests {
             inserter2.insert(t, v.into()).unwrap();
         }
 
-        inserter2.flush();
+        inserter2.flush().unwrap();
 
         // Prepare test query
         let query = r#"sum(http_requests_total{service = "web"}) / sum(http_requests_total{service = "mobile"})"#;
@@ -1605,7 +1606,7 @@ mod tests {
             for (t, v) in zip(timestamps, values) {
                 inserter.insert(t, v.into()).unwrap();
             }
-            inserter.flush();
+            inserter.flush().unwrap();
 
             inserter
         }

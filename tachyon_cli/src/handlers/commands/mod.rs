@@ -92,7 +92,7 @@ pub fn handle_command(
                     }
                 }
             }
-            inserter.flush();
+            inserter.flush()?;
             println!(
                 "Successfully wrote {} entries to {:#?}",
                 vectors.len(),

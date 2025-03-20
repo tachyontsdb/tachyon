@@ -34,8 +34,13 @@ impl PersistentWriter {
         let open_file = self
             .indexer
             .borrow()
-            .get_open_files_for_stream_id(stream_id)
-            .unwrap();
+            .get_open_files_for_stream_id(stream_id)?;
+
+        assert!(
+            open_file.len() <= 1,
+            "Invalid state! Multiple open files for the stream {}.",
+            stream_id
+        );
 
         if open_file.len() == 1 {
             let file_path = &open_file[0];
@@ -47,11 +52,7 @@ impl PersistentWriter {
             )
             .partial_init(ts, v)
         } else {
-            let max_ts_opt = self
-                .indexer
-                .borrow_mut()
-                .get_max_timestamp(stream_id)
-                .unwrap();
+            let max_ts_opt = self.indexer.borrow_mut().get_max_timestamp(stream_id)?;
 
             if let Some(max_ts) = max_ts_opt {
                 if ts < max_ts {
@@ -65,8 +66,7 @@ impl PersistentWriter {
             let file_path = PersistentWriter::derive_file_path(&self.root, stream_id, ts);
             self.indexer
                 .borrow_mut()
-                .insert_new_file(stream_id, &file_path, ts, None)
-                .unwrap();
+                .insert_new_file(stream_id, &file_path, ts, None)?;
 
             PartiallyPersistentDataFile::new(
                 self.version,
@@ -100,16 +100,13 @@ impl Writer for PersistentWriter {
             // Use the existing file if available
             file.write(ts, v)?; // will return err if out of order
             if file.num_entries() >= MAX_NUM_ENTRIES {
-                file.flush().unwrap();
-                self.indexer
-                    .borrow_mut()
-                    .insert_or_replace_file(
-                        stream_id,
-                        &file.path,
-                        file.header.borrow().min_timestamp,
-                        file.header.borrow().max_timestamp,
-                    )
-                    .unwrap();
+                file.flush()?;
+                self.indexer.borrow_mut().insert_or_replace_file(
+                    stream_id,
+                    &file.path,
+                    file.header.borrow().min_timestamp,
+                    file.header.borrow().max_timestamp,
+                )?;
                 self.open_data_files.remove_entry(&stream_id);
             }
             Ok(())
@@ -121,29 +118,28 @@ impl Writer for PersistentWriter {
         }
     }
 
-    fn flush_all(&mut self) {
+    fn flush_all(&mut self) -> Result<(), WriterErr> {
         for (stream_id, file) in self.open_data_files.iter_mut() {
-            file.flush().unwrap();
+            file.flush()?;
             // TODO: we can have files that aren't the max number of entries
             // We need to decompress the partial file and then do some logic to complete any unfinished chunk at the end of the file
-            self.indexer
-                .borrow_mut()
-                .insert_or_replace_file(
-                    *stream_id,
-                    &file.path,
-                    file.header.borrow().min_timestamp,
-                    file.header.borrow().max_timestamp,
-                )
-                .unwrap();
+            self.indexer.borrow_mut().insert_or_replace_file(
+                *stream_id,
+                &file.path,
+                file.header.borrow().min_timestamp,
+                file.header.borrow().max_timestamp,
+            )?;
         }
         self.open_data_files.clear();
+        Ok(())
     }
 
-    fn create_stream(&self, stream_id: Uuid) {
+    fn create_stream(&self, stream_id: Uuid) -> Result<(), WriterErr> {
         let stream = self.root.join(stream_id.to_string());
         if !stream.exists() {
-            fs::create_dir(stream).unwrap();
+            fs::create_dir(stream)?;
         }
+        Ok(())
     }
 }
 
@@ -206,7 +202,7 @@ mod tests {
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
-        writer.create_stream(stream_id);
+        writer.create_stream(stream_id).unwrap();
 
         for i in 0..MAX_NUM_ENTRIES as u64 {
             let ts = i as Timestamp;
@@ -247,7 +243,7 @@ mod tests {
 
         {
             let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
-            writer.create_stream(stream_id);
+            writer.create_stream(stream_id).unwrap();
 
             for i in 0..batch_size {
                 let ts = i as Timestamp;
@@ -275,7 +271,7 @@ mod tests {
 
         {
             let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
-            writer.create_stream(stream_id);
+            writer.create_stream(stream_id).unwrap();
 
             for i in batch_size..MAX_NUM_ENTRIES as u64 {
                 let ts = i as Timestamp;
@@ -315,7 +311,7 @@ mod tests {
         let mut values = [Vec::<Value>::new(), Vec::<Value>::new()];
 
         for stream_id in stream_ids {
-            writer.create_stream(stream_id);
+            writer.create_stream(stream_id).unwrap();
         }
 
         for i in 0..MAX_NUM_ENTRIES as u64 {
@@ -388,7 +384,7 @@ mod tests {
             }
         }
 
-        writer.create_stream(stream_id);
+        writer.create_stream(stream_id).unwrap();
 
         for _ in 0..2 {
             create_and_write_batch(
@@ -427,7 +423,7 @@ mod tests {
         let mut timestamps = Vec::<Timestamp>::new();
         let mut values = Vec::<Value>::new();
 
-        writer.create_stream(stream_id);
+        writer.create_stream(stream_id).unwrap();
 
         for i in 0..100_u64 {
             let ts = i as Timestamp;
@@ -457,7 +453,7 @@ mod tests {
 
         let mut writer = PersistentWriter::new(dirs[0].clone(), indexer, Version(0));
 
-        writer.create_stream(stream_id);
+        writer.create_stream(stream_id).unwrap();
 
         let mut base = 0;
         for i in 0..MAX_NUM_ENTRIES as u64 {
@@ -500,7 +496,7 @@ mod tests {
 
         {
             let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
-            writer.create_stream(stream_id);
+            writer.create_stream(stream_id).unwrap();
 
             for i in 0..batch_size {
                 let ts = i as Timestamp;

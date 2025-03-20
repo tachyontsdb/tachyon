@@ -553,7 +553,7 @@ impl PartiallyPersistentDataFile {
         let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
         self.compressor = Option::Some(IntCompressor::new_from_partial(writer, data_file));
 
-        self.write(ts, v).unwrap();
+        self.write(ts, v)?;
         Ok(self)
     }
 
@@ -599,13 +599,13 @@ impl PartiallyPersistentDataFile {
         }
     }
 
-    pub fn flush(&mut self) -> Result<(), String> {
+    pub fn flush(&mut self) -> Result<(), WriterErr> {
         match self.compressor {
             Some(ref mut compressor) => {
                 compressor.flush_all();
                 Ok(())
             }
-            None => Err("Compressor not initialized".to_string()),
+            None => Err(WriterErr::CompressorNotInitialized),
         }
     }
 
