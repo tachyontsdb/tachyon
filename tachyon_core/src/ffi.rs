@@ -209,7 +209,7 @@ pub unsafe extern "C" fn tachyon_inserter_insert_float64(
     }
 }
 
-// SAFETY: On error (not code 0), this returns an error in the `out` parameter.
+/// SAFETY: On error (not code 0), this returns an error in the `out` parameter.
 /// The caller is responsible for freeing the returned pointer in `out`.
 /// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
