@@ -27,7 +27,7 @@ use std::io::{Read, Write};
 use crate::{
     storage::{
         compression::{int::IntCompressionUtils, CompressionEngine, DecompressionEngine},
-        file::Header,
+        file::{Header, TimeDataFile},
         FileReaderUtils,
     },
     utils::static_assert,
@@ -125,7 +125,7 @@ impl<T: Write> CompressionEngine<T> for CompressionEngineV1<T> {
         self.result.len()
     }
 
-    fn new_from_partial(_writer: T, _data_file: crate::storage::file::TimeDataFile) -> Self
+    fn new_from_partial(_writer: T, _data_file: TimeDataFile) -> Self
     where
         Self: Sized,
     {

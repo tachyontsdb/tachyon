@@ -68,7 +68,9 @@ impl VectorSelectNode {
 
 impl ExecutorNode for VectorSelectNode {
     fn value_type(&self) -> ValueType {
-        self.cursor.value_type()
+        // will only default to UInteger64 if this node iterates over 0 files
+        // TODO: could potentially query indexer to get the value type in this case
+        self.cursor.value_type().unwrap_or(ValueType::UInteger64)
     }
 
     fn return_type(&self) -> ReturnType {
@@ -76,7 +78,9 @@ impl ExecutorNode for VectorSelectNode {
     }
 
     fn next_vector(&mut self, _: &mut Connection) -> Option<Vector> {
-        if self.cursor.is_done() {
+        if let Some(vector) = self.cursor.next() {
+            Some(vector)
+        } else {
             self.stream_idx += 1;
             if self.stream_idx >= self.stream_ids.len() {
                 return None;
@@ -98,9 +102,7 @@ impl ExecutorNode for VectorSelectNode {
                 self.hint,
             )
             .unwrap();
+            self.cursor.next()
         }
-        let res = self.cursor.fetch();
-        self.cursor.next();
-        Some(res)
     }
 }

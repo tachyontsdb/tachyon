@@ -730,6 +730,13 @@ mod tests {
     }
 
     #[test]
+    fn test_e2e_vector_no_files() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+        vector_test_helper(root_dir, 0, 5, 0, 0);
+    }
+
+    #[test]
     fn test_e2e_multiple_streams() {
         set_up_dirs!(dirs, "db");
 
