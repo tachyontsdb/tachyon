@@ -145,7 +145,7 @@ fn main() -> Result<()> {
         .expect("Unable to create output file");
 
     // Capture a set number of frames (here 60 frames, adjust as needed).
-    for frame_index in 0..120 {
+    for frame_index in 0..60 {
         println!("Waiting for frame {}", frame_index);
         let mut req = rx
             .recv_timeout(Duration::from_secs(2))
@@ -211,6 +211,10 @@ fn main() -> Result<()> {
                 .unwrap(),
             current_brightness,
         );
+
+        if frame_index == 15 {
+            panic!("Breakpoint");
+        }
 
         // Write the valid frame data to the output file.
         file.write_all(&frame_data[..bytes_used])
