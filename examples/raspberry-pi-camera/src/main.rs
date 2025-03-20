@@ -212,10 +212,6 @@ fn main() -> Result<()> {
             current_brightness,
         );
 
-        if frame_index == 15 {
-            panic!("Breakpoint");
-        }
-
         // Write the valid frame data to the output file.
         file.write_all(&frame_data[..bytes_used])
             .expect("Failed to write frame data to file");
