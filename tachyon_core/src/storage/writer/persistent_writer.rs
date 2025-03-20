@@ -68,13 +68,20 @@ impl PersistentWriter {
                 .borrow_mut()
                 .insert_new_file(stream_id, &file_path, ts, None)?;
 
-            PartiallyPersistentDataFile::new(
+            let file = PartiallyPersistentDataFile::new(
                 self.version,
                 StreamId(stream_id.as_u128()),
                 value_type,
                 file_path.clone(),
             )
-            .lazy_init(ts, v)
+            .lazy_init(ts, v);
+
+            self.indexer
+                .borrow_mut()
+                .insert_new_file(stream_id, &file_path, ts, None)
+                .unwrap();
+
+            file
         }
     }
 }
