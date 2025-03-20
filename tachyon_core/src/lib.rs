@@ -829,23 +829,22 @@ mod tests {
         let mut conn = Connection::new(root_dir).unwrap();
 
         // Insert dummy values
-        let timestamps = [10, 20, 30, 40];
-        let values = [2i64, 4, 6, 8];
+        let timestamps = [0, 10, 20, 30, 40];
+        let values = [10i64, 2, 4, 6, 8];
         let mut inserter = create_stream_helper(&mut conn, r#"ints"#, ValueType::Integer64);
         for (t, v) in zip(timestamps, values) {
             inserter.insert(t, v.into()).unwrap();
         }
         inserter.flush().unwrap();
 
-        let timestamps = [10, 20, 30, 40];
-        let values = [1u64, 2, 3, 4];
+        let values = [5u64, 1, 2, 3, 4];
         let mut inserter = create_stream_helper(&mut conn, r#"uints"#, ValueType::UInteger64);
         for (t, v) in zip(timestamps, values) {
             inserter.insert(t, v.into()).unwrap();
         }
         inserter.flush().unwrap();
 
-        let values = [4.1, 3.2, 2.3, 1.4];
+        let values = [5.0, 4.1, 3.2, 2.3, 1.4];
         let mut inserter = create_stream_helper(&mut conn, r#"floats"#, ValueType::Float64);
         for (t, v) in zip(timestamps, values) {
             inserter.insert(t, v.into()).unwrap();
@@ -897,7 +896,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"ints + floats"#,
-            &[6.1, 7.2, 8.3, 9.4].map(|x| x.into()),
+            &[15.0, 6.1, 7.2, 8.3, 9.4].map(|x| x.into()),
             None,
         );
     }
@@ -908,7 +907,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"ints - uints"#,
-            &[1i64, 2, 3, 4].map(|x| x.into()),
+            &[5i64, 1, 2, 3, 4].map(|x| x.into()),
             None,
         );
     }
@@ -919,7 +918,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"ints * floats"#,
-            &[8.2, 12.8, 13.8, 11.2].map(|x| x.into()),
+            &[50.0, 8.2, 12.8, 13.8, 11.2].map(|x| x.into()),
             None,
         );
     }
@@ -930,7 +929,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"ints / uints"#,
-            &[2.0, 2.0, 2.0, 2.0].map(|x| x.into()),
+            &[2.0, 2.0, 2.0, 2.0, 2.0].map(|x| x.into()),
             None,
         );
     }
@@ -941,7 +940,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"ints % floats"#,
-            &[2.0, 0.8, 1.4, 1.0].map(|x| x.into()),
+            &[0.0, 2.0, 0.8, 1.4, 1.0].map(|x| x.into()),
             None,
         );
     }
@@ -952,7 +951,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"ints + 2"#,
-            &[4.0, 6.0, 8.0, 10.0].map(|x| x.into()),
+            &[12.0, 4.0, 6.0, 8.0, 10.0].map(|x| x.into()),
             None,
         );
     }
@@ -963,7 +962,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"uints - 2.5"#,
-            &[-1.5, -0.5, 0.5, 1.5].map(|x| x.into()),
+            &[2.5, -1.5, -0.5, 0.5, 1.5].map(|x| x.into()),
             None,
         );
     }
@@ -974,7 +973,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"floats * 11"#,
-            &[45.1, 35.2, 25.3, 15.4].map(|x| x.into()),
+            &[55.0, 45.1, 35.2, 25.3, 15.4].map(|x| x.into()),
             None,
         );
     }
@@ -985,7 +984,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"ints / -4"#,
-            &[-0.5, -1.0, -1.5, -2.0].map(|x| x.into()),
+            &[-2.5, -0.5, -1.0, -1.5, -2.0].map(|x| x.into()),
             None,
         );
     }
@@ -996,7 +995,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"uints % 2"#,
-            &[1.0, 0.0, 1.0, 0.0].map(|x| x.into()),
+            &[1.0, 1.0, 0.0, 1.0, 0.0].map(|x| x.into()),
             None,
         );
     }
@@ -1007,7 +1006,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"(ints % 4) == 2"#,
-            &[2.0, 2.0].map(|x| x.into()),
+            &[2.0, 2.0, 2.0].map(|x| x.into()),
             None,
         );
     }
@@ -1018,7 +1017,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"uints != 2"#,
-            &[1i64, 3, 4].map(|x| x.into()),
+            &[5i64, 1, 3, 4].map(|x| x.into()),
             None,
         );
     }
@@ -1029,7 +1028,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"floats > 2.3"#,
-            &[4.1, 3.2].map(|x| x.into()),
+            &[5.0, 4.1, 3.2].map(|x| x.into()),
             None,
         );
     }
@@ -1051,7 +1050,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"floats >= 2.3"#,
-            &[4.1, 3.2, 2.3].map(|x| x.into()),
+            &[5.0, 4.1, 3.2, 2.3].map(|x| x.into()),
             None,
         );
     }
@@ -1084,7 +1083,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"sum(ints)"#,
-            &[20i64].map(|x| x.into()),
+            &[30i64].map(|x| x.into()),
             None,
         );
     }
@@ -1101,7 +1100,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"sum(ints)[15ms]"#,
-            &[2i64, 10, 8].map(|x| x.into()),
+            &[12i64, 10, 8].map(|x| x.into()),
             Some(&[15u64, 30, 40]),
         );
     }
@@ -1112,7 +1111,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"count(uints)"#,
-            &[4i64].map(|x| x.into()),
+            &[5i64].map(|x| x.into()),
             None,
         );
     }
@@ -1129,7 +1128,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"count(ints)[15ms]"#,
-            &[1i64, 2, 1].map(|x| x.into()),
+            &[2i64, 2, 1].map(|x| x.into()),
             Some(&[15u64, 30, 40]),
         );
     }
@@ -1140,7 +1139,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"avg(floats)"#,
-            &[2.75].map(|x| x.into()),
+            &[3.2].map(|x| x.into()),
             None,
         );
     }
@@ -1157,7 +1156,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"avg(ints)[15ms]"#,
-            &[2.0, 5.0, 8.0].map(|x| x.into()),
+            &[6.0, 5.0, 8.0].map(|x| x.into()),
             Some(&[15u64, 30, 40]),
         );
     }
@@ -1196,7 +1195,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"max(uints)"#,
-            &[4u64].map(|x| x.into()),
+            &[5u64].map(|x| x.into()),
             None,
         );
     }
@@ -1213,7 +1212,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"max(ints)[15ms]"#,
-            &[2i64, 6, 8].map(|x| x.into()),
+            &[10i64, 6, 8].map(|x| x.into()),
             Some(&[15u64, 30, 40]),
         );
     }
@@ -1224,8 +1223,8 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"min(ints)[4ms]"#,
-            &[2i64, 4, 6, 8].map(|x| x.into()),
-            Some(&[12u64, 20, 32, 40]),
+            &[10i64, 2, 4, 6, 8].map(|x| x.into()),
+            Some(&[4u64, 12, 20, 32, 40]),
         );
     }
 
@@ -1235,8 +1234,19 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"sum(count(ints)[4ms])"#,
-            &[4i64].map(|x| x.into()),
+            &[5i64].map(|x| x.into()),
             None,
+        );
+    }
+
+    #[test]
+    fn test_e2e_aggregate_aggregate_over_subperiod() {
+        set_up_dirs!(dirs, "db");
+        execution_test_helper(
+            dirs[0].clone(),
+            r#"sum(count(ints)[4ms])[16ms]"#,
+            &[2i64, 2, 1].map(|x| x.into()),
+            Some(&[16u64, 32, 40]),
         );
     }
 
@@ -1246,7 +1256,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"topk(2, ints)"#,
-            &[8i64, 6].map(|x| x.into()),
+            &[10i64, 8].map(|x| x.into()),
             None,
         );
     }
@@ -1257,7 +1267,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"topk(100, uints)"#,
-            &[4u64, 3, 2, 1].map(|x| x.into()),
+            &[5u64, 4, 3, 2, 1].map(|x| x.into()),
             None,
         );
     }
@@ -1285,7 +1295,7 @@ mod tests {
         execution_test_helper(
             dirs[0].clone(),
             r#"bottomk(100, uints)"#,
-            &[1u64, 2, 3, 4].map(|x| x.into()),
+            &[1u64, 2, 3, 4, 5].map(|x| x.into()),
             None,
         );
     }

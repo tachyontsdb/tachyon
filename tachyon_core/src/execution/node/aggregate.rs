@@ -19,6 +19,7 @@ struct AggregateChild {
     peeked_vector: Option<Vector>,
     /// End timestamp of aggregation (sub)period
     end: Timestamp,
+    /// Set to true when all vectors have been read
     done: bool,
 }
 
@@ -71,30 +72,42 @@ impl AggregateNode {
         )
     }
 
+    /// Wrapper around next_vector().
+    /// When the next vector is past the current subperiod, returns None; the next call will return that vector.
+    /// When there are no more vectors, returns None and sets child.done = true.
     fn next_child_vector(
         child: &mut AggregateChild,
         subperiod: Option<Duration>,
         conn: &mut Connection,
     ) -> Option<Vector> {
-        // Retrieve peeked vector; else, get next vector
-        let next_vector = if let Some(vector) = child.peeked_vector {
-            child.peeked_vector = None;
-            if let Some(subperiod) = subperiod {
+        // Aggregation by subperiod
+        if let Some(subperiod) = subperiod {
+            // Retrieve peeked vector; else, get next vector
+            let next_vector = if let Some(vector) = child.peeked_vector {
+                child.peeked_vector = None;
                 child.end += subperiod.as_millis() as u64;
-            }
-            Some(vector)
-        } else {
-            child.node.next_vector(conn)
-        };
-
-        if let Some(vector) = next_vector {
-            // Return None if next vector is past subperiod; next call will return it
-            if vector.timestamp > child.end {
-                child.peeked_vector = Some(vector); // Store peeked vector
-                None
-            } else {
                 Some(vector)
+            } else {
+                child.node.next_vector(conn)
+            };
+
+            if let Some(vector) = next_vector {
+                // Return None if next vector is past subperiod; next call will return it
+                if vector.timestamp > child.end {
+                    child.peeked_vector = Some(vector);
+                    // child.done = true is not set here as there will be more vectors in the next subperiod
+                    None
+                } else {
+                    Some(vector)
+                }
+            } else {
+                child.done = true;
+                None
             }
+
+            // Regular aggregation
+        } else if let Some(vector) = child.node.next_vector(conn) {
+            Some(vector)
         } else {
             child.done = true;
             None
@@ -134,7 +147,7 @@ impl AggregateNode {
             }
             Some(count)
         } else {
-            let mut count = 1u64;
+            let mut count = 1u64; // We have already read the first vector
             while AggregateNode::next_child_vector(child, subperiod, conn).is_some() {
                 count += 1;
             }
@@ -194,6 +207,7 @@ impl ExecutorNode for AggregateNode {
                 );
 
                 match (sum_opt, count_opt) {
+                    // sum and count will either both be Some or both be None
                     (Some(sum), Some(count)) => {
                         Some(sum.div(sum_value_type, &count, count_value_type))
                     }
