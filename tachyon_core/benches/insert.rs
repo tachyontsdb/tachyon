@@ -4,7 +4,7 @@ use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
 };
-use std::{fs, path::PathBuf, str::FromStr};
+use std::{fs, hint::black_box, path::PathBuf, str::FromStr};
 use tachyon_core::{Connection, ValueType};
 
 const STREAM: &str = r#"inserter_stream{service = "web"}"#;
@@ -25,14 +25,16 @@ fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
     (timestamps, values)
 }
 
-fn bench_insert(conn: &mut Connection, timestamps: &Vec<u64>, values: &Vec<u64>) {
-    let mut inserter = conn.prepare_insert(STREAM);
+fn bench_insert(conn: &mut Connection, timestamps: &[u64], values: &[u64]) {
+    let mut inserter = black_box(conn.prepare_insert(STREAM));
 
     for i in 0..timestamps.len() {
-        inserter.insert_uinteger64(timestamps[i], values[i]);
+        inserter
+            .insert_uinteger64(timestamps[i], values[i])
+            .unwrap();
     }
 
-    inserter.flush();
+    inserter.flush().unwrap();
 }
 
 fn insert_benchmark(c: &mut Criterion) {
@@ -48,14 +50,14 @@ fn insert_benchmark(c: &mut Criterion) {
             fs::remove_dir_all(root_dir.clone()).unwrap();
         })
     });
-
-    fs::remove_dir_all(root_dir.clone()).unwrap();
 }
 
 fn get_config() -> Criterion {
     let mut options = Options::default();
     options.flame_chart = true;
-    Criterion::default().with_profiler(PProfProfiler::new(10000, Output::Flamegraph(Some(options))))
+    Criterion::default()
+        .sample_size(20)
+        .with_profiler(PProfProfiler::new(10000, Output::Flamegraph(Some(options))))
 }
 
 criterion_group!(
