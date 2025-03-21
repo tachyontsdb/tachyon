@@ -445,6 +445,8 @@ impl TimeDataFile {
             values.push(value);
         }
 
+        // SAFETY: cursor.cursor is only None in the case of 0 files, which is not possible
+        //         here since we pass in a non-empty file_paths to Cursor::new
         Self {
             header: cursor.cursor.unwrap().header,
             timestamps,

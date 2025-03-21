@@ -68,9 +68,8 @@ impl VectorSelectNode {
 
 impl ExecutorNode for VectorSelectNode {
     fn value_type(&self) -> ValueType {
-        // will only default to UInteger64 if this node iterates over 0 files
-        // TODO: could potentially query indexer to get the value type in this case
-        self.cursor.value_type().unwrap_or(ValueType::UInteger64)
+        // will only default to Float64 if this node iterates over 0 files
+        self.cursor.value_type().unwrap_or(ValueType::Float64)
     }
 
     fn return_type(&self) -> ReturnType {
