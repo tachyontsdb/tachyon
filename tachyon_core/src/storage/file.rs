@@ -175,7 +175,7 @@ pub enum ScanHint {
     Max,
 }
 
-pub struct Cursor {
+struct CursorImpl {
     file_id: FileId,
     file_index: usize,
     header: Header,
@@ -195,7 +195,7 @@ pub struct Cursor {
     is_done: bool,
 }
 
-impl Cursor {
+impl CursorImpl {
     /// Precondition: file_paths\[0] contains at least one timestamp t such that start <= t
     pub fn new(
         file_paths: Vec<PathBuf>,
@@ -250,10 +250,7 @@ impl Cursor {
         }
 
         while cursor.current_timestamp < start {
-            if let Some(Vector { timestamp, value }) = cursor.next() {
-                cursor.current_timestamp = timestamp;
-                cursor.use_query_hint_for_value(value);
-            } else {
+            if cursor.next_vector().is_none() {
                 panic!("Unexpected end of file! File does not contain start timestamp!");
             }
         }
@@ -332,21 +329,16 @@ impl Cursor {
             return None;
         }
 
+        let to_return = Vector {
+            timestamp: self.current_timestamp,
+            value: self.value,
+        };
+
         if self.values_read == self.header.count as u64 {
             if self.load_next_file().is_none() {
                 self.is_done = true;
-                return None;
             }
-
-            // This should never be triggered
-            if self.current_timestamp > self.end {
-                panic!("Unexpected file change! Cursor timestamp is greater then end timestamp!");
-            }
-
-            return Some(Vector {
-                timestamp: self.current_timestamp,
-                value: self.value,
-            });
+            return Some(to_return);
         }
 
         let current = self.decomp_engine.next();
@@ -356,22 +348,10 @@ impl Cursor {
 
         if self.current_timestamp > self.end {
             self.is_done = true;
-            return None;
         }
         self.values_read += 1;
 
-        Some(Vector {
-            timestamp: self.current_timestamp,
-            value: self.value,
-        })
-    }
-
-    /// Precondition: Not valid after next returns none
-    pub fn fetch(&self) -> Vector {
-        Vector {
-            timestamp: self.current_timestamp,
-            value: self.value,
-        }
+        Some(to_return)
     }
 
     pub fn is_done(&self) -> bool {
@@ -383,11 +363,50 @@ impl Cursor {
     }
 }
 
+pub struct Cursor {
+    cursor: Option<CursorImpl>,
+}
+
+impl Cursor {
+    pub fn new(
+        file_paths: Vec<PathBuf>,
+        start: Timestamp,
+        end: Timestamp,
+        page_cache: Rc<RefCell<PageCache>>,
+        scan_hint: ScanHint,
+    ) -> Result<Self, io::Error> {
+        if file_paths.is_empty() {
+            Ok(Cursor { cursor: None })
+        } else {
+            let cursor = CursorImpl::new(file_paths, start, end, page_cache, scan_hint)?;
+            Ok(Cursor {
+                cursor: Some(cursor),
+            })
+        }
+    }
+
+    pub fn is_done(&self) -> bool {
+        if let Some(cursor) = &self.cursor {
+            cursor.is_done()
+        } else {
+            true
+        }
+    }
+
+    pub fn value_type(&self) -> Option<ValueType> {
+        self.cursor.as_ref().map(|c| c.value_type())
+    }
+}
+
 impl Iterator for Cursor {
     type Item = Vector;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_vector()
+        if let Some(cursor) = &mut self.cursor {
+            cursor.next_vector()
+        } else {
+            None
+        }
     }
 }
 
@@ -421,18 +440,15 @@ impl TimeDataFile {
         let mut timestamps = Vec::new();
         let mut values = Vec::new();
 
-        loop {
-            let Vector { timestamp, value } = cursor.fetch();
+        for Vector { timestamp, value } in cursor.by_ref() {
             timestamps.push(timestamp);
             values.push(value);
-
-            if cursor.next().is_none() {
-                break;
-            }
         }
 
+        // SAFETY: cursor.cursor is only None in the case of 0 files, which is not possible
+        //         here since we pass in a non-empty file_paths to Cursor::new
         Self {
-            header: cursor.header,
+            header: cursor.cursor.unwrap().header,
             timestamps,
             values,
         }
@@ -703,15 +719,9 @@ mod tests {
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
-        let mut i = 0;
-        loop {
-            let Vector { timestamp, value } = cursor.fetch();
+        for (i, Vector { timestamp, value }) in cursor.by_ref().enumerate() {
             assert_eq!(timestamp, model.timestamps[i]);
             assert!(value.eq_same(ValueType::UInteger64, &model.values[i]));
-            i += 1;
-            if cursor.next().is_none() {
-                break;
-            }
         }
     }
 
@@ -731,14 +741,10 @@ mod tests {
         )
         .unwrap();
 
-        loop {
-            let Vector { timestamp, value } = cursor.fetch();
+        for Vector { timestamp, value } in cursor.by_ref() {
             println!("{} {}", timestamp, value.get_uinteger64());
             assert_eq!(timestamp, 1);
             assert!(value.eq_same(ValueType::UInteger64, &2u64.into()));
-            if cursor.next().is_none() {
-                break;
-            }
         }
     }
 
@@ -776,16 +782,10 @@ mod tests {
         assert!(cursor.is_ok());
 
         let mut cursor = cursor.unwrap();
-        let mut i = 0;
 
-        loop {
-            let Vector { timestamp, value } = cursor.fetch();
+        for (i, Vector { timestamp, value }) in cursor.by_ref().enumerate() {
             assert_eq!(timestamp, timestamps[i]);
             assert!(value.eq_same(ValueType::UInteger64, &values[i]));
-            i += 1;
-            if cursor.next().is_none() {
-                break;
-            }
         }
     }
 
@@ -824,14 +824,10 @@ mod tests {
         let mut cursor = cursor.unwrap();
         let mut i = 5;
 
-        loop {
-            let Vector { timestamp, value } = cursor.fetch();
+        for Vector { timestamp, value } in cursor.by_ref() {
             assert_eq!(timestamp, timestamps[i]);
             assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
-            if cursor.next().is_none() {
-                break;
-            }
         }
         assert_eq!(i, 24);
     }
@@ -859,15 +855,9 @@ mod tests {
         )
         .unwrap();
 
-        let mut i = 0;
-        loop {
-            let Vector { timestamp, value } = cursor.fetch();
+        for (i, Vector { timestamp, value }) in cursor.by_ref().enumerate() {
             assert_eq!(timestamp, timestamps[i]);
             assert!(value.eq_same(ValueType::UInteger64, &values[i]));
-            i += 1;
-            if cursor.next().is_none() {
-                break;
-            }
         }
     }
 
@@ -894,14 +884,10 @@ mod tests {
         .unwrap();
 
         let mut i = 0;
-        loop {
-            let Vector { timestamp, value } = cursor.fetch();
+        for Vector { timestamp, value } in cursor.by_ref() {
             assert_eq!(timestamp, timestamps[i]);
             assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
-            if cursor.next().is_none() {
-                break;
-            }
         }
         assert_eq!(i, timestamps.len());
     }
@@ -941,14 +927,10 @@ mod tests {
         .unwrap();
 
         let mut i = 0;
-        loop {
-            let Vector { timestamp, value } = cursor.fetch();
+        for Vector { timestamp, value } in cursor.by_ref() {
             assert_eq!(timestamp, timestamps[i]);
             assert!(value.eq_same(ValueType::UInteger64, &values[i]));
             i += 1;
-            if cursor.next().is_none() {
-                break;
-            }
         }
         assert_eq!(i, timestamps.len());
     }
@@ -982,13 +964,9 @@ mod tests {
                 Cursor::new(file_paths.clone(), start, end, page_cache.clone(), hint).unwrap();
             let mut i = 0;
             let mut res: Value = 0u64.into();
-            loop {
-                let Vector { value, .. } = cursor.fetch();
+            for Vector { value, .. } in cursor.by_ref() {
                 res = res.add(ValueType::UInteger64, &value, ValueType::UInteger64);
                 i += 1;
-                if cursor.next().is_none() {
-                    break;
-                }
             }
 
             (res, i)
@@ -1036,13 +1014,9 @@ mod tests {
 
             let mut i = 0;
             let mut res: Value = u64::MAX.into();
-            loop {
-                let Vector { value, .. } = cursor.fetch();
+            for Vector { value, .. } in cursor.by_ref() {
                 res = res.min(ValueType::UInteger64, &value, ValueType::UInteger64);
                 i += 1;
-                if cursor.next().is_none() {
-                    break;
-                }
             }
 
             (res, i)
@@ -1058,5 +1032,18 @@ mod tests {
 
         let (res, _) = get_value(2, 9, ScanHint::Min);
         assert!(res.eq_same(ValueType::UInteger64, &3u64.into()));
+    }
+
+    #[test]
+    fn test_empty_files() {
+        let mut cursor = Cursor::new(
+            vec![],
+            0,
+            100,
+            Rc::new(RefCell::new(PageCache::new(10))),
+            ScanHint::None,
+        )
+        .unwrap();
+        assert!(cursor.next().is_none());
     }
 }

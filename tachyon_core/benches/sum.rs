@@ -4,7 +4,7 @@ use pprof::{
     flamegraph::Options,
 };
 use std::{cell::RefCell, hint::black_box, path::PathBuf, rc::Rc};
-use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Version};
+use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Vector, Version};
 
 const NUM_ITEMS: u64 = 10000000;
 
@@ -26,12 +26,8 @@ fn bench_sum_sequential_timestamps(
     );
 
     let mut res = 0;
-    loop {
-        let vector = black_box(cursor.fetch());
-        res += black_box(vector.value.get_uinteger64());
-        if black_box(cursor.next()).is_none() {
-            break;
-        }
+    for Vector { value, .. } in cursor.by_ref() {
+        res += black_box(value.get_uinteger64());
     }
     res
 }
@@ -55,12 +51,8 @@ fn bench_sum_sequential_timestamps_with_hint(
 
     let mut res = 0;
 
-    loop {
-        let vector = black_box(cursor.fetch());
-        res += black_box(vector.value.get_uinteger64());
-        if black_box(cursor.next()).is_none() {
-            break;
-        }
+    for Vector { value, .. } in cursor.by_ref() {
+        res += black_box(value.get_uinteger64());
     }
     res
 }
