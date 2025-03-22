@@ -8,12 +8,15 @@ use rusqlite::{params, Connection as SQLiteConnection};
 use std::{
     fmt::Debug,
     fs,
-    hint::black_box,
-    io,
     path::{Path, PathBuf},
-    u64,
 };
-use tachyon_core::{Connection as TachyonConnection, Timestamp, ValueType, Vector};
+use tachyon_core::{
+    error::TachyonErr, Connection as TachyonConnection, Timestamp, Value, ValueType, Vector,
+};
+
+#[cfg(feature = "tachyon_memory_profiling")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
 
 //----------------------------------------------------------------------
 // Generic Database Source Trait
@@ -25,19 +28,19 @@ pub trait DatabaseSource: Sized {
     type Error: Debug;
 
     /// Initialize a new database connection or instance
-    fn new(path: &Path) -> Result<Self, Self::Error>;
+    fn new(path: impl AsRef<Path>, value_type: ValueType) -> Result<Self, Self::Error>;
 
     /// Set up the database (create tables, streams, etc.)
     fn setup(&mut self) -> Result<(), Self::Error>;
 
     /// Insert data points (timestamp, value)
-    fn insert(&mut self, timestamp: Vec<u64>, value: Vec<u64>) -> Result<(), Self::Error>;
+    fn insert(&mut self, timestamps: &[Timestamp], values: &[Value]) -> Result<(), Self::Error>;
 
     /// Read data from the database
     fn read(&mut self, start: Timestamp, end: Timestamp) -> Result<u128, Self::Error>;
 
     /// Clean up resources (e.g., close connections, remove files)
-    fn cleanup(path: &Path) -> Result<(), Self::Error>;
+    fn cleanup(path: impl AsRef<Path>) -> Result<(), Self::Error>;
 
     /// Name of the database for display in benchmarks
     fn name() -> &'static str;
@@ -47,32 +50,40 @@ pub trait DatabaseSource: Sized {
 // Tachyon Database Adapter
 //----------------------------------------------------------------------
 
+const DEFAULT_STREAM_NAME: &str = r#"bench_stream"#;
+
 pub struct TachyonDB {
     conn: TachyonConnection,
+    value_type: ValueType,
     stream_name: String,
 }
 
 impl DatabaseSource for TachyonDB {
-    type Error = tachyon_core::error::TachyonErr;
+    type Error = TachyonErr;
 
-    fn new(path: &Path) -> Result<Self, Self::Error> {
-        let conn = TachyonConnection::new(path.to_path_buf())?;
+    fn new(path: impl AsRef<Path>, value_type: ValueType) -> Result<Self, Self::Error> {
+        let conn = TachyonConnection::new(path.as_ref())?;
         Ok(TachyonDB {
             conn,
-            stream_name: r#"bench_stream"#.to_string(),
+            value_type,
+            stream_name: DEFAULT_STREAM_NAME.to_string(),
         })
     }
 
     fn setup(&mut self) -> Result<(), Self::Error> {
         self.conn
-            .create_stream(&self.stream_name, ValueType::UInteger64)?;
+            .create_stream(&self.stream_name, self.value_type)?;
         Ok(())
     }
 
-    fn insert(&mut self, timestamp: Vec<u64>, value: Vec<u64>) -> Result<(), Self::Error> {
+    fn insert(&mut self, timestamps: &[Timestamp], values: &[Value]) -> Result<(), Self::Error> {
         let mut inserter = self.conn.prepare_insert(&self.stream_name);
-        for (ts, val) in timestamp.iter().zip(value.iter()) {
-            inserter.insert_uinteger64(*ts, *val)?;
+        for (ts, val) in timestamps.iter().zip(values.iter()) {
+            match self.value_type {
+                ValueType::Integer64 => inserter.insert_integer64(*ts, val.get_integer64())?,
+                ValueType::UInteger64 => inserter.insert_uinteger64(*ts, val.get_uinteger64())?,
+                ValueType::Float64 => inserter.insert_float64(*ts, val.get_float64())?,
+            }
         }
         inserter.flush()?;
         Ok(())
@@ -91,8 +102,8 @@ impl DatabaseSource for TachyonDB {
         Ok(sum)
     }
 
-    fn cleanup(path: &Path) -> Result<(), Self::Error> {
-        if path.exists() {
+    fn cleanup(path: impl AsRef<Path>) -> Result<(), Self::Error> {
+        if path.as_ref().exists() {
             fs::remove_dir_all(path)
                 .map_err(|e| tachyon_core::error::TachyonErr::MiscErr { inner: Box::new(e) })?;
         }
@@ -108,38 +119,59 @@ impl DatabaseSource for TachyonDB {
 // SQLite Database Adapter
 //----------------------------------------------------------------------
 
+const DEFAULT_SQLITE_FILE: &str = "benchmark.sqlite";
+
 pub struct SQLiteDB {
     conn: SQLiteConnection,
+    value_type: ValueType,
 }
 
 impl DatabaseSource for SQLiteDB {
     type Error = rusqlite::Error;
 
-    fn new(path: &Path) -> Result<Self, Self::Error> {
-        let db_path = path.join("benchmark.sqlite");
+    fn new(path: impl AsRef<Path>, value_type: ValueType) -> Result<Self, Self::Error> {
+        let db_path = path.as_ref().join(DEFAULT_SQLITE_FILE);
         let conn = SQLiteConnection::open(db_path)?;
-        Ok(SQLiteDB { conn })
+        Ok(SQLiteDB { conn, value_type })
     }
 
     fn setup(&mut self) -> Result<(), Self::Error> {
         self.conn.execute(
-            "CREATE TABLE IF NOT EXISTS timeseries (
+            &format!(
+                "CREATE TABLE IF NOT EXISTS timeseries (
                 timestamp INTEGER,
-                value INTEGER
+                value {}
             )",
+                match self.value_type {
+                    ValueType::Integer64 | ValueType::UInteger64 => "INTEGER",
+                    ValueType::Float64 => "REAL",
+                }
+            ),
             [],
         )?;
         Ok(())
     }
 
-    fn insert(&mut self, timestamp: Vec<u64>, value: Vec<u64>) -> Result<(), Self::Error> {
+    fn insert(&mut self, timestamps: &[Timestamp], values: &[Value]) -> Result<(), Self::Error> {
         let transaction = self.conn.transaction().unwrap();
         let mut insert_stmt = transaction
-            .prepare("INSERT INTO timeseries (timestamp, value) VALUES (?, ?)")
+            .prepare_cached("INSERT INTO timeseries (timestamp, value) VALUES (?, ?)")
             .unwrap();
 
-        for (t, v) in timestamp.iter().zip(value.iter()) {
-            insert_stmt.execute([&t, &v]).unwrap();
+        for (t, v) in timestamps.iter().zip(values.iter()) {
+            match self.value_type {
+                ValueType::Integer64 => {
+                    insert_stmt.execute(params![t, v.get_integer64(),]).unwrap();
+                }
+                ValueType::UInteger64 => {
+                    insert_stmt
+                        .execute(params![t, v.get_uinteger64(),])
+                        .unwrap();
+                }
+                ValueType::Float64 => {
+                    insert_stmt.execute(params![t, v.get_float64(),]).unwrap();
+                }
+            }
         }
         drop(insert_stmt);
         transaction.commit().unwrap();
@@ -162,8 +194,8 @@ impl DatabaseSource for SQLiteDB {
         Ok(sum)
     }
 
-    fn cleanup(path: &Path) -> Result<(), Self::Error> {
-        let db_path = path.join("benchmark.sqlite");
+    fn cleanup(path: impl AsRef<Path>) -> Result<(), Self::Error> {
+        let db_path = path.as_ref().join(DEFAULT_SQLITE_FILE);
         if db_path.exists() {
             fs::remove_file(&db_path).map_err(|e| {
                 rusqlite::Error::InvalidPath(format!("Failed to remove file: {}", e).into())
@@ -182,20 +214,29 @@ impl DatabaseSource for SQLiteDB {
 //----------------------------------------------------------------------
 
 /// Function to read timestamp-value pairs from a CSV file
-pub fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
-    println!("Reading from: {}", path);
-    let mut rdr = Reader::from_path(path).unwrap();
+pub fn read_from_csv(
+    path: impl AsRef<Path>,
+    value_type: ValueType,
+) -> (Vec<Timestamp>, Vec<Value>) {
+    println!("Reading from: {:?}", path.as_ref());
 
     let mut timestamps = Vec::new();
     let mut values = Vec::new();
+
+    let mut rdr = Reader::from_path(path.as_ref()).unwrap();
     for result in rdr.records() {
         let record = result.unwrap();
-        timestamps.push(record[0].parse::<u64>().unwrap());
-        values.push(record[1].parse::<u64>().unwrap());
+        timestamps.push(record[0].parse::<Timestamp>().unwrap());
+        match value_type {
+            ValueType::Integer64 => values.push(record[1].parse::<i64>().unwrap().into()),
+            ValueType::UInteger64 => values.push(record[1].parse::<u64>().unwrap().into()),
+            ValueType::Float64 => values.push(record[1].parse::<f64>().unwrap().into()),
+        }
     }
+
     println!(
-        "Done reading from: {}, read {} records\n",
-        path,
+        "Done reading from: {:?}, read {} records\n",
+        path.as_ref(),
         timestamps.len()
     );
 
@@ -204,54 +245,61 @@ pub fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
 
 /// Benchmark inserting data into a database
 pub fn bench_insert<D: DatabaseSource>(
-    db_path: &Path,
-    timestamps: &[u64],
-    values: &[u64],
+    db_path: impl AsRef<Path>,
+    value_type: ValueType,
+    timestamps: &[Timestamp],
+    values: &[Value],
 ) -> Result<(), D::Error> {
-    let mut db = black_box(D::new(db_path)?);
+    let mut db = D::new(db_path.as_ref(), value_type)?;
     db.setup()?;
-
-    black_box(db.insert(timestamps.to_vec(), values.to_vec())?);
-
+    db.insert(timestamps, values)?;
+    D::cleanup(db_path.as_ref()).unwrap();
     Ok(())
 }
 
 /// Benchmark reading data from a database
 pub fn bench_read<D: DatabaseSource>(
-    db_path: &Path,
-    start: u64,
-    end: u64,
+    db_path: impl AsRef<Path>,
+    value_type: ValueType,
+    start: Timestamp,
+    end: Timestamp,
 ) -> Result<u128, D::Error> {
-    let mut db = black_box(D::new(db_path)?);
-    let result = black_box(db.read(start, end)?);
+    let mut db = D::new(db_path, value_type)?;
+    let result = db.read(start, end)?;
     Ok(result)
 }
 
 /// Runner for insert benchmarks
-pub fn run_insert_benchmark<D: DatabaseSource>(c: &mut Criterion, db_path: &Path, csv_path: &str) {
-    fs::create_dir_all(db_path).unwrap();
-    let (timestamps, values) = read_from_csv(csv_path);
+pub fn run_insert_benchmark<D: DatabaseSource>(
+    c: &mut Criterion,
+    value_type: ValueType,
+    db_path: impl AsRef<Path>,
+    csv_path: impl AsRef<Path>,
+) {
+    fs::create_dir_all(db_path.as_ref()).unwrap();
+    let (timestamps, values) = read_from_csv(csv_path, value_type);
 
     c.bench_function(&format!("{}: insert benchmark", D::name()), |b| {
         b.iter(|| {
-            bench_insert::<D>(db_path, &timestamps, &values).unwrap();
-            D::cleanup(db_path).unwrap();
+            bench_insert::<D>(db_path.as_ref(), value_type, &timestamps, &values).unwrap();
         })
     });
 }
 
 /// Runner for read benchmarks
-pub fn run_read_benchmark<D: DatabaseSource>(c: &mut Criterion, db_path: &Path, csv_path: &str) {
-    fs::create_dir_all(db_path).unwrap();
-    let (timestamps, values) = read_from_csv(csv_path);
+pub fn run_read_benchmark<D: DatabaseSource>(
+    c: &mut Criterion,
+    value_type: ValueType,
+    db_path: impl AsRef<Path>,
+    csv_path: impl AsRef<Path>,
+) {
+    fs::create_dir_all(db_path.as_ref()).unwrap();
+    let (timestamps, values) = read_from_csv(csv_path, value_type);
 
-    // First, we need to insert the data
-    let mut db = D::new(db_path).unwrap();
+    let mut db = D::new(db_path.as_ref(), value_type).unwrap();
     db.setup().unwrap();
-    black_box(db.insert(timestamps.to_vec(), values.to_vec()).unwrap());
+    db.insert(&timestamps, &values).unwrap();
 
-    println!("Starting read benchmark");
-    // Now benchmark reading
     c.bench_function(
         &format!(
             "{}: read benchmark ({} entries)",
@@ -259,50 +307,56 @@ pub fn run_read_benchmark<D: DatabaseSource>(c: &mut Criterion, db_path: &Path, 
             timestamps.len()
         ),
         |b| {
-            b.iter(|| bench_read::<D>(db_path, timestamps[0], *timestamps.last().unwrap()).unwrap())
+            b.iter(|| {
+                bench_read::<D>(
+                    db_path.as_ref(),
+                    value_type,
+                    *timestamps.first().unwrap(),
+                    *timestamps.last().unwrap(),
+                )
+                .unwrap()
+            })
         },
     );
 
-    // Output recursive directory size
-    println!("{} DB size: {} bytes", D::name(), get_dir_size(db_path));
+    println!(
+        "{} DB size: {} bytes",
+        D::name(),
+        get_dir_size(db_path.as_ref())
+    );
 
-    // Clean up after benchmark
     D::cleanup(db_path).unwrap();
 }
 
 /// Calculate the total size of a directory recursively
-fn get_dir_size(path: &Path) -> u64 {
+fn get_dir_size(path: impl AsRef<Path>) -> u64 {
     let mut total_size = 0;
 
-    if path.is_file() {
+    if path.as_ref().is_file() {
         return fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     }
 
-    match fs::read_dir(path) {
-        Ok(entries) => {
-            for entry in entries.flatten() {
-                let entry_path = entry.path();
-                if entry_path.is_file() {
-                    total_size += fs::metadata(&entry_path).map(|m| m.len()).unwrap_or(0);
-                } else if entry_path.is_dir() {
-                    total_size += get_dir_size(&entry_path);
-                }
-            }
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            total_size += get_dir_size(&entry_path);
         }
-        Err(_) => {}
     }
 
     total_size
 }
 
+//----------------------------------------------------------------------
+// Benchmark Options
+//----------------------------------------------------------------------
+
 /// Helper function to get criterion configuration with profiling
-pub fn get_criterion_config() -> Criterion {
-    // let mut options = Options::default();
-    // options.flame_chart = true;
-    // Criterion::default()
-    //     .sample_size(20)
-    //     .with_profiler(PProfProfiler::new(10000, Output::Flamegraph(Some(options))))
+pub fn get_criterion_config<const SAMPLE_SIZE: usize>() -> Criterion {
+    let mut options = Options::default();
+    options.flame_chart = true;
     Criterion::default()
+        .sample_size(SAMPLE_SIZE)
+        .with_profiler(PProfProfiler::new(10000, Output::Flamegraph(Some(options))))
 }
 
 //----------------------------------------------------------------------
@@ -310,39 +364,51 @@ pub fn get_criterion_config() -> Criterion {
 //----------------------------------------------------------------------
 
 fn tachyon_insert_benchmark(c: &mut Criterion) {
-    let db_path = PathBuf::from("../tmp/tachyon_bench");
+    #[cfg(feature = "tachyon_memory_profiling")]
+    let _profiler = dhat::Profiler::builder().testing().build();
+
+    let db_path = PathBuf::from("../tmp/tachyon_insert_bench");
     let csv_path = "../data/voltage_dataset.csv";
-    run_insert_benchmark::<TachyonDB>(c, &db_path, csv_path);
+    run_insert_benchmark::<TachyonDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
 fn sqlite_insert_benchmark(c: &mut Criterion) {
-    let db_path = PathBuf::from("../tmp/sqlite_bench");
+    #[cfg(feature = "tachyon_memory_profiling")]
+    let _profiler = dhat::Profiler::builder().testing().build();
+
+    let db_path = PathBuf::from("../tmp/sqlite_insert_bench");
     let csv_path = "../data/voltage_dataset.csv";
-    run_insert_benchmark::<SQLiteDB>(c, &db_path, csv_path);
+    run_insert_benchmark::<SQLiteDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
 fn tachyon_read_benchmark(c: &mut Criterion) {
+    #[cfg(feature = "tachyon_memory_profiling")]
+    let _profiler = dhat::Profiler::builder().testing().build();
+
     let db_path = PathBuf::from("../tmp/tachyon_read_bench");
     let csv_path = "../data/voltage_dataset.csv";
-    run_read_benchmark::<TachyonDB>(c, &db_path, csv_path);
+    run_read_benchmark::<TachyonDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
 fn sqlite_read_benchmark(c: &mut Criterion) {
+    #[cfg(feature = "tachyon_memory_profiling")]
+    let _profiler = dhat::Profiler::builder().testing().build();
+
     let db_path = PathBuf::from("../tmp/sqlite_read_bench");
     let csv_path = "../data/voltage_dataset.csv";
-    run_read_benchmark::<SQLiteDB>(c, &db_path, csv_path);
+    run_read_benchmark::<SQLiteDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
 criterion_group!(
     name = insert_benches;
-    config = get_criterion_config();
+    config = get_criterion_config::<20>();
     targets = tachyon_insert_benchmark, sqlite_insert_benchmark
 );
 
 criterion_group!(
     name = read_benches;
-    config = get_criterion_config();
+    config = get_criterion_config::<100>();
     targets = tachyon_read_benchmark, sqlite_read_benchmark
 );
 
-criterion_main!(read_benches);
+criterion_main!(read_benches, insert_benches);
