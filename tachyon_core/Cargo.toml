@@ -41,6 +41,10 @@ harness = false
 name = "write"
 harness = false
 
+[[bench]]
+name = "db_benchmark_framework"
+harness = false
+
 [dependencies]
 promql-parser = { path = "../tachyondb-promql-parser" }
 rusqlite = { version = "0.32.1", features = ["serde_json", "bundled", "uuid"] }

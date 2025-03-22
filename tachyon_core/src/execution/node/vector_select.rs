@@ -46,12 +46,14 @@ impl VectorSelectNode {
         }
 
         let stream_id = stream_ids[0];
-        // TODO: get rid of unwrap
+
         let file_paths = conn
             .indexer
             .borrow()
             .get_required_files(stream_id, start, end)
-            .unwrap();
+            .map_err(|e| QueryErr::UnsupportedErr {
+                expr_type: e.to_string(),
+            })?;
 
         Ok(Self {
             stream_ids,

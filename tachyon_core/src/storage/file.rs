@@ -570,12 +570,12 @@ impl PartiallyPersistentDataFile {
         let data_file = TimeDataFile::read_data_file(self.path.clone());
         self.header = Rc::new(RefCell::new(data_file.header.clone()));
 
-        if ts < self.header.borrow().max_timestamp {
-            return Err(WriterErr::OutOfOrderErr {
-                ts,
-                prev_ts: self.header.borrow().max_timestamp,
-            });
-        }
+        // if ts < self.header.borrow().max_timestamp {
+        //     return Err(WriterErr::OutOfOrderErr {
+        //         ts,
+        //         prev_ts: self.header.borrow().max_timestamp,
+        //     });
+        // }
 
         let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
         self.compressor = Option::Some(IntCompressor::new_from_partial(writer, data_file));
@@ -608,12 +608,12 @@ impl PartiallyPersistentDataFile {
     }
 
     pub fn write(&mut self, ts: Timestamp, v: Value) -> Result<(), WriterErr> {
-        if ts < self.header.borrow().max_timestamp {
-            return Err(WriterErr::OutOfOrderErr {
-                ts,
-                prev_ts: self.header.borrow().max_timestamp,
-            });
-        }
+        // if ts < self.header.borrow().max_timestamp {
+        //     return Err(WriterErr::OutOfOrderErr {
+        //         ts,
+        //         prev_ts: self.header.borrow().max_timestamp,
+        //     });
+        // }
 
         self.update_header(ts, v);
 
