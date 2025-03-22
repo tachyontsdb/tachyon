@@ -53,16 +53,16 @@ impl PersistentWriter {
             )
             .partial_init(ts, v)
         } else {
-            // let max_ts_opt = self.indexer.borrow_mut().get_max_timestamp(stream_id)?;
+            let max_ts_opt = self.indexer.borrow_mut().get_max_timestamp(stream_id)?;
 
-            // if let Some(max_ts) = max_ts_opt {
-            //     if ts < max_ts {
-            //         return Err(WriterErr::OutOfOrderErr {
-            //             ts,
-            //             prev_ts: max_ts,
-            //         });
-            //     }
-            // }
+            if let Some(max_ts) = max_ts_opt {
+                if ts < max_ts {
+                    return Err(WriterErr::OutOfOrderErr {
+                        ts,
+                        prev_ts: max_ts,
+                    });
+                }
+            }
 
             let file_path = PersistentWriter::derive_file_path(&self.root, stream_id, ts);
 
