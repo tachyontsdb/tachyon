@@ -13,12 +13,12 @@ use promql_parser::parser::{
 #[derive(Debug)]
 pub struct QueryPlanner<'a> {
     ast: &'a Expr,
-    start: Option<Timestamp>,
-    end: Option<Timestamp>,
+    start: Timestamp,
+    end: Timestamp,
 }
 
 impl<'a> QueryPlanner<'a> {
-    pub fn new(ast: &'a Expr, start: Option<Timestamp>, end: Option<Timestamp>) -> Self {
+    pub fn new(ast: &'a Expr, start: Timestamp, end: Timestamp) -> Self {
         Self { ast, start, end }
     }
 
@@ -159,7 +159,7 @@ impl<'a> QueryPlanner<'a> {
         conn: &mut Connection,
         hint: ScanHint,
     ) -> Result<TNode, QueryErr> {
-        let start_opt = if expr.at.is_some() {
+        let start = if expr.at.is_some() {
             // SAFETY: expr.at is Some from above, unwrapping is safe
             let mut at_res = match expr.at.as_ref().unwrap() {
                 parser::AtModifier::Start => 0,
@@ -174,34 +174,22 @@ impl<'a> QueryPlanner<'a> {
                     parser::Offset::Neg(t) => at_res.saturating_sub(t.as_millis() as u64),
                 }
             }
-            Some(at_res)
+            at_res
         } else {
             self.start
         };
 
-        if let Some(start) = start_opt {
-            if let Some(end) = self.end {
-                if let Some(name) = &expr.name {
-                    Ok(TNode::VectorSelect(VectorSelectNode::new(
-                        conn,
-                        name.to_string(),
-                        expr.matchers.clone(),
-                        start,
-                        end,
-                        hint,
-                    )?))
-                } else {
-                    Err(QueryErr::QuerySyntaxErr)
-                }
-            } else {
-                Err(QueryErr::StartEndTimeErr {
-                    start_or_end: "end".to_string(),
-                })
-            }
+        if let Some(name) = &expr.name {
+            Ok(TNode::VectorSelect(VectorSelectNode::new(
+                conn,
+                name.to_string(),
+                expr.matchers.clone(),
+                start,
+                self.end,
+                hint,
+            )?))
         } else {
-            Err(QueryErr::StartEndTimeErr {
-                start_or_end: "start".to_string(),
-            })
+            Err(QueryErr::QuerySyntaxErr)
         }
     }
 

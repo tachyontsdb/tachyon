@@ -80,7 +80,7 @@ fn vector_selector_benchmark(c: &mut Criterion) {
 
     for query in queries {
         c.bench_function(&format!("tachyon: query benchmark for: {}", query), |b| {
-            b.iter(|| bench_query(query, Some(0), Some(1300000000), &mut conn))
+            b.iter(|| bench_query(query, Some(0), None, &mut conn))
         });
     }
 
