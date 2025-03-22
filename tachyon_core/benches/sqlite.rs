@@ -158,6 +158,6 @@ fn get_config() -> Criterion {
 criterion_group!(
     name = benches;
     config = get_config();
-    targets = criterion_benchmark,voltage_benchmark
+    targets = criterion_benchmarkvoltage_benchmark
 );
 criterion_main!(benches);
