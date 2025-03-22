@@ -85,6 +85,7 @@ impl AggregateNode {
             // Retrieve peeked vector; else, get next vector
             let next_vector = if let Some(vector) = child.peeked_vector {
                 child.peeked_vector = None;
+                // No need to check if this is past the query end as the planner ensures all child vectors obey start <= t <= end
                 child.end += subperiod.as_millis() as u64;
                 Some(vector)
             } else {
@@ -135,11 +136,13 @@ impl AggregateNode {
         subperiod: Option<Duration>,
         conn: &mut Connection,
     ) -> Option<Value> {
+        if child.done {
+            return None;
+        }
         let value_type = child.node.value_type();
-        let first_vector = AggregateNode::next_child_vector(child, subperiod, conn)?;
 
         if AggregateNode::using_scanhint(child, subperiod) {
-            let mut count = first_vector.value;
+            let mut count = Value::get_default(value_type);
             while let Some(Vector { value, .. }) =
                 AggregateNode::next_child_vector(child, subperiod, conn)
             {
@@ -147,7 +150,7 @@ impl AggregateNode {
             }
             Some(count)
         } else {
-            let mut count = 1u64; // We have already read the first vector
+            let mut count = 0u64;
             while AggregateNode::next_child_vector(child, subperiod, conn).is_some() {
                 count += 1;
             }
