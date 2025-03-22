@@ -1822,4 +1822,37 @@ mod tests {
             assert!(avgquery.next_scalar().is_none());
         }
     }
+
+    #[test]
+    fn test_multiple_writes_to_same_stream_recovers_after_panic() {
+        set_up_dirs!(dirs, "db");
+        let root_dir = dirs[0].clone();
+
+        let mid = 60;
+        let end = 200;
+
+        let result = std::panic::catch_unwind(|| {
+            let mut conn = Connection::new(&root_dir).unwrap();
+            let mut inserter =
+                create_stream_helper(&mut conn, r#"http_requests_total"#, ValueType::Float64);
+
+            for i in 0..mid {
+                inserter.insert_float64(i, i as f64).unwrap();
+            }
+
+            panic!("Intentional panic to prevent Drop from running for inserter");
+        });
+
+        assert!(result.is_err(), "Expected a panic but didn't get one");
+
+        {
+            let mut conn = Connection::new(&root_dir).unwrap();
+            let mut inserter = conn.prepare_insert(r#"http_requests_total"#);
+
+            for i in mid..end {
+                inserter.insert_float64(i, i as f64).unwrap();
+            }
+            inserter.flush().unwrap();
+        }
+    }
 }

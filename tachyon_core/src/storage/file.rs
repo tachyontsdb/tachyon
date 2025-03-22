@@ -144,6 +144,16 @@ impl Header {
         Ok(8)
     }
 
+    fn write_from_path(&self, path: &PathBuf) -> Result<usize, io::Error> {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(true) // may be the case that this file already exists due to previous panic!
+            .write(true)
+            .open(path)?;
+
+        self.write(&mut file)
+    }
+
     fn write(&self, file: &mut File) -> Result<usize, io::Error> {
         file.write_all(&MAGIC)?;
 
@@ -549,6 +559,7 @@ impl PartiallyPersistentDataFile {
 
     pub fn lazy_init(mut self, ts: Timestamp, v: Value) -> Result<Self, WriterErr> {
         self.update_header(ts, v);
+        self.header.borrow().write_from_path(&self.path)?;
         let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
         self.compressor = Option::Some(IntCompressor::new(writer, &self.header.borrow().clone()));
 
