@@ -836,31 +836,31 @@ mod tests {
             let mut inserter =
                 create_stream_helper(&mut conn, r#"test_stream"#, ValueType::Integer64);
             for (t, v) in zip(timestamps, values) {
-                inserter.insert(*t, (*v).into());
+                inserter.insert(*t, (*v).into()).unwrap();
             }
-            inserter.flush();
+            inserter.flush().unwrap();
         } else {
             let timestamps = [0, 10, 20, 30, 40];
             let values = [10i64, 2, 4, 6, 8];
             let mut inserter = create_stream_helper(&mut conn, r#"ints"#, ValueType::Integer64);
             for (t, v) in zip(timestamps, values) {
-                inserter.insert(t, v.into());
+                inserter.insert(t, v.into()).unwrap();
             }
-            inserter.flush();
+            inserter.flush().unwrap();
 
             let values = [5u64, 1, 2, 3, 4];
             let mut inserter = create_stream_helper(&mut conn, r#"uints"#, ValueType::UInteger64);
             for (t, v) in zip(timestamps, values) {
-                inserter.insert(t, v.into());
+                inserter.insert(t, v.into()).unwrap();
             }
-            inserter.flush();
+            inserter.flush().unwrap();
 
             let values = [5.0, 4.1, 3.2, 2.3, 1.4];
             let mut inserter = create_stream_helper(&mut conn, r#"floats"#, ValueType::Float64);
             for (t, v) in zip(timestamps, values) {
-                inserter.insert(t, v.into());
+                inserter.insert(t, v.into()).unwrap();
             }
-            inserter.flush();
+            inserter.flush().unwrap();
         }
 
         let [start, end] = range.unwrap_or([0u64, 40]);
@@ -1412,9 +1412,9 @@ mod tests {
         set_up_dirs!(dirs, "db");
         execution_test_helper(
             dirs[0].clone(),
-            None,
-            None,
-            r#"sum(ints < 0)[10ms]"#,
+            Some(&[]),
+            Some(&[]),
+            r#"sum(test_stream)[10ms]"#,
             None,
             &[],
             Some(&[]),
