@@ -42,21 +42,22 @@ impl InMemoryWriter {
             entries_written += file.write_batch_data_to_file_in_mem(&batch[entries_written..]);
 
             if file.num_entries() >= MAX_NUM_ENTRIES {
-                file.write(InMemoryWriter::derive_file_path(
-                    &(self.root),
-                    stream_id,
-                    file,
-                ));
+                let physical_path = self
+                    .root
+                    .join(InMemoryWriter::create_virtual_file_path(stream_id, file));
+                file.write(physical_path);
                 self.open_data_files.remove_entry(&stream_id);
             }
         }
     }
 
-    fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, file: &TimeDataFile) -> PathBuf {
-        root.as_ref().join(format!(
-            "{}/{}.{}",
+    fn create_virtual_file_path(stream_id: Uuid, file: &TimeDataFile) -> PathBuf {
+        let uuid = Uuid::new_v4();
+        PathBuf::from(format!(
+            "{}/{}-{}.{}",
             stream_id,
             file.get_file_name(),
+            uuid,
             FILE_EXTENSION
         ))
     }
@@ -90,12 +91,14 @@ impl Writer for InMemoryWriter {
 
         file.write_data_to_file_in_mem(ts, v);
         if file.num_entries() >= MAX_NUM_ENTRIES {
-            let file_path = InMemoryWriter::derive_file_path(&self.root, stream_id, file);
-            file.write(file_path.clone());
+            let virtual_path = InMemoryWriter::create_virtual_file_path(stream_id, file);
+            let physical_path = self.root.join(&virtual_path);
+
+            file.write(physical_path);
             // TODO: remove unwrap
             self.indexer.borrow_mut().insert_new_file(
                 stream_id,
-                &file_path,
+                &virtual_path,
                 file.header.min_timestamp,
                 Some(file.header.max_timestamp),
             )?;
@@ -114,7 +117,7 @@ impl Writer for InMemoryWriter {
 
     fn flush_all(&mut self) -> Result<(), WriterErr> {
         for (stream_id, file) in self.open_data_files.iter_mut() {
-            let file_path = InMemoryWriter::derive_file_path(&self.root, *stream_id, file);
+            let file_path = InMemoryWriter::create_virtual_file_path(*stream_id, file);
             file.write(file_path.clone());
             // TODO: remove unwrap
             self.indexer.borrow_mut().insert_new_file(
@@ -160,10 +163,15 @@ mod tests {
                 .into_string()
                 .unwrap();
 
-            let suffix_opt = path
-                .rsplit('/')
-                .next()
-                .and_then(|num_str| num_str.split('.').next().unwrap().parse::<u32>().ok());
+            let suffix_opt = path.rsplit('/').next().and_then(|num_str| {
+                num_str
+                    .split('.')
+                    .next()
+                    .and_then(|num_str| num_str.split('-').next())
+                    .unwrap()
+                    .parse::<u32>()
+                    .ok()
+            });
 
             suffix_opt.expect("Expected file suffix to be u32")
         }

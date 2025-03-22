@@ -50,7 +50,7 @@ impl VectorSelectNode {
         let file_paths = conn
             .indexer
             .borrow()
-            .get_required_files(stream_id, start, end)
+            .get_physical_required_files(stream_id, start, end)
             .unwrap();
 
         Ok(Self {
@@ -90,7 +90,7 @@ impl ExecutorNode for VectorSelectNode {
             let file_paths = self
                 .indexer
                 .borrow()
-                .get_required_files(stream_id, self.start, self.end)
+                .get_physical_required_files(stream_id, self.start, self.end)
                 .unwrap();
 
             self.cursor = Cursor::new(

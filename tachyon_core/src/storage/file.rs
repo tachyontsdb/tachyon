@@ -537,7 +537,8 @@ impl TimeDataFile {
 
 pub struct PartiallyPersistentDataFile {
     pub header: Rc<RefCell<Header>>,
-    pub path: PathBuf,
+    pub physical_path: PathBuf,
+    pub virtual_path: PathBuf,
     compressor: Option<IntCompressor<PartiallyPersistentDataFileWriter>>,
 }
 
@@ -546,28 +547,31 @@ impl PartiallyPersistentDataFile {
         version: Version,
         stream_id: StreamId,
         value_type: ValueType,
-        path: PathBuf,
+        physical_path: PathBuf,
+        virtual_path: PathBuf,
     ) -> Self {
         let header = Rc::new(RefCell::new(Header::new(version, stream_id, value_type)));
 
         Self {
             header,
-            path,
+            physical_path,
+            virtual_path,
             compressor: None,
         }
     }
 
     pub fn lazy_init(mut self, ts: Timestamp, v: Value) -> Result<Self, WriterErr> {
         self.update_header(ts, v);
-        self.header.borrow().write_from_path(&self.path)?;
-        let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
+        self.header.borrow().write_from_path(&self.physical_path)?;
+        let writer =
+            PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.physical_path));
         self.compressor = Option::Some(IntCompressor::new(writer, &self.header.borrow().clone()));
 
         Ok(self)
     }
 
     pub fn partial_init(mut self, ts: Timestamp, v: Value) -> Result<Self, WriterErr> {
-        let data_file = TimeDataFile::read_data_file(self.path.clone());
+        let data_file = TimeDataFile::read_data_file(self.physical_path.clone());
         self.header = Rc::new(RefCell::new(data_file.header.clone()));
 
         if ts < self.header.borrow().max_timestamp {
@@ -577,7 +581,8 @@ impl PartiallyPersistentDataFile {
             });
         }
 
-        let writer = PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.path));
+        let writer =
+            PartiallyPersistentDataFileWriter::new(self.header.clone(), &(self.physical_path));
         self.compressor = Option::Some(IntCompressor::new_from_partial(writer, data_file));
 
         self.write(ts, v)?;

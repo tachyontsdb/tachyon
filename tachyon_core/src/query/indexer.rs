@@ -40,6 +40,12 @@ trait IndexerStore {
         start: Timestamp,
         end: Timestamp,
     ) -> Result<Vec<PathBuf>, IndexerErr>;
+    fn get_physical_files_for_stream_id(
+        &self,
+        stream_id: Uuid,
+        start: Timestamp,
+        end: Timestamp,
+    ) -> Result<Vec<PathBuf>, IndexerErr>;
     fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Result<Vec<PathBuf>, IndexerErr>;
     fn get_max_timestamp(&self, stream_id: Uuid) -> Result<Option<Timestamp>, IndexerErr>;
 }
@@ -51,6 +57,7 @@ mod sqlite {
 
     pub struct SQLiteIndexerStore {
         conn: Connection,
+        root: PathBuf,
     }
 
     impl SQLiteIndexerStore {
@@ -66,6 +73,7 @@ mod sqlite {
         pub fn new(root_dir: impl AsRef<Path>) -> Result<Self, IndexerErr> {
             Ok(Self {
                 conn: Connection::open(root_dir.as_ref().join(Self::SQLITE_DB_NAME))?,
+                root: root_dir.as_ref().to_path_buf(),
             })
         }
     }
@@ -343,6 +351,28 @@ mod sqlite {
             Ok(rows.map(|item| item.unwrap().into()).collect())
         }
 
+        fn get_physical_files_for_stream_id(
+            &self,
+            stream_id: Uuid,
+            start: Timestamp,
+            end: Timestamp,
+        ) -> Result<Vec<PathBuf>, IndexerErr> {
+            let mut stmt = self.conn.prepare_cached(&format!(
+                "SELECT filename FROM {} WHERE id = ? AND (? <= end OR end IS NULL) AND ? >= start ORDER BY start ASC",
+                Self::SQLITE_ID_TO_FILENAME_TABLE
+            ))?;
+
+            // SAFETY: the row.get call will only fail if we generated the table wrong, which is bad
+            let rows = stmt.query_map((stream_id, start, end), |row| {
+                Ok(row
+                    .get::<usize, String>(0)
+                    .expect("ID to Filename: row not valid at idx 0."))
+            })?;
+
+            // SAFETY: this will always be Ok based on implementation of .query_map above
+            Ok(rows.map(|item| self.root.join(item.unwrap())).collect())
+        }
+
         fn get_value_type_for_stream_id(&self, stream_id: Uuid) -> Option<ValueType> {
             self.conn
                 .query_row(
@@ -541,6 +571,16 @@ impl Indexer {
         end: Timestamp,
     ) -> Result<Vec<PathBuf>, IndexerErr> {
         self.store.get_files_for_stream_id(stream_id, start, end)
+    }
+
+    pub fn get_physical_required_files(
+        &self,
+        stream_id: Uuid,
+        start: Timestamp,
+        end: Timestamp,
+    ) -> Result<Vec<PathBuf>, IndexerErr> {
+        self.store
+            .get_physical_files_for_stream_id(stream_id, start, end)
     }
 
     pub fn get_open_files_for_stream_id(

@@ -12,17 +12,16 @@ use std::rc::Rc;
 use uuid::Uuid;
 
 pub struct PersistentWriter {
-    open_data_files: HashMap<Uuid, PartiallyPersistentDataFile>, // Stream ID to in-mem file
+    partial_data_files: HashMap<Uuid, PartiallyPersistentDataFile>, // Stream ID to in-mem file
     root: PathBuf,
     indexer: Rc<RefCell<Indexer>>,
     version: Version,
 }
 
 impl PersistentWriter {
-    fn derive_file_path(root: impl AsRef<Path>, stream_id: Uuid, ts: Timestamp) -> PathBuf {
+    fn create_virtual_file_path(stream_id: Uuid, ts: Timestamp) -> PathBuf {
         let uuid = Uuid::new_v4();
-        root.as_ref()
-            .join(format!("{}/{}-{}.{}", stream_id, ts, uuid, FILE_EXTENSION))
+        PathBuf::from(format!("{}/{}-{}.{}", stream_id, ts, uuid, FILE_EXTENSION))
     }
 
     fn create_or_open_file(
@@ -32,24 +31,26 @@ impl PersistentWriter {
         v: Value,
         value_type: ValueType,
     ) -> Result<PartiallyPersistentDataFile, WriterErr> {
-        let open_file = self
+        let open_files = self
             .indexer
             .borrow()
             .get_open_files_for_stream_id(stream_id)?;
 
         assert!(
-            open_file.len() <= 1,
+            open_files.len() <= 1,
             "Invalid state! Multiple open files for the stream {}.",
             stream_id
         );
 
-        if open_file.len() == 1 {
-            let file_path = &open_file[0];
+        if open_files.len() == 1 {
+            let virtual_path = &open_files[0];
+            let physical_path = self.root.join(virtual_path);
             PartiallyPersistentDataFile::new(
                 self.version,
                 StreamId(stream_id.as_u128()),
                 value_type,
-                file_path.clone(),
+                physical_path,
+                virtual_path.clone(),
             )
             .partial_init(ts, v)
         } else {
@@ -64,19 +65,21 @@ impl PersistentWriter {
                 }
             }
 
-            let file_path = PersistentWriter::derive_file_path(&self.root, stream_id, ts);
+            let virtual_path = PersistentWriter::create_virtual_file_path(stream_id, ts);
+            let physical_path = self.root.join(&virtual_path);
 
             let file = PartiallyPersistentDataFile::new(
                 self.version,
                 StreamId(stream_id.as_u128()),
                 value_type,
-                file_path.clone(),
+                physical_path,
+                virtual_path.clone(),
             )
             .lazy_init(ts, v)?;
 
             self.indexer
                 .borrow_mut()
-                .insert_new_file(stream_id, &file_path, ts, None)?;
+                .insert_new_file(stream_id, &virtual_path, ts, None)?;
 
             Ok(file)
         }
@@ -86,7 +89,7 @@ impl PersistentWriter {
 impl Writer for PersistentWriter {
     fn new(root: impl AsRef<Path>, indexer: Rc<RefCell<Indexer>>, version: Version) -> Self {
         PersistentWriter {
-            open_data_files: HashMap::new(),
+            partial_data_files: HashMap::new(),
             root: root.as_ref().to_path_buf(),
             indexer,
             version,
@@ -100,41 +103,41 @@ impl Writer for PersistentWriter {
         v: Value,
         value_type: ValueType,
     ) -> Result<(), WriterErr> {
-        if let Some(file) = self.open_data_files.get_mut(&stream_id) {
+        if let Some(file) = self.partial_data_files.get_mut(&stream_id) {
             // Use the existing file if available
             file.write(ts, v)?; // will return err if out of order
             if file.num_entries() >= MAX_NUM_ENTRIES {
                 file.flush()?;
                 self.indexer.borrow_mut().insert_or_replace_file(
                     stream_id,
-                    &file.path,
+                    &file.virtual_path,
                     file.header.borrow().min_timestamp,
                     file.header.borrow().max_timestamp,
                 )?;
-                self.open_data_files.remove_entry(&stream_id);
+                self.partial_data_files.remove_entry(&stream_id);
             }
             Ok(())
         } else {
             let file: PartiallyPersistentDataFile =
                 self.create_or_open_file(stream_id, ts, v, value_type)?;
-            self.open_data_files.insert(stream_id, file);
+            self.partial_data_files.insert(stream_id, file);
             Ok(())
         }
     }
 
     fn flush_all(&mut self) -> Result<(), WriterErr> {
-        for (stream_id, file) in self.open_data_files.iter_mut() {
+        for (stream_id, file) in self.partial_data_files.iter_mut() {
             file.flush()?;
             // TODO: we can have files that aren't the max number of entries
             // We need to decompress the partial file and then do some logic to complete any unfinished chunk at the end of the file
             self.indexer.borrow_mut().insert_or_replace_file(
                 *stream_id,
-                &file.path,
+                &file.virtual_path,
                 file.header.borrow().min_timestamp,
                 file.header.borrow().max_timestamp,
             )?;
         }
-        self.open_data_files.clear();
+        self.partial_data_files.clear();
         Ok(())
     }
 
