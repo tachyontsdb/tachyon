@@ -4,8 +4,84 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use tachyon_core::{Connection, Timestamp, ValueType, Vector};
+use tachyon_core::{error::TachyonErr, Connection, Timestamp, ValueType, Vector};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
+
+fn get_value_type_str(value_type: ValueType) -> String {
+    match value_type {
+        ValueType::Integer64 => String::from("Integer64"),
+        ValueType::UInteger64 => String::from("UInteger64"),
+        ValueType::Float64 => String::from("Float64"),
+    }
+}
+
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+impl From<TachyonErr> for ErrorResponse {
+    fn from(value: TachyonErr) -> Self {
+        Self {
+            error: value.to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct GetStreamsRequest {
+    path: String,
+}
+
+#[derive(Serialize)]
+struct GetStreamsResponseMatcher {
+    label: String,
+    value: String,
+}
+
+#[derive(Serialize)]
+struct GetStreamsResponseStream {
+    name: String,
+    value_type: String,
+    matchers: Vec<GetStreamsResponseMatcher>,
+}
+
+#[derive(Serialize)]
+struct GetStreamsResponse {
+    streams: Vec<GetStreamsResponseStream>,
+}
+
+async fn get_streams(
+    Json(request): Json<GetStreamsRequest>,
+) -> Result<Json<GetStreamsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let connection =
+        Connection::new(request.path).map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
+    let raw_streams = connection
+        .get_all_streams()
+        .map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
+
+    let mut streams = Vec::new();
+    for (_, pairs, value_type) in raw_streams {
+        let mut name: Option<String> = None;
+        let mut matchers = Vec::new();
+
+        for (label, value) in pairs {
+            if label == "__name" {
+                name = Some(value);
+            } else {
+                matchers.push(GetStreamsResponseMatcher { label, value });
+            }
+        }
+
+        streams.push(GetStreamsResponseStream {
+            name: name.unwrap(),
+            value_type: get_value_type_str(value_type),
+            matchers,
+        });
+    }
+
+    Ok(Json(GetStreamsResponse { streams }))
+}
 
 #[derive(Deserialize)]
 struct PerformQueryRequest {
@@ -26,12 +102,12 @@ struct PerformQueryResponse {
 
 async fn perform_query(
     Json(request): Json<PerformQueryRequest>,
-) -> Result<Json<PerformQueryResponse>, (StatusCode, String)> {
+) -> Result<Json<PerformQueryResponse>, (StatusCode, Json<ErrorResponse>)> {
     let mut connection =
-        Connection::new(request.path).map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
+        Connection::new(request.path).map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
     let mut query = connection
         .prepare_query(request.query, request.start, request.end)
-        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
+        .map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
 
     let value_type = query.value_type();
 
@@ -51,11 +127,7 @@ async fn perform_query(
     }
 
     Ok(Json(PerformQueryResponse {
-        value_type: match value_type {
-            ValueType::Integer64 => String::from("Integer64"),
-            ValueType::UInteger64 => String::from("UInteger64"),
-            ValueType::Float64 => String::from("Float64"),
-        },
+        value_type: get_value_type_str(value_type),
         timestamps,
         values_u64: if value_type == ValueType::UInteger64 {
             Some(values_u64)
@@ -79,6 +151,7 @@ async fn perform_query(
 pub async fn main() {
     let app = Router::new()
         .route("/health", get(|| async {}))
+        .route("/get_streams", post(get_streams))
         .route("/query", post(perform_query))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
