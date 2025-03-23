@@ -84,7 +84,7 @@ cargo bench --locked --bench <bench-name> -- --profile-time=20
 
 #### Timescale DB
 
-Run the following before running the `timescaledb` benchmark:
+Run the following before running the `timescaledb` or `db_benchmark_framework` benchmarks:
 
 ```
 docker run -d --name timescaledb -p 5432:5432 -e POSTGRES_PASSWORD=password timescale/timescaledb-ha:pg16
