@@ -327,6 +327,10 @@ impl DatabaseSource for TimescaleDB {
     fn cleanup(_path: impl AsRef<Path>) -> Result<(), Self::Error> {
         // Connect and drop the table
         let mut client = PgClient::connect(DEFAULT_CONN_STRING, NoTls)?;
+        let timescale_postgres_db_size = client.query_one(&format!("SELECT pg_size_pretty(pg_total_relation_size('{}'))", DEFAULT_TABLE_NAME), &[])?;
+        println!("Postgres TimescaleDB table '{}' size: {:?}", DEFAULT_TABLE_NAME, timescale_postgres_db_size.get::<usize, String>(0));
+        let timescale_hypertable_db_size = client.query_one(&format!("SELECT hypertable_size('{}')", DEFAULT_TABLE_NAME), &[])?;
+        println!("TimescaleDB hypertable '{}' size: {:?}", DEFAULT_TABLE_NAME, timescale_hypertable_db_size.get::<usize, i64>(0));
         client.execute(&format!("DROP TABLE IF EXISTS {}", DEFAULT_TABLE_NAME), &[])?;
         Ok(())
     }
@@ -406,6 +410,7 @@ pub fn run_insert_benchmark<D: DatabaseSource>(
     fs::create_dir_all(db_path.as_ref()).unwrap();
     let (timestamps, values) = read_from_csv(csv_path, value_type);
 
+    println!("Starting insert benchmarks");
     c.bench_function(&format!("{}: insert benchmark", D::name()), |b| {
         b.iter(|| {
             bench_insert::<D>(db_path.as_ref(), value_type, &timestamps, &values).unwrap();
@@ -423,10 +428,14 @@ pub fn run_read_benchmark<D: DatabaseSource>(
     fs::create_dir_all(db_path.as_ref()).unwrap();
     let (timestamps, values) = read_from_csv(csv_path, value_type);
 
+    println!("Setting up db");
     let mut db = D::new(db_path.as_ref(), value_type).unwrap();
     db.setup().unwrap();
+
+    println!("Inserting values for read benchmark");
     db.insert(&timestamps, &values).unwrap();
 
+    println!("Starting read benchmarks");
     c.bench_function(
         &format!(
             "{}: read benchmark ({} entries)",
@@ -490,12 +499,15 @@ pub fn get_criterion_config<const SAMPLE_SIZE: usize>() -> Criterion {
 // Benchmark Main Functions
 //----------------------------------------------------------------------
 
+const DATASET_PATH: &str = "../data/memory_dataset.csv";
+
 fn tachyon_insert_benchmark(c: &mut Criterion) {
     #[cfg(feature = "tachyon_memory_profiling")]
     let _profiler = dhat::Profiler::builder().testing().build();
 
     let db_path = PathBuf::from("../tmp/tachyon_insert_bench");
-    let csv_path = "../data/voltage_dataset.csv";
+    let csv_path = DATASET_PATH;
+    println!("Running with dataset {} at {:?}", csv_path, db_path);
     run_insert_benchmark::<TachyonDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
@@ -504,7 +516,8 @@ fn sqlite_insert_benchmark(c: &mut Criterion) {
     let _profiler = dhat::Profiler::builder().testing().build();
 
     let db_path = PathBuf::from("../tmp/sqlite_insert_bench");
-    let csv_path = "../data/voltage_dataset.csv";
+    let csv_path = DATASET_PATH;
+    println!("Running with dataset {} at {:?}", csv_path, db_path);
     run_insert_benchmark::<SQLiteDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
@@ -513,7 +526,8 @@ fn tachyon_read_benchmark(c: &mut Criterion) {
     let _profiler = dhat::Profiler::builder().testing().build();
 
     let db_path = PathBuf::from("../tmp/tachyon_read_bench");
-    let csv_path = "../data/voltage_dataset.csv";
+    let csv_path = DATASET_PATH;
+    println!("Running with dataset {} at {:?}", csv_path, db_path);
     run_read_benchmark::<TachyonDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
@@ -522,7 +536,8 @@ fn sqlite_read_benchmark(c: &mut Criterion) {
     let _profiler = dhat::Profiler::builder().testing().build();
 
     let db_path = PathBuf::from("../tmp/sqlite_read_bench");
-    let csv_path = "../data/voltage_dataset.csv";
+    let csv_path = DATASET_PATH;
+    println!("Running with dataset {} at {:?}", csv_path, db_path);
     run_read_benchmark::<SQLiteDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
@@ -531,7 +546,8 @@ fn timescaledb_insert_benchmark(c: &mut Criterion) {
     let _profiler = dhat::Profiler::builder().testing().build();
 
     let db_path = PathBuf::from("../tmp/timescaledb_insert_bench"); // Path is ignored but kept for consistency
-    let csv_path = "../data/voltage_dataset.csv";
+    let csv_path = DATASET_PATH;
+    println!("Running with dataset {} at {:?}", csv_path, db_path);
     run_insert_benchmark::<TimescaleDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
@@ -540,7 +556,8 @@ fn timescaledb_read_benchmark(c: &mut Criterion) {
     let _profiler = dhat::Profiler::builder().testing().build();
 
     let db_path = PathBuf::from("../tmp/timescaledb_read_bench"); // Path is ignored but kept for consistency
-    let csv_path = "../data/voltage_dataset.csv";
+    let csv_path = DATASET_PATH;
+    println!("Running with dataset {} at {:?}", csv_path, db_path);
     run_read_benchmark::<TimescaleDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
