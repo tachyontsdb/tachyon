@@ -42,22 +42,26 @@ impl VectorToVectorNode {
             VectorToVectorStream::Rhs => &self.rhs_range,
         };
 
+        let value_type = match stream {
+            VectorToVectorStream::Lhs => self.lhs.value_type(),
+            VectorToVectorStream::Rhs => self.rhs.value_type(),
+        };
+
         if range.len() == 1 {
             range[0].value
         } else if range.len() == 2 {
             let (v1, v2) = (range[1].value, range[0].value);
             let (t1, t2) = (range[1].timestamp, range[0].timestamp);
 
-            let rhs_value_type = self.rhs.value_type();
-
-            let slope = (v2.convert_into_f64(self.lhs.value_type())
-                - v1.convert_into_f64(rhs_value_type))
+            let slope = (v2.convert_into_f64(value_type) - v1.convert_into_f64(value_type))
                 / (t2 as f64 - t1 as f64);
-            let res =
-                ((ts as f64 - t1 as f64) * slope + v1.convert_into_f64(rhs_value_type)).round();
+            let res = ((ts as f64 - t1 as f64) * slope + v1.convert_into_f64(value_type)).round();
 
-            // TODO: Allow floats
-            (res as u64).into()
+            match value_type {
+                ValueType::Integer64 => (res as i64).into(),
+                ValueType::UInteger64 => (res as u64).into(),
+                ValueType::Float64 => res.into(),
+            }
         } else {
             panic!("No values in range for interpolation.")
         }
@@ -168,7 +172,7 @@ impl ExecutorNode for VectorToVectorNode {
                                                 timestamp: rhs_ts,
                                                 value: self.op.apply(
                                                     lhs_interpolated,
-                                                    ValueType::UInteger64, // TODO: Fix this
+                                                    self.lhs.value_type(), // TODO: Fix this
                                                     rhs_val,
                                                     self.rhs.value_type(),
                                                 ),
@@ -189,9 +193,9 @@ impl ExecutorNode for VectorToVectorNode {
                                                 timestamp: value_ts,
                                                 value: self.op.apply(
                                                     value_val,
-                                                    self.value_type(),
+                                                    self.lhs.value_type(),
                                                     rhs_interpolated,
-                                                    ValueType::UInteger64,
+                                                    self.rhs.value_type(),
                                                 ),
                                             })
                                         }
@@ -246,7 +250,7 @@ impl ExecutorNode for VectorToVectorNode {
                                                 lhs_val,
                                                 self.lhs.value_type(),
                                                 rhs_interpolated,
-                                                ValueType::UInteger64,
+                                                self.rhs.value_type(),
                                             ), // TODO: Fix this
                                         })
                                     }
@@ -263,7 +267,7 @@ impl ExecutorNode for VectorToVectorNode {
                                             timestamp: value_ts,
                                             value: self.op.apply(
                                                 lhs_interpolated,
-                                                ValueType::UInteger64,
+                                                self.lhs.value_type(),
                                                 value_val,
                                                 self.rhs.value_type(),
                                             ),
@@ -290,7 +294,7 @@ impl ExecutorNode for VectorToVectorNode {
                                         timestamp: value_ts,
                                         value: self.op.apply(
                                             lhs_interpolated,
-                                            ValueType::UInteger64, // TODO: Fix this
+                                            self.lhs.value_type(), // TODO: Fix this
                                             value_val,
                                             self.rhs.value_type(),
                                         ),
@@ -330,7 +334,7 @@ impl ExecutorNode for VectorToVectorNode {
                                         lhs_val,
                                         self.lhs.value_type(),
                                         rhs_interpolated,
-                                        ValueType::UInteger64, // TODO: Fix this
+                                        self.rhs.value_type(), // TODO: Fix this
                                     ),
                                 })
                             }
@@ -347,7 +351,7 @@ impl ExecutorNode for VectorToVectorNode {
                                     timestamp: rhs_ts,
                                     value: self.op.apply(
                                         lhs_interpolated,
-                                        ValueType::UInteger64,
+                                        self.lhs.value_type(),
                                         rhs_val,
                                         self.rhs.value_type(),
                                     ),
@@ -360,7 +364,7 @@ impl ExecutorNode for VectorToVectorNode {
                                     lhs_val,
                                     self.lhs.value_type(),
                                     rhs_val,
-                                    self.value_type(),
+                                    self.rhs.value_type(),
                                 ),
                             }),
                         },
@@ -377,9 +381,9 @@ impl ExecutorNode for VectorToVectorNode {
                                 timestamp: lhs_ts,
                                 value: self.op.apply(
                                     lhs_val,
-                                    self.value_type(),
+                                    self.lhs.value_type(),
                                     rhs_interpolated,
-                                    ValueType::UInteger64,
+                                    self.rhs.value_type(),
                                 ), // TODO: Fix this for floats
                             })
                         }
@@ -396,7 +400,7 @@ impl ExecutorNode for VectorToVectorNode {
                                 timestamp: rhs_ts,
                                 value: self.op.apply(
                                     lhs_interpolated,
-                                    ValueType::UInteger64,
+                                    self.lhs.value_type(),
                                     rhs_val,
                                     self.rhs.value_type(),
                                 ),
