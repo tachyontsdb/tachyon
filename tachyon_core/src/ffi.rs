@@ -117,12 +117,12 @@ pub unsafe extern "C" fn tachyon_stream_check_exists(
     out: *mut *mut c_void,
 ) -> u8 {
     let stream = CStr::from_ptr(stream).to_str().unwrap();
-    
+
     match (*connection).check_stream_exists(stream) {
         Ok(exists) => {
             *out = Box::into_raw(Box::new(exists)) as *mut c_void;
             0u8
-        },
+        }
         Err(tachyon_err) => {
             let return_value = get_error_code(&tachyon_err);
             *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
@@ -139,19 +139,18 @@ pub unsafe extern "C" fn tachyon_inserter_create(
     out: *mut *mut c_void,
 ) -> u8 {
     let stream = CStr::from_ptr(stream).to_str().unwrap();
-    
+
     match (*connection).prepare_insert(stream) {
         Ok(inserter) => {
-            *out = Box::into_raw(Box::new(inserter))as *mut c_void;
+            *out = Box::into_raw(Box::new(inserter)) as *mut c_void;
             0u8
-        },
+        }
         Err(tachyon_err) => {
             let return_value = get_error_code(&tachyon_err);
             *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
             return_value
         }
     }
-    
 }
 
 #[no_mangle]

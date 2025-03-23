@@ -69,7 +69,10 @@ pub enum ConnectionErr {
 #[derive(Error, Debug)]
 pub enum InserterErr {
     #[error("Can't insert type {this_type} into a stream of type {stream_type}.")]
-    TypeErr { this_type: ValueType, stream_type: ValueType }
+    TypeErr {
+        this_type: ValueType,
+        stream_type: ValueType,
+    },
 }
 
 #[derive(Error, Debug)]

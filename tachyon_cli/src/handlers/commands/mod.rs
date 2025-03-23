@@ -69,8 +69,7 @@ pub fn handle_command(
             create,
         } => {
             if create && !connection.check_stream_exists(&stream)? {
-                connection
-                    .create_stream(&stream, config.value_type)?;
+                connection.create_stream(&stream, config.value_type)?;
             }
 
             let mut inserter = connection.prepare_insert(&stream)?;
