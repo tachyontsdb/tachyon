@@ -1,4 +1,4 @@
-use crate::Timestamp;
+use crate::{Timestamp, ValueType};
 use promql_parser::label::Matchers;
 use std::{error::Error, io, path::PathBuf, time::SystemTimeError};
 use thiserror::Error;
@@ -17,6 +17,8 @@ pub enum TachyonErr {
     QueryErr(#[from] QueryErr),
     #[error(transparent)]
     WriterErr(#[from] WriterErr),
+    #[error(transparent)]
+    InserterErr(#[from] InserterErr),
 }
 
 #[derive(Error, Debug)]
@@ -52,8 +54,22 @@ pub enum ConnectionErr {
     DatabaseCreationErr { db_dir: PathBuf },
     #[error("Failed to create stream: {stream}.")]
     StreamCreationErr { stream: String },
+    #[error("Failed to create stream because it already exists: {stream}")]
+    ExistingStreamErr { stream: String },
+    #[error("Failed to insert into stream: {stream}")]
+    StreamInsertErr { stream: String },
+    #[error("Failed to {op} on non-existent stream: {stream}.")]
+    StreamNoExistErr { op: String, stream: String },
     #[error("Failed to get all streams.")]
     GetStreamsErr,
+    #[error("Failed to parse stream {stream} as a vector selector.")]
+    StreamParseErr { stream: String },
+}
+
+#[derive(Error, Debug)]
+pub enum InserterErr {
+    #[error("Can't insert type {this_type} into a stream of type {stream_type}.")]
+    TypeErr { this_type: ValueType, stream_type: ValueType }
 }
 
 #[derive(Error, Debug)]

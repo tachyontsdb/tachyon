@@ -408,16 +408,23 @@ impl Connection {
         })
     }
 
-    fn parse_stream(&self, stream: impl AsRef<str>) -> parser::VectorSelector {
+    fn parse_stream_for_insert(
+        &self,
+        stream: impl AsRef<str>,
+    ) -> Result<parser::VectorSelector, ConnectionErr> {
         let Ok(parser::Expr::VectorSelector(selector)) = parser::parse(stream.as_ref()) else {
-            panic!("Expected a vector selector!");
+            return Err(ConnectionErr::StreamParseErr {
+                stream: stream.as_ref().to_string(),
+            });
         };
 
         if selector.at.is_some() || selector.offset.is_some() {
-            panic!("Cannot include at / offset for insert query!");
+            return Err(ConnectionErr::StreamParseErr {
+                stream: stream.as_ref().to_string(),
+            });
         }
 
-        selector
+        Ok(selector)
     }
 
     fn get_stream_ids_for_selector(&self, selector: &parser::VectorSelector) -> HashSet<Uuid> {
@@ -431,10 +438,14 @@ impl Connection {
         stream: impl AsRef<str>,
         value_type: ValueType,
     ) -> Result<(), TachyonErr> {
-        let selector = self.parse_stream(&stream);
+        let selector = self.parse_stream_for_insert(&stream)?;
 
         if !self.get_stream_ids_for_selector(&selector).is_empty() {
-            panic!("Attempting to create a stream that already exists!");
+            return Err(TachyonErr::ConnectionErr(
+                ConnectionErr::ExistingStreamErr {
+                    stream: stream.as_ref().to_string(),
+                },
+            ));
         }
 
         let stream_id = self
@@ -459,10 +470,10 @@ impl Connection {
         todo!("Not deleting stream {:?}", stream.as_ref());
     }
 
-    pub fn check_stream_exists(&self, stream: impl AsRef<str>) -> bool {
-        !self
-            .get_stream_ids_for_selector(&self.parse_stream(stream))
-            .is_empty()
+    pub fn check_stream_exists(&self, stream: impl AsRef<str>) -> Result<bool, TachyonErr> {
+        Ok(!self
+            .get_stream_ids_for_selector(&self.parse_stream_for_insert(stream)?)
+            .is_empty())
     }
 
     pub fn get_all_streams(&self) -> Result<Vec<StreamSummaryType>, TachyonErr> {
@@ -472,16 +483,24 @@ impl Connection {
             .map_err(|_| TachyonErr::ConnectionErr(ConnectionErr::GetStreamsErr))
     }
 
-    pub fn prepare_insert(&mut self, stream: impl AsRef<str>) -> Inserter {
-        let stream_ids = self.get_stream_ids_for_selector(&self.parse_stream(stream.as_ref()));
+    pub fn prepare_insert(&mut self, stream: impl AsRef<str>) -> Result<Inserter, TachyonErr> {
+        let stream_ids =
+            self.get_stream_ids_for_selector(&self.parse_stream_for_insert(stream.as_ref())?);
 
-        if stream_ids.len() != 1 {
-            panic!("Invalid number of streams found in the database!");
+        if stream_ids.len() == 0 {
+            return Err(TachyonErr::ConnectionErr(ConnectionErr::StreamNoExistErr {
+                op: "insert".to_string(),
+                stream: stream.as_ref().to_string(),
+            }));
+        } else if stream_ids.len() > 1 {
+            return Err(TachyonErr::ConnectionErr(ConnectionErr::StreamInsertErr {
+                stream: stream.as_ref().to_string(),
+            }));
         }
 
         let stream_id = stream_ids.into_iter().next().unwrap();
 
-        Inserter {
+        Ok(Inserter {
             value_type: self
                 .indexer
                 .borrow()
@@ -489,7 +508,7 @@ impl Connection {
                 .unwrap(),
             stream_id,
             writer: self.writer.clone(),
-        }
+        })
     }
 
     pub fn prepare_query(
@@ -525,7 +544,12 @@ macro_rules! create_inserter_insert {
             value: $type,
         ) -> Result<(), crate::error::TachyonErr> {
             if self.value_type != $value_type {
-                panic!("Invalid value type on insert!");
+                return Err(crate::error::TachyonErr::InserterErr(
+                    crate::error::InserterErr::TypeErr {
+                        this_type: $value_type,
+                        stream_type: self.value_type,
+                    },
+                ));
             }
 
             self.insert(
@@ -604,11 +628,11 @@ mod tests {
         stream: impl AsRef<str>,
         value_type: ValueType,
     ) -> Inserter {
-        if !conn.check_stream_exists(stream.as_ref()) {
+        if !conn.check_stream_exists(stream.as_ref()).unwrap() {
             conn.create_stream(stream.as_ref(), value_type).unwrap();
         }
 
-        conn.prepare_insert(stream.as_ref())
+        conn.prepare_insert(stream.as_ref()).unwrap()
     }
 
     fn vector_test_helper(
@@ -1848,7 +1872,7 @@ mod tests {
 
         {
             let mut conn = Connection::new(&root_dir).unwrap();
-            let mut inserter = conn.prepare_insert(r#"http_requests_total"#);
+            let mut inserter = conn.prepare_insert(r#"http_requests_total"#).unwrap();
 
             for i in mid..end {
                 inserter.insert_float64(i, i as f64).unwrap();
