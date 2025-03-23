@@ -1,5 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use csv::Reader;
+use postgres::{Client as PgClient, NoTls};
 use pprof::{
     criterion::{Output, PProfProfiler},
     flamegraph::Options,
@@ -210,6 +211,132 @@ impl DatabaseSource for SQLiteDB {
 }
 
 //----------------------------------------------------------------------
+// TimescaleDB Database Adapter
+//----------------------------------------------------------------------
+
+const DEFAULT_CONN_STRING: &str = "host=localhost user=postgres password=password dbname=postgres";
+const DEFAULT_TABLE_NAME: &str = "benchmark_timeseries";
+
+pub struct TimescaleDB {
+    conn: PgClient,
+    value_type: ValueType,
+    table_name: String,
+}
+
+impl DatabaseSource for TimescaleDB {
+    type Error = postgres::Error;
+
+    fn new(_path: impl AsRef<Path>, value_type: ValueType) -> Result<Self, Self::Error> {
+        // Path is ignored for TimescaleDB since it uses a network connection
+        let conn = PgClient::connect(DEFAULT_CONN_STRING, NoTls)?;
+        Ok(TimescaleDB {
+            conn,
+            value_type,
+            table_name: DEFAULT_TABLE_NAME.to_string(),
+        })
+    }
+
+    fn setup(&mut self) -> Result<(), Self::Error> {
+        // Drop table if it exists
+        self.conn
+            .execute(&format!("DROP TABLE IF EXISTS {}", self.table_name), &[])?;
+
+        // Create the table with appropriate type
+        let value_type = match self.value_type {
+            ValueType::Integer64 => "BIGINT",
+            ValueType::UInteger64 => "BIGINT", // PostgreSQL doesn't have unsigned types
+            ValueType::Float64 => "DOUBLE PRECISION",
+        };
+
+        let create_table_query = format!(
+            "CREATE TABLE {} (
+                timestamp BIGINT,
+                value {}
+            )",
+            self.table_name, value_type
+        );
+
+        self.conn.execute(&create_table_query, &[])?;
+
+        // Create hypertable
+        let create_hypertable_query = format!(
+            "SELECT create_hypertable('{}', by_range('timestamp'))",
+            self.table_name
+        );
+        self.conn.execute(&create_hypertable_query, &[])?;
+
+        Ok(())
+    }
+
+    fn insert(&mut self, timestamps: &[Timestamp], values: &[Value]) -> Result<(), Self::Error> {
+        let mut transaction = self.conn.transaction()?;
+
+        for (ts, v) in timestamps.iter().zip(values.iter()) {
+            match self.value_type {
+                ValueType::Integer64 => {
+                    transaction.execute(
+                        &format!("INSERT INTO {} VALUES ($1, $2)", self.table_name),
+                        &[&(*ts as i64), &v.get_integer64()],
+                    )?;
+                }
+                ValueType::UInteger64 => {
+                    transaction.execute(
+                        &format!("INSERT INTO {} VALUES ($1, $2)", self.table_name),
+                        &[&(*ts as i64), &(v.get_uinteger64() as i64)],
+                    )?;
+                }
+                ValueType::Float64 => {
+                    transaction.execute(
+                        &format!("INSERT INTO {} VALUES ($1, $2)", self.table_name),
+                        &[&(*ts as i64), &v.get_float64()],
+                    )?;
+                }
+            }
+        }
+
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn read(&mut self, start: Timestamp, end: Timestamp) -> Result<u128, Self::Error> {
+        let query = format!(
+            "SELECT timestamp, value FROM {} WHERE timestamp BETWEEN $1 AND $2",
+            self.table_name
+        );
+
+        let mut sum: u128 = 0;
+        for row in self.conn.query(&query, &[&(start as i64), &(end as i64)])? {
+            let timestamp: i64 = row.get(0);
+
+            // Handle different value types
+            match self.value_type {
+                ValueType::Integer64 | ValueType::UInteger64 => {
+                    let value: i64 = row.get(1);
+                    sum += (timestamp as u128) + (value as u128);
+                }
+                ValueType::Float64 => {
+                    let value: f64 = row.get(1);
+                    sum += (timestamp as u128) + (value as u128);
+                }
+            }
+        }
+
+        Ok(sum)
+    }
+
+    fn cleanup(_path: impl AsRef<Path>) -> Result<(), Self::Error> {
+        // Connect and drop the table
+        let mut client = PgClient::connect(DEFAULT_CONN_STRING, NoTls)?;
+        client.execute(&format!("DROP TABLE IF EXISTS {}", DEFAULT_TABLE_NAME), &[])?;
+        Ok(())
+    }
+
+    fn name() -> &'static str {
+        "TimescaleDB"
+    }
+}
+
+//----------------------------------------------------------------------
 // Framework Utilities
 //----------------------------------------------------------------------
 
@@ -399,16 +526,34 @@ fn sqlite_read_benchmark(c: &mut Criterion) {
     run_read_benchmark::<SQLiteDB>(c, ValueType::UInteger64, &db_path, csv_path);
 }
 
+fn timescaledb_insert_benchmark(c: &mut Criterion) {
+    #[cfg(feature = "tachyon_memory_profiling")]
+    let _profiler = dhat::Profiler::builder().testing().build();
+
+    let db_path = PathBuf::from("../tmp/timescaledb_insert_bench"); // Path is ignored but kept for consistency
+    let csv_path = "../data/voltage_dataset.csv";
+    run_insert_benchmark::<TimescaleDB>(c, ValueType::UInteger64, &db_path, csv_path);
+}
+
+fn timescaledb_read_benchmark(c: &mut Criterion) {
+    #[cfg(feature = "tachyon_memory_profiling")]
+    let _profiler = dhat::Profiler::builder().testing().build();
+
+    let db_path = PathBuf::from("../tmp/timescaledb_read_bench"); // Path is ignored but kept for consistency
+    let csv_path = "../data/voltage_dataset.csv";
+    run_read_benchmark::<TimescaleDB>(c, ValueType::UInteger64, &db_path, csv_path);
+}
+
 criterion_group!(
     name = insert_benches;
     config = get_criterion_config::<20>();
-    targets = tachyon_insert_benchmark, sqlite_insert_benchmark
+    targets = tachyon_insert_benchmark, sqlite_insert_benchmark, timescaledb_insert_benchmark
 );
 
 criterion_group!(
     name = read_benches;
     config = get_criterion_config::<100>();
-    targets = tachyon_read_benchmark, sqlite_read_benchmark
+    targets = tachyon_read_benchmark, sqlite_read_benchmark, timescaledb_read_benchmark
 );
 
 criterion_main!(read_benches, insert_benches);
