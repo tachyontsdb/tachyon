@@ -99,7 +99,7 @@ pub fn handle_command(
             Ok(())
         }
         TachyonCommand::Create { stream } => {
-            connection.create_stream(stream, config.value_type).unwrap();
+            connection.create_stream(stream, config.value_type)?;
             Ok(())
         }
         TachyonCommand::Exit => {
