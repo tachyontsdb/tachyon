@@ -500,7 +500,8 @@ impl Connection {
     ) -> Result<Query, TachyonErr> {
         let ast = parser::parse(query.as_ref())
             .map_err(|_| TachyonErr::QueryErr(QueryErr::QuerySyntaxErr))?;
-        let mut planner = QueryPlanner::new(&ast, start, end);
+        let mut planner =
+            QueryPlanner::new(&ast, start.unwrap_or(0), end.unwrap_or(i64::MAX as u64));
         let plan = planner.plan(self)?;
 
         Ok(Query {
