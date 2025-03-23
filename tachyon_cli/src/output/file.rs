@@ -26,7 +26,7 @@ impl CliOutput for FileWriter {
                     }), // Handle other extensions explicitly
                 }
             }
-            None => Ok(()),
+            None => Err(CLIErr::OutputPathNotSpecified),
         }
     }
 }
