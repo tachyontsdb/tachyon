@@ -1,5 +1,10 @@
 use axum::{
+    extract::{
+        ws::{Message, Utf8Bytes, WebSocket},
+        WebSocketUpgrade,
+    },
     http::StatusCode,
+    response::Response,
     routing::{any, get, post},
     Json, Router,
 };
@@ -150,8 +155,36 @@ async fn perform_query(
     ))
 }
 
-async fn websocket_perform_query() {
-    todo!();
+async fn websocket_perform_query(ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(handle_perform_query_socket)
+}
+
+async fn handle_perform_query_socket(mut socket: WebSocket) {
+    while let Some(message) = socket.recv().await {
+        if message.is_err() {
+            // Client disconnected
+            return;
+        }
+
+        // SAFETY: Previously checked for Err variant
+        let message = message.unwrap();
+
+        let message = message.to_text().unwrap();
+        let request = serde_json::from_str::<PerformQueryRequest>(message).unwrap();
+
+        let query_response = {
+            let mut connection = Connection::new(request.path).unwrap();
+            query(&mut connection, request.query, request.start, request.end).unwrap()
+        };
+
+        let response_str = serde_json::to_string(&query_response).unwrap();
+        let response = Message::text(Utf8Bytes::from(&response_str));
+
+        if socket.send(response).await.is_err() {
+            // Client disconnected
+            return;
+        }
+    }
 }
 
 #[tokio::main]
