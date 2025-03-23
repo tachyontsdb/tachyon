@@ -115,7 +115,8 @@ pub fn handle_command(
             output_mode,
             path: output_path,
             value_type,
-            command } => {
+            command,
+        } => {
             if let Some(output_mode) = output_mode {
                 config.output_mode = output_mode;
             }

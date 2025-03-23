@@ -1,5 +1,8 @@
 use clap::Subcommand;
-use tabled::{builder::Builder, settings::{object::Rows, Color, Style}};
+use tabled::{
+    builder::Builder,
+    settings::{object::Rows, Color, Style},
+};
 use tachyon_core::ValueType;
 
 use crate::{cli::Config, CLIErr};
@@ -15,12 +18,12 @@ pub fn handle_mode_get(command: Mode, config: &mut Config) -> Result<(), CLIErr>
             let mut rows = Vec::<Vec<String>>::new();
             rows.push(vec![
                 "Configuration Option".to_string(),
-                "Configuration Value".to_string()
+                "Configuration Value".to_string(),
             ]);
 
             rows.push(vec![
                 "Output Mode".to_string(),
-                config.output_mode.to_string()
+                config.output_mode.to_string(),
             ]);
 
             if let Some(path) = &config.path {
@@ -38,19 +41,16 @@ pub fn handle_mode_get(command: Mode, config: &mut Config) -> Result<(), CLIErr>
                 "u64"
             };
 
-            rows.push(vec![
-                "Value Type".to_string(),
-                value_type_str.to_string(),
-            ]);
-
+            rows.push(vec!["Value Type".to_string(), value_type_str.to_string()]);
 
             let mut table = Builder::from(rows).build();
-            table.with(Style::modern_rounded())
-            .modify(Rows::single(0), Color::FG_BRIGHT_CYAN);
+            table
+                .with(Style::modern_rounded())
+                .modify(Rows::single(0), Color::FG_BRIGHT_CYAN);
 
             println!("{}", table);
 
             Ok(())
-        },
+        }
     }
 }
