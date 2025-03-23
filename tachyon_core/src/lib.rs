@@ -1468,12 +1468,12 @@ mod tests {
         set_up_dirs!(dirs, "db");
         execution_test_helper(
             dirs[0].clone(),
+            Some(&[0u64, 10, 20, 30, 40]),
+            Some(&[5i64, 1, 3, 2, 4]),
+            r#"topk(3, test_stream)"#,
             None,
-            None,
-            r#"topk(2, ints)"#,
-            None,
-            &[10i64, 8].map(|x| x.into()),
-            None,
+            &[5i64, 3, 4].map(|x| x.into()),
+            Some(&[0u64, 20, 40]),
         );
     }
 
@@ -1486,8 +1486,8 @@ mod tests {
             None,
             r#"topk(100, uints)"#,
             None,
-            &[5u64, 4, 3, 2, 1].map(|x| x.into()),
-            None,
+            &[5u64, 1, 2, 3, 4].map(|x| x.into()),
+            Some(&[0u64, 10, 20, 30, 40]),
         );
     }
 
@@ -1501,7 +1501,7 @@ mod tests {
             r#"topk(0, floats)"#,
             None,
             &[],
-            None,
+            Some(&[]),
         );
     }
 
@@ -1510,12 +1510,12 @@ mod tests {
         set_up_dirs!(dirs, "db");
         execution_test_helper(
             dirs[0].clone(),
+            Some(&[0u64, 10, 20, 30, 40]),
+            Some(&[2i64, 5, 1, 4, 3]),
+            r#"bottomk(3, test_stream)"#,
             None,
-            None,
-            r#"bottomk(2, ints)"#,
-            None,
-            &[2i64, 4].map(|x| x.into()),
-            None,
+            &[2i64, 1, 3].map(|x| x.into()),
+            Some(&[0u64, 20, 40]),
         );
     }
 
@@ -1528,8 +1528,8 @@ mod tests {
             None,
             r#"bottomk(100, uints)"#,
             None,
-            &[1u64, 2, 3, 4, 5].map(|x| x.into()),
-            None,
+            &[5u64, 1, 2, 3, 4].map(|x| x.into()),
+            Some(&[0u64, 10, 20, 30, 40]),
         );
     }
 
@@ -1543,7 +1543,7 @@ mod tests {
             r#"bottomk(0, floats)"#,
             None,
             &[],
-            None,
+            Some(&[]),
         );
     }
 
@@ -2131,9 +2131,9 @@ mod tests {
                 .prepare_query(r#"topk(2, mystream{t="i"})"#, Some(0), Some(1000))
                 .unwrap();
             assert_eq!(topquery.value_type(), ValueType::Integer64);
-            assert_eq!(topquery.next_scalar().unwrap().get_integer64(), -1i64);
-            assert_eq!(topquery.next_scalar().unwrap().get_integer64(), -5i64);
-            assert!(topquery.next_scalar().is_none());
+            assert_eq!(topquery.next_vector().unwrap().value.get_integer64(), -5i64);
+            assert_eq!(topquery.next_vector().unwrap().value.get_integer64(), -1i64);
+            assert!(topquery.next_vector().is_none());
         }
 
         {
@@ -2187,8 +2187,11 @@ mod tests {
                 .prepare_query(r#"bottomk(1, mystream{t="f"})"#, Some(0), Some(1000))
                 .unwrap();
             assert_eq!(topquery.value_type(), ValueType::Float64);
-            assert_eq!(topquery.next_scalar().unwrap().get_float64(), -23.1f64);
-            assert!(topquery.next_scalar().is_none());
+            assert_eq!(
+                topquery.next_vector().unwrap().value.get_float64(),
+                -23.1f64
+            );
+            assert!(topquery.next_vector().is_none());
         }
 
         {

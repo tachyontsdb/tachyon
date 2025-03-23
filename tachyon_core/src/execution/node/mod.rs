@@ -76,7 +76,6 @@ impl ExecutorNode for TNode {
             TNode::BinaryOp(sel) => sel.next_scalar(conn),
             TNode::ScalarToScalar(sel) => sel.next_scalar(conn),
             TNode::Aggregate(sel) => sel.next_scalar(conn),
-            TNode::GetK(sel) => sel.next_scalar(conn),
             _ => panic!("next_scalar not implemented for this node!"),
         }
     }
@@ -88,6 +87,7 @@ impl ExecutorNode for TNode {
             TNode::VectorToScalar(sel) => sel.next_vector(conn),
             TNode::BinaryOp(sel) => sel.next_vector(conn),
             TNode::Aggregate(sel) => sel.next_vector(conn),
+            TNode::GetK(sel) => sel.next_vector(conn),
             _ => panic!("next_vector not implemented for this node!"),
         }
     }

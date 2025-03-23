@@ -1,28 +1,31 @@
-use crate::{Connection, ReturnType, Value, ValueType, Vector};
+use crate::{Connection, ReturnType, ValueType, Vector};
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 
 use super::{ExecutorNode, TNode};
 
-struct TypeValuePair(ValueType, Value);
+struct TypeVectorPair(ValueType, Vector);
 
-impl PartialEq for TypeValuePair {
+impl PartialEq for TypeVectorPair {
     fn eq(&self, other: &Self) -> bool {
-        self.1.eq(self.0, &other.1, other.0)
+        self.1.value.eq(self.0, &other.1.value, other.0)
     }
 }
 
-impl Eq for TypeValuePair {}
+impl Eq for TypeVectorPair {}
 
-impl PartialOrd for TypeValuePair {
+impl PartialOrd for TypeVectorPair {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for TypeValuePair {
+impl Ord for TypeVectorPair {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.1.partial_cmp(self.0, &other.1, other.0).unwrap()
+        self.1
+            .value
+            .partial_cmp(self.0, &other.1.value, other.0)
+            .unwrap()
     }
 }
 
@@ -40,7 +43,7 @@ pub struct GetKNode {
     k: Option<usize>,
 
     ix: usize,
-    ks: Vec<Value>,
+    ks: Vec<Vector>,
 }
 
 impl GetKNode {
@@ -67,10 +70,10 @@ impl ExecutorNode for GetKNode {
     }
 
     fn return_type(&self) -> ReturnType {
-        ReturnType::Scalar
+        ReturnType::Vector
     }
 
-    fn next_scalar(&mut self, conn: &mut Connection) -> Option<Value> {
+    fn next_vector(&mut self, conn: &mut Connection) -> Option<Vector> {
         if self.k.is_none() {
             // Generate heaps during the first call
 
@@ -86,55 +89,58 @@ impl ExecutorNode for GetKNode {
                 // Newer values overwrite older values in case of ties
 
                 if self.getk_type == GetKType::Bottom {
-                    let mut maxheap = BinaryHeap::<TypeValuePair>::new();
-                    while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
+                    let mut maxheap = BinaryHeap::<TypeVectorPair>::new();
+                    while let Some(vector) = self.child.next_vector(conn) {
                         if maxheap.len() < k {
-                            maxheap.push(TypeValuePair(child_value_type, value));
+                            maxheap.push(TypeVectorPair(child_value_type, vector));
                         } else {
-                            let ordering = value
-                                .partial_cmp_same(child_value_type, &maxheap.peek().unwrap().1)
+                            let ordering = vector
+                                .value
+                                .partial_cmp_same(
+                                    child_value_type,
+                                    &maxheap.peek().unwrap().1.value,
+                                )
                                 .unwrap();
                             if ordering.is_le() {
                                 maxheap.pop();
-                                maxheap.push(TypeValuePair(child_value_type, value));
+                                maxheap.push(TypeVectorPair(child_value_type, vector));
                             }
                         }
                     }
-                    maxheap
-                        .into_sorted_vec()
-                        .into_iter()
-                        .map(|pair| pair.1)
-                        .collect()
+                    maxheap.into_iter().map(|pair| pair.1).collect()
                 } else {
-                    let mut minheap = BinaryHeap::<Reverse<TypeValuePair>>::new();
-                    while let Some(Vector { value, .. }) = self.child.next_vector(conn) {
+                    let mut minheap = BinaryHeap::<Reverse<TypeVectorPair>>::new();
+                    while let Some(vector) = self.child.next_vector(conn) {
                         if minheap.len() < k {
-                            minheap.push(Reverse(TypeValuePair(child_value_type, value)));
+                            minheap.push(Reverse(TypeVectorPair(child_value_type, vector)));
                         } else {
-                            let ordering = value
-                                .partial_cmp_same(child_value_type, &minheap.peek().unwrap().0 .1)
+                            let ordering = vector
+                                .value
+                                .partial_cmp_same(
+                                    child_value_type,
+                                    &minheap.peek().unwrap().0 .1.value,
+                                )
                                 .unwrap();
                             if ordering.is_ge() {
                                 minheap.pop();
-                                minheap.push(Reverse(TypeValuePair(child_value_type, value)));
+                                minheap.push(Reverse(TypeVectorPair(child_value_type, vector)));
                             }
                         }
                     }
-                    minheap
-                        .into_sorted_vec()
-                        .into_iter()
-                        .map(|rev_pair| rev_pair.0 .1)
-                        .collect()
+                    minheap.into_iter().map(|rev_pair| rev_pair.0 .1).collect()
                 }
             };
+
+            // Return values in order of timestamp
+            self.ks.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
         }
 
         if self.ix >= self.ks.len() {
             None
         } else {
-            let value = self.ks[self.ix];
+            let vector = self.ks[self.ix];
             self.ix += 1;
-            Some(value)
+            Some(vector)
         }
     }
 }
