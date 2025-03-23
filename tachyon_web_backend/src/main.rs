@@ -1,19 +1,12 @@
 use axum::{
     http::StatusCode,
-    routing::{get, post},
+    routing::{any, get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use tachyon_core::{error::TachyonErr, Connection, Timestamp, ValueType, Vector};
+use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-
-fn get_value_type_str(value_type: ValueType) -> String {
-    match value_type {
-        ValueType::Integer64 => String::from("Integer64"),
-        ValueType::UInteger64 => String::from("UInteger64"),
-        ValueType::Float64 => String::from("Float64"),
-    }
-}
 
 #[derive(Serialize)]
 struct ErrorResponse {
@@ -75,7 +68,7 @@ async fn get_streams(
 
         streams.push(GetStreamsResponseStream {
             name: name.unwrap(),
-            value_type: get_value_type_str(value_type),
+            value_type: value_type.to_string(),
             matchers,
         });
     }
@@ -83,16 +76,8 @@ async fn get_streams(
     Ok(Json(GetStreamsResponse { streams }))
 }
 
-#[derive(Deserialize)]
-struct PerformQueryRequest {
-    path: String,
-    query: String,
-    start: Option<Timestamp>,
-    end: Option<Timestamp>,
-}
-
 #[derive(Serialize)]
-struct PerformQueryResponse {
+struct QueryResponse {
     value_type: String,
     timestamps: Vec<Timestamp>,
     values_u64: Option<Vec<u64>>,
@@ -100,14 +85,13 @@ struct PerformQueryResponse {
     values_f64: Option<Vec<f64>>,
 }
 
-async fn perform_query(
-    Json(request): Json<PerformQueryRequest>,
-) -> Result<Json<PerformQueryResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let mut connection =
-        Connection::new(request.path).map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
-    let mut query = connection
-        .prepare_query(request.query, request.start, request.end)
-        .map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
+fn query(
+    connection: &mut Connection,
+    query: impl AsRef<str>,
+    start: Option<Timestamp>,
+    end: Option<Timestamp>,
+) -> Result<QueryResponse, TachyonErr> {
+    let mut query = connection.prepare_query(query, start, end)?;
 
     let value_type = query.value_type();
 
@@ -126,8 +110,8 @@ async fn perform_query(
         }
     }
 
-    Ok(Json(PerformQueryResponse {
-        value_type: get_value_type_str(value_type),
+    Ok(QueryResponse {
+        value_type: value_type.to_string(),
         timestamps,
         values_u64: if value_type == ValueType::UInteger64 {
             Some(values_u64)
@@ -144,7 +128,30 @@ async fn perform_query(
         } else {
             None
         },
-    }))
+    })
+}
+
+#[derive(Deserialize)]
+struct PerformQueryRequest {
+    path: String,
+    query: String,
+    start: Option<Timestamp>,
+    end: Option<Timestamp>,
+}
+
+async fn perform_query(
+    Json(request): Json<PerformQueryRequest>,
+) -> Result<Json<QueryResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let mut connection =
+        Connection::new(request.path).map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
+    Ok(Json(
+        query(&mut connection, request.query, request.start, request.end)
+            .map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?,
+    ))
+}
+
+async fn websocket_perform_query() {
+    todo!();
 }
 
 #[tokio::main]
@@ -153,9 +160,10 @@ pub async fn main() {
         .route("/health", get(|| async {}))
         .route("/get_streams", post(get_streams))
         .route("/query", post(perform_query))
+        .route("/ws/query", any(websocket_perform_query))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
