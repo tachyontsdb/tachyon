@@ -487,7 +487,7 @@ impl Connection {
         let stream_ids =
             self.get_stream_ids_for_selector(&self.parse_stream_for_insert(stream.as_ref())?);
 
-        if stream_ids.len() == 0 {
+        if stream_ids.is_empty() {
             return Err(TachyonErr::ConnectionErr(ConnectionErr::StreamNoExistErr {
                 op: "insert".to_string(),
                 stream: stream.as_ref().to_string(),

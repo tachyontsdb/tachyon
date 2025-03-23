@@ -26,7 +26,7 @@ fn read_from_csv(path: &str) -> (Vec<u64>, Vec<u64>) {
 }
 
 fn bench_insert(conn: &mut Connection, timestamps: &[u64], values: &[u64]) {
-    let mut inserter = black_box(conn.prepare_insert(STREAM));
+    let mut inserter = black_box(conn.prepare_insert(STREAM).unwrap());
 
     for i in 0..timestamps.len() {
         inserter
