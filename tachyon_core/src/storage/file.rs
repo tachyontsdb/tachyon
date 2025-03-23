@@ -9,7 +9,7 @@ use crate::{StreamId, Timestamp, Value, ValueType, Vector, Version};
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, Write};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -135,13 +135,14 @@ impl Header {
         }
     }
 
-    fn write_value(&self, file: &mut File, value: Value) -> Result<usize, io::Error> {
-        match self.value_type {
-            ValueType::Integer64 => file.write_all(&value.get_integer64().to_le_bytes())?,
-            ValueType::UInteger64 => file.write_all(&value.get_uinteger64().to_le_bytes())?,
-            ValueType::Float64 => file.write_all(&value.get_float64().to_le_bytes())?,
-        }
-        Ok(8)
+    fn write_value_to_buffer(&self, buffer: &mut [u8], offset: usize, value: Value) -> usize {
+        let bytes = match self.value_type {
+            ValueType::Integer64 => value.get_integer64().to_le_bytes(),
+            ValueType::UInteger64 => value.get_uinteger64().to_le_bytes(),
+            ValueType::Float64 => value.get_float64().to_le_bytes(),
+        };
+        buffer[offset..offset + 8].copy_from_slice(&bytes);
+        8
     }
 
     fn write_from_path(&self, path: &PathBuf) -> Result<usize, io::Error> {
@@ -154,23 +155,53 @@ impl Header {
         self.write(&mut file)
     }
 
+    fn as_bytes(&self) -> [u8; HEADER_SIZE + MAGIC_SIZE] {
+        let mut buffer = [0u8; HEADER_SIZE + MAGIC_SIZE];
+        let mut offset = 0;
+
+        buffer[offset..offset + MAGIC_SIZE].copy_from_slice(&MAGIC);
+        offset += MAGIC_SIZE;
+
+        let version_bytes = self.version.0.to_le_bytes();
+        buffer[offset..offset + 2].copy_from_slice(&version_bytes);
+        offset += 2;
+
+        let stream_id_bytes = self.stream_id.0.to_le_bytes();
+        buffer[offset..offset + 16].copy_from_slice(&stream_id_bytes);
+        offset += 16;
+
+        let min_ts_bytes = self.min_timestamp.to_le_bytes();
+        buffer[offset..offset + 8].copy_from_slice(&min_ts_bytes);
+        offset += 8;
+
+        let max_ts_bytes = self.max_timestamp.to_le_bytes();
+        buffer[offset..offset + 8].copy_from_slice(&max_ts_bytes);
+        offset += 8;
+
+        let count_bytes = self.count.to_le_bytes();
+        buffer[offset..offset + 4].copy_from_slice(&count_bytes);
+        offset += 4;
+
+        buffer[offset] = self.value_type as u8;
+        offset += 1;
+
+        offset += self.write_value_to_buffer(&mut buffer, offset, self.value_sum);
+        offset += self.write_value_to_buffer(&mut buffer, offset, self.min_value);
+        offset += self.write_value_to_buffer(&mut buffer, offset, self.max_value);
+        offset += self.write_value_to_buffer(&mut buffer, offset, self.first_value);
+
+        debug_assert_eq!(
+            offset,
+            HEADER_SIZE + MAGIC_SIZE,
+            "Header buffer size mismatch"
+        );
+        buffer
+    }
+
     fn write(&self, file: &mut File) -> Result<usize, io::Error> {
-        file.write_all(&MAGIC)?;
+        let buffer = self.as_bytes();
 
-        file.write_all(&self.version.0.to_le_bytes())?;
-        file.write_all(&self.stream_id.0.to_le_bytes())?;
-
-        file.write_all(&self.min_timestamp.to_le_bytes())?;
-        file.write_all(&self.max_timestamp.to_le_bytes())?;
-
-        file.write_all(&self.count.to_le_bytes())?;
-        file.write_all(&(self.value_type as u8).to_le_bytes())?;
-
-        self.write_value(file, self.value_sum).unwrap();
-        self.write_value(file, self.min_value).unwrap();
-        self.write_value(file, self.max_value).unwrap();
-
-        self.write_value(file, self.first_value).unwrap();
+        file.write_all(&buffer)?;
 
         Ok(HEADER_SIZE + MAGIC_SIZE)
     }
@@ -664,9 +695,10 @@ impl PartiallyPersistentDataFileWriter {
 
 impl Write for PartiallyPersistentDataFileWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.file.seek(io::SeekFrom::Start(0)).unwrap();
-        self.header.borrow().write(self.file.by_ref()).unwrap();
-        self.file.seek(io::SeekFrom::End(0)).unwrap();
+        let header_bytes = self.header.borrow().as_bytes();
+        self.file.seek(SeekFrom::Start(0))?;
+        self.file.write_all(&header_bytes)?;
+        self.file.seek(SeekFrom::End(0))?;
         self.file.write(buf)
     }
 
