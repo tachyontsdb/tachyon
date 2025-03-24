@@ -265,6 +265,20 @@ impl DatabaseSource for TimescaleDB {
         );
         self.conn.execute(&create_hypertable_query, &[])?;
 
+        let enable_compress_query = format!(
+            "ALTER TABLE {} SET (
+                timescaledb.enable_columnstore = true,
+                timescaledb.segmentby = 'timestamp');",
+            self.table_name,
+        );
+        self.conn.execute(&enable_compress_query, &[])?;
+
+        let move_to_columnstore_query = format!(
+            "CALL add_columnstore_policy('{}', created_before => INTERVAL '1 second');",
+            self.table_name,
+        );
+        self.conn.execute(&move_to_columnstore_query, &[])?;
+
         Ok(())
     }
 
@@ -327,6 +341,7 @@ impl DatabaseSource for TimescaleDB {
     fn cleanup(_path: impl AsRef<Path>) -> Result<(), Self::Error> {
         // Connect and drop the table
         let mut client = PgClient::connect(DEFAULT_CONN_STRING, NoTls)?;
+
         let timescale_postgres_db_size = client.query_one(
             &format!(
                 "SELECT pg_size_pretty(pg_total_relation_size('{}'))",
@@ -339,6 +354,7 @@ impl DatabaseSource for TimescaleDB {
             DEFAULT_TABLE_NAME,
             timescale_postgres_db_size.get::<usize, String>(0)
         );
+
         let timescale_hypertable_db_size = client.query_one(
             &format!("SELECT hypertable_size('{}')", DEFAULT_TABLE_NAME),
             &[],
@@ -348,6 +364,20 @@ impl DatabaseSource for TimescaleDB {
             DEFAULT_TABLE_NAME,
             timescale_hypertable_db_size.get::<usize, i64>(0)
         );
+
+        let timescale_hypertable_compressed_size = client.query_one(
+            &format!(
+                "SELECT after_compression_total_bytes FROM hypertable_columnstore_stats('{}')",
+                DEFAULT_TABLE_NAME
+            ),
+            &[],
+        )?;
+        println!(
+            "TimescaleDB hypertable '{}' compressed size: {:?}",
+            DEFAULT_TABLE_NAME,
+            timescale_hypertable_compressed_size.get::<usize, Option<i64>>(0),
+        );
+
         client.execute(&format!("DROP TABLE IF EXISTS {}", DEFAULT_TABLE_NAME), &[])?;
         Ok(())
     }
