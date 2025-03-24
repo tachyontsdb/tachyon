@@ -40,7 +40,7 @@ fn main() -> Result<()> {
     let stream_name = "camera_brightness";
 
     // Create the stream if it doesn't exist
-    if !connection.check_stream_exists(stream_name) {
+    if !connection.check_stream_exists(stream_name).expect("Failed to check stream exists.") {
         println!("Creating stream '{}' for brightness data", stream_name);
         connection
             .create_stream(stream_name, ValueType::Float64)
@@ -53,7 +53,7 @@ fn main() -> Result<()> {
     }
 
     // Prepare inserter for the stream
-    let mut inserter = connection.prepare_insert(stream_name);
+    let mut inserter = connection.prepare_insert(stream_name).expect("Failed to prepare insert.");
     println!("Tachyon database initialized successfully");
 
     // Get the output filename from the command-line arguments.

@@ -4,6 +4,7 @@ members = [
     "tachyon_core",
     "tachyon_cli",
     "tachyon_web_backend",
+    # "examples/raspberry-pi-camera",
 ]
 resolver = "2"
 
