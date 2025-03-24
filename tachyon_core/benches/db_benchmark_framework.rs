@@ -251,7 +251,8 @@ impl DatabaseSource for TimescaleDB {
         let create_table_query = format!(
             "CREATE TABLE {} (
                 timestamp BIGINT,
-                value {}
+                value {},
+                stream_id INT
             )",
             self.table_name, value_type
         );
@@ -268,7 +269,7 @@ impl DatabaseSource for TimescaleDB {
         let enable_compress_query = format!(
             "ALTER TABLE {} SET (
                 timescaledb.enable_columnstore = true,
-                timescaledb.segmentby = 'timestamp');",
+                timescaledb.segmentby = 'stream_id');",
             self.table_name,
         );
         self.conn.execute(&enable_compress_query, &[])?;
@@ -285,30 +286,35 @@ impl DatabaseSource for TimescaleDB {
     fn insert(&mut self, timestamps: &[Timestamp], values: &[Value]) -> Result<(), Self::Error> {
         let mut transaction = self.conn.transaction()?;
 
+        let stream_id: i32 = 1;
+
         for (ts, v) in timestamps.iter().zip(values.iter()) {
             match self.value_type {
                 ValueType::Integer64 => {
                     transaction.execute(
-                        &format!("INSERT INTO {} VALUES ($1, $2)", self.table_name),
-                        &[&(*ts as i64), &v.get_integer64()],
+                        &format!("INSERT INTO {} VALUES ($1, $2, $3)", self.table_name),
+                        &[&(*ts as i64), &v.get_integer64(), &stream_id],
                     )?;
                 }
                 ValueType::UInteger64 => {
                     transaction.execute(
-                        &format!("INSERT INTO {} VALUES ($1, $2)", self.table_name),
-                        &[&(*ts as i64), &(v.get_uinteger64() as i64)],
+                        &format!("INSERT INTO {} VALUES ($1, $2, $3)", self.table_name),
+                        &[&(*ts as i64), &(v.get_uinteger64() as i64), &stream_id],
                     )?;
                 }
                 ValueType::Float64 => {
                     transaction.execute(
-                        &format!("INSERT INTO {} VALUES ($1, $2)", self.table_name),
-                        &[&(*ts as i64), &v.get_float64()],
+                        &format!("INSERT INTO {} VALUES ($1, $2, $3)", self.table_name),
+                        &[&(*ts as i64), &v.get_float64(), &stream_id],
                     )?;
                 }
             }
         }
 
         transaction.commit()?;
+
+        self.manual_compress();
+
         Ok(())
     }
 
@@ -367,15 +373,16 @@ impl DatabaseSource for TimescaleDB {
 
         let timescale_hypertable_compressed_size = client.query_one(
             &format!(
-                "SELECT after_compression_total_bytes FROM hypertable_columnstore_stats('{}')",
+                "SELECT before_compression_total_bytes, after_compression_total_bytes FROM hypertable_columnstore_stats('{}')",
                 DEFAULT_TABLE_NAME
             ),
             &[],
         )?;
         println!(
-            "TimescaleDB hypertable '{}' compressed size: {:?}",
+            "TimescaleDB hypertable '{}' compressed size: (before) {:?} | (after) {:?}",
             DEFAULT_TABLE_NAME,
             timescale_hypertable_compressed_size.get::<usize, Option<i64>>(0),
+            timescale_hypertable_compressed_size.get::<usize, Option<i64>>(1),
         );
 
         client.execute(&format!("DROP TABLE IF EXISTS {}", DEFAULT_TABLE_NAME), &[])?;
@@ -384,6 +391,17 @@ impl DatabaseSource for TimescaleDB {
 
     fn name() -> &'static str {
         "TimescaleDB"
+    }
+}
+
+impl TimescaleDB {
+    fn manual_compress(&mut self) {
+        // Compress all chunks in the hypertable
+        let compress_chunks_query = format!(
+            "SELECT compress_chunk(chunk) FROM show_chunks('{}') AS chunk",
+            self.table_name
+        );
+        self.conn.execute(&compress_chunks_query, &[]).unwrap();
     }
 }
 
