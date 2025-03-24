@@ -55,7 +55,7 @@ impl VectorToVectorNode {
 
             let slope = (v2.convert_into_f64(value_type) - v1.convert_into_f64(value_type))
                 / (t2 as f64 - t1 as f64);
-            let res = ((ts as f64 - t1 as f64) * slope + v1.convert_into_f64(value_type)).round();
+            let res = (ts as f64 - t1 as f64) * slope + v1.convert_into_f64(value_type);
 
             match value_type {
                 ValueType::Integer64 => (res as i64).into(),
