@@ -145,6 +145,32 @@ impl PageCache {
         self.cur_file_id - 1
     }
 
+    // Removes all pages from the file
+    pub fn flush_pages_for_file(&mut self, file_id: FileId) {
+        // 1. flush all pages from the page cache for file ID
+        // TODO: Check if this needs to be optimized
+        for frame in &mut self.frames {
+            if let Frame::Page(page) = frame {
+                if page.file_id == file_id {
+                    self.mapping
+                        .remove(&(((page.file_id as u64) << 32) | (page.page_id as u64)));
+                    *frame = Frame::Empty;
+                }
+            }
+        }
+    }
+
+    pub fn get_file(&mut self, file_id: FileId) -> &File {
+        // Check that file is open
+        if let std::collections::hash_map::Entry::Vacant(e) = self.open_files.entry(file_id) {
+            let path = self.file_id_to_path.get(&file_id).unwrap();
+            e.insert(File::open(path).unwrap());
+        }
+
+        // SAFETY: we ensure that the file is inserted above, so this is guaranteed to be Some
+        self.open_files.get(&file_id).unwrap()
+    }
+
     fn load_page(&mut self, file_id: FileId, page_id: PageId) -> FrameId {
         let frame_id;
         // 1st - check that page_id is loaded in memory

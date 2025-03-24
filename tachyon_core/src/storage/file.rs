@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -17,6 +18,79 @@ const MAGIC_SIZE: usize = 4;
 const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
 const HEADER_SIZE: usize = 71;
+
+/*
+This structure is responsible for handling file-level locks.
+Currently, only Unix-based systems are supported. [shared] locks
+correspond to readers and [exclusive] locks correspond to writers.
+
+There can only be one process with an exclusive lock, but multiple
+processes can have shared locks. However, a shared lock and an
+exclusive lock cannot be held at the same time.
+*/
+pub struct FileLockGuard {
+    fd: RawFd,
+    released: bool,
+}
+
+impl FileLockGuard {
+    pub fn new_shared(fd: &File) -> Result<Self, io::Error> {
+        rustix::fs::flock(fd.as_fd(), rustix::fs::FlockOperation::LockShared)?;
+        Ok(Self {
+            fd: fd.as_raw_fd(),
+            released: false,
+        })
+    }
+
+    pub fn new_exclusive(fd: &File) -> Result<Self, io::Error> {
+        rustix::fs::flock(fd.as_fd(), rustix::fs::FlockOperation::LockExclusive)?;
+        Ok(Self {
+            fd: fd.as_raw_fd(),
+            released: false,
+        })
+    }
+
+    pub fn non_blocking_new_shared(fd: &File) -> Result<Self, io::Error> {
+        rustix::fs::flock(
+            fd.as_fd(),
+            rustix::fs::FlockOperation::NonBlockingLockShared,
+        )?;
+        Ok(Self {
+            fd: fd.as_raw_fd(),
+            released: false,
+        })
+    }
+
+    pub fn non_blocking_new_exclusive(fd: &File) -> Result<Self, io::Error> {
+        rustix::fs::flock(
+            fd.as_fd(),
+            rustix::fs::FlockOperation::NonBlockingLockExclusive,
+        )?;
+        Ok(Self {
+            fd: fd.as_raw_fd(),
+            released: false,
+        })
+    }
+
+    pub fn release(&mut self) -> Result<(), io::Error> {
+        if self.released {
+            return Ok(());
+        }
+        rustix::fs::flock(
+            unsafe { BorrowedFd::borrow_raw(self.fd) },
+            rustix::fs::FlockOperation::Unlock,
+        )?;
+        self.released = true;
+
+        Ok(())
+    }
+}
+
+impl Drop for FileLockGuard {
+    fn drop(&mut self) {
+        let _ = self.release();
+    }
+}
 
 #[derive(Clone)]
 pub struct Header {
@@ -234,6 +308,8 @@ struct CursorImpl {
     scan_hint: ScanHint,
 
     is_done: bool,
+
+    file_lock: FileLockGuard,
 }
 
 impl CursorImpl {
@@ -253,6 +329,7 @@ impl CursorImpl {
         let file_id = page_cache_ref.register_or_get_file_id(&file_paths[0]);
         let header = Header::parse(file_id, &mut page_cache_ref);
 
+        let file_lock = FileLockGuard::new_shared(page_cache_ref.get_file(file_id))?;
         drop(page_cache_ref);
 
         let decomp_engine = IntDecompressor::new(
@@ -278,6 +355,7 @@ impl CursorImpl {
             scan_hint,
 
             is_done: false,
+            file_lock,
         };
 
         cursor.use_query_hint_for_value(cursor.value);
@@ -355,6 +433,9 @@ impl CursorImpl {
             &self.header,
         );
 
+        self.file_lock =
+            FileLockGuard::new_shared(self.page_cache.borrow_mut().get_file(self.file_id)).unwrap();
+
         // Use the query hint if applicable on the next file
         if self.scan_hint != ScanHint::None
             && self.start <= self.header.min_timestamp
@@ -378,6 +459,17 @@ impl CursorImpl {
         if self.values_read == self.header.count as u64 {
             if self.load_next_file().is_none() {
                 self.is_done = true;
+                // flush all pages from the last file - it's possible
+                // that the last file is not closed so it could be mutated
+                // by another process and so we do not want stale data
+                // TODO: Check if open
+                self.page_cache
+                    .borrow_mut()
+                    .flush_pages_for_file(self.file_id);
+
+                // release early just in case cursor isn't dropped right away
+                // to allow other processes to continue
+                self.file_lock.release().unwrap();
             }
             return Some(to_return);
         }
@@ -388,6 +480,14 @@ impl CursorImpl {
         self.use_query_hint_for_value(self.value);
 
         if self.current_timestamp > self.end {
+            // flush all pages from the last file
+            self.page_cache
+                .borrow_mut()
+                .flush_pages_for_file(self.file_id);
+
+            // release early just in case cursor isn't dropped right away
+            // to allow other processes to continue
+            self.file_lock.release().unwrap();
             self.is_done = true;
         }
         self.values_read += 1;
@@ -700,11 +800,15 @@ impl PartiallyPersistentDataFileWriter {
 
 impl Write for PartiallyPersistentDataFileWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let _guard = FileLockGuard::new_exclusive(&self.file)?;
         let header_bytes = self.header.borrow().as_bytes();
         self.file.seek(SeekFrom::Start(0))?;
         self.file.write_all(&header_bytes)?;
         self.file.seek(SeekFrom::End(0))?;
-        self.file.write(buf)
+        let written = self.file.write(buf)?;
+
+        // lock dropped via RAII
+        Ok(written)
     }
 
     fn flush(&mut self) -> io::Result<()> {
