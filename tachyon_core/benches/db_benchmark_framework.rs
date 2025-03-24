@@ -581,13 +581,13 @@ fn timescaledb_read_benchmark(c: &mut Criterion) {
 criterion_group!(
     name = insert_benches;
     config = get_criterion_config::<20>();
-    targets = tachyon_insert_benchmark, sqlite_insert_benchmark // , timescaledb_insert_benchmark
+    targets = tachyon_insert_benchmark, sqlite_insert_benchmark , timescaledb_insert_benchmark
 );
 
 criterion_group!(
     name = read_benches;
     config = get_criterion_config::<100>();
-    targets = tachyon_read_benchmark, sqlite_read_benchmark // , timescaledb_read_benchmark
+    targets = tachyon_read_benchmark, sqlite_read_benchmark , timescaledb_read_benchmark
 );
 
 criterion_main!(read_benches, insert_benches);
