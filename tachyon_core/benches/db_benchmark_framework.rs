@@ -78,7 +78,7 @@ impl DatabaseSource for TachyonDB {
     }
 
     fn insert(&mut self, timestamps: &[Timestamp], values: &[Value]) -> Result<(), Self::Error> {
-        let mut inserter = self.conn.prepare_insert(&self.stream_name);
+        let mut inserter = self.conn.prepare_insert(&self.stream_name)?;
         for (ts, val) in timestamps.iter().zip(values.iter()) {
             match self.value_type {
                 ValueType::Integer64 => inserter.insert_integer64(*ts, val.get_integer64())?,
@@ -327,10 +327,27 @@ impl DatabaseSource for TimescaleDB {
     fn cleanup(_path: impl AsRef<Path>) -> Result<(), Self::Error> {
         // Connect and drop the table
         let mut client = PgClient::connect(DEFAULT_CONN_STRING, NoTls)?;
-        let timescale_postgres_db_size = client.query_one(&format!("SELECT pg_size_pretty(pg_total_relation_size('{}'))", DEFAULT_TABLE_NAME), &[])?;
-        println!("Postgres TimescaleDB table '{}' size: {:?}", DEFAULT_TABLE_NAME, timescale_postgres_db_size.get::<usize, String>(0));
-        let timescale_hypertable_db_size = client.query_one(&format!("SELECT hypertable_size('{}')", DEFAULT_TABLE_NAME), &[])?;
-        println!("TimescaleDB hypertable '{}' size: {:?}", DEFAULT_TABLE_NAME, timescale_hypertable_db_size.get::<usize, i64>(0));
+        let timescale_postgres_db_size = client.query_one(
+            &format!(
+                "SELECT pg_size_pretty(pg_total_relation_size('{}'))",
+                DEFAULT_TABLE_NAME
+            ),
+            &[],
+        )?;
+        println!(
+            "Postgres TimescaleDB table '{}' size: {:?}",
+            DEFAULT_TABLE_NAME,
+            timescale_postgres_db_size.get::<usize, String>(0)
+        );
+        let timescale_hypertable_db_size = client.query_one(
+            &format!("SELECT hypertable_size('{}')", DEFAULT_TABLE_NAME),
+            &[],
+        )?;
+        println!(
+            "TimescaleDB hypertable '{}' size: {:?}",
+            DEFAULT_TABLE_NAME,
+            timescale_hypertable_db_size.get::<usize, i64>(0)
+        );
         client.execute(&format!("DROP TABLE IF EXISTS {}", DEFAULT_TABLE_NAME), &[])?;
         Ok(())
     }
