@@ -137,11 +137,16 @@ fn query(
 }
 
 #[derive(Deserialize)]
-struct PerformQueryRequest {
-    path: String,
+struct QueryRequest {
     query: String,
     start: Option<Timestamp>,
     end: Option<Timestamp>,
+}
+
+#[derive(Deserialize)]
+struct PerformQueryRequest {
+    path: String,
+    inner: QueryRequest,
 }
 
 async fn perform_query(
@@ -150,9 +155,23 @@ async fn perform_query(
     let mut connection =
         Connection::new(request.path).map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
     Ok(Json(
-        query(&mut connection, request.query, request.start, request.end)
-            .map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?,
+        query(
+            &mut connection,
+            request.inner.query,
+            request.inner.start,
+            request.inner.end,
+        )
+        .map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?,
     ))
+}
+
+#[derive(Deserialize)]
+struct BeginSocketRequest {
+    path: String,
+    begin_time: Timestamp,
+    end_time: Timestamp,
+    interval_ms: u64,
+    inners: Vec<QueryRequest>,
 }
 
 async fn websocket_perform_query(ws: WebSocketUpgrade) -> Response {
@@ -170,14 +189,18 @@ async fn handle_perform_query_socket(mut socket: WebSocket) {
         let message = message.unwrap();
 
         let message = message.to_text().unwrap();
-        let request = serde_json::from_str::<PerformQueryRequest>(message).unwrap();
+        let request = serde_json::from_str::<BeginSocketRequest>(message).unwrap();
 
-        let query_response = {
+        let query_responses = {
             let mut connection = Connection::new(request.path).unwrap();
-            query(&mut connection, request.query, request.start, request.end).unwrap()
+            request
+                .inners
+                .iter()
+                .map(|inner| query(&mut connection, &inner.query, inner.start, inner.end).unwrap())
+                .collect::<Vec<_>>()
         };
 
-        let response_str = serde_json::to_string(&query_response).unwrap();
+        let response_str = serde_json::to_string(&query_responses).unwrap();
         let response = Message::text(Utf8Bytes::from(&response_str));
 
         if socket.send(response).await.is_err() {

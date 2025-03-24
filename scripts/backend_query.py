@@ -51,7 +51,7 @@ def main():
     else:
         end = int(end)
 
-    query_body = {"path": path, "query": query, "start": start, "end": end}
+    query_body = {"path": path, "inner": {"query": query, "start": start, "end": end}}
     query_response = requests.post(url=f"{backend_url}/query", json=query_body)
 
     print(f"Query response status code: {query_response.status_code}")
