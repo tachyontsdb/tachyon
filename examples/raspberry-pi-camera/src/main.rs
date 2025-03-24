@@ -210,7 +210,7 @@ fn main() -> Result<()> {
                 .try_into()
                 .unwrap(),
             current_brightness,
-        );
+        ).expect("Failed to insert float.");
 
         // Write the valid frame data to the output file.
         file.write_all(&frame_data[..bytes_used])
@@ -227,7 +227,7 @@ fn main() -> Result<()> {
 
     println!("Video capture complete. Output saved to {}", filename);
 
-    inserter.flush();
+    inserter.flush().expect("Failed to flush inserter.");
 
     Ok(())
 }
