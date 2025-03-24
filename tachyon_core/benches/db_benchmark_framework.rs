@@ -327,10 +327,27 @@ impl DatabaseSource for TimescaleDB {
     fn cleanup(_path: impl AsRef<Path>) -> Result<(), Self::Error> {
         // Connect and drop the table
         let mut client = PgClient::connect(DEFAULT_CONN_STRING, NoTls)?;
-        let timescale_postgres_db_size = client.query_one(&format!("SELECT pg_size_pretty(pg_total_relation_size('{}'))", DEFAULT_TABLE_NAME), &[])?;
-        println!("Postgres TimescaleDB table '{}' size: {:?}", DEFAULT_TABLE_NAME, timescale_postgres_db_size.get::<usize, String>(0));
-        let timescale_hypertable_db_size = client.query_one(&format!("SELECT hypertable_size('{}')", DEFAULT_TABLE_NAME), &[])?;
-        println!("TimescaleDB hypertable '{}' size: {:?}", DEFAULT_TABLE_NAME, timescale_hypertable_db_size.get::<usize, i64>(0));
+        let timescale_postgres_db_size = client.query_one(
+            &format!(
+                "SELECT pg_size_pretty(pg_total_relation_size('{}'))",
+                DEFAULT_TABLE_NAME
+            ),
+            &[],
+        )?;
+        println!(
+            "Postgres TimescaleDB table '{}' size: {:?}",
+            DEFAULT_TABLE_NAME,
+            timescale_postgres_db_size.get::<usize, String>(0)
+        );
+        let timescale_hypertable_db_size = client.query_one(
+            &format!("SELECT hypertable_size('{}')", DEFAULT_TABLE_NAME),
+            &[],
+        )?;
+        println!(
+            "TimescaleDB hypertable '{}' size: {:?}",
+            DEFAULT_TABLE_NAME,
+            timescale_hypertable_db_size.get::<usize, i64>(0)
+        );
         client.execute(&format!("DROP TABLE IF EXISTS {}", DEFAULT_TABLE_NAME), &[])?;
         Ok(())
     }
@@ -564,13 +581,13 @@ fn timescaledb_read_benchmark(c: &mut Criterion) {
 criterion_group!(
     name = insert_benches;
     config = get_criterion_config::<20>();
-    targets = tachyon_insert_benchmark, sqlite_insert_benchmark, timescaledb_insert_benchmark
+    targets = tachyon_insert_benchmark, sqlite_insert_benchmark // , timescaledb_insert_benchmark
 );
 
 criterion_group!(
     name = read_benches;
     config = get_criterion_config::<100>();
-    targets = tachyon_read_benchmark, sqlite_read_benchmark, timescaledb_read_benchmark
+    targets = tachyon_read_benchmark, sqlite_read_benchmark // , timescaledb_read_benchmark
 );
 
 criterion_main!(read_benches, insert_benches);
