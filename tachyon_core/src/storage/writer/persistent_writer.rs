@@ -555,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_stream_files() {
+    fn test_delete_stream() {
         set_up_dirs!(dirs, "db");
         let stream_id = Uuid::new_v4();
 

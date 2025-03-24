@@ -941,7 +941,6 @@ mod tests {
         assert!(all_string_names.contains(&String::from(r#"stream2{matcher="b"}"#)));
 
         let matching_string_names = conn.get_matching_stream_names(r#"stream1"#).unwrap();
-
         assert!(matching_string_names.len() == 2);
         assert!(matching_string_names.contains(&String::from(r#"stream1{matcher="a"}"#)));
         assert!(matching_string_names.contains(&String::from(r#"stream1{matcher="b"}"#)));
