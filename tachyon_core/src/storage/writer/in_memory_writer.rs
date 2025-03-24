@@ -115,12 +115,8 @@ impl Writer for InMemoryWriter {
         Ok(())
     }
 
-    fn delete_stream(&self, stream_id: Uuid) -> Result<(), WriterErr> {
-        let stream = self.root.join(stream_id.to_string());
-        if stream.exists() {
-            fs::remove_dir_all(stream)?;
-        }
-        Ok(())
+    fn delete_stream(&self, _stream_id: Uuid) -> Result<(), WriterErr> {
+        panic!("Not implemented.");
     }
 
     fn flush_all(&mut self) -> Result<(), WriterErr> {

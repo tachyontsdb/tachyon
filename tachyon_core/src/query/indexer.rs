@@ -716,7 +716,7 @@ mod tests {
     use crate::ValueType;
     use promql_parser::label::{MatchOp, Matcher, Matchers};
     use std::collections::HashSet;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use uuid::Uuid;
 
     #[test]
@@ -820,11 +820,8 @@ mod tests {
         indexer.drop_store().unwrap();
     }
 
-    #[test]
-    fn test_get_value_type_for_stream() {
-        set_up_dirs!(dirs, "db");
-
-        let mut indexer = Indexer::new(dirs[0].clone()).unwrap();
+    fn indexer_test_helper(root_dir: impl AsRef<Path>) -> ((Uuid, Uuid, Uuid), Indexer) {
+        let mut indexer = Indexer::new(root_dir).unwrap();
         indexer.drop_store().unwrap();
         indexer.create_store().unwrap();
 
@@ -854,6 +851,14 @@ mod tests {
         let s3id = indexer
             .insert_new_id(stream3, &matchers3, stream_value_type_3)
             .unwrap();
+
+        ((s1id, s2id, s3id), indexer)
+    }
+
+    #[test]
+    fn test_get_value_type_for_stream() {
+        set_up_dirs!(dirs, "db");
+        let ((s1id, s2id, s3id), indexer) = indexer_test_helper(dirs[0].clone());
 
         assert_eq!(
             indexer.get_stream_value_type(s1id),
@@ -872,37 +877,7 @@ mod tests {
     #[test]
     fn test_get_all_streams() {
         set_up_dirs!(dirs, "db");
-
-        let mut indexer = Indexer::new(dirs[0].clone()).unwrap();
-        indexer.drop_store().unwrap();
-        indexer.create_store().unwrap();
-
-        let (stream1, matchers1, stream_value_type_1) = (
-            "str1",
-            Matchers::new(vec![Matcher::new(MatchOp::Equal, "a", "b")]),
-            ValueType::UInteger64,
-        );
-        let s1id = indexer
-            .insert_new_id(stream1, &matchers1, stream_value_type_1)
-            .unwrap();
-
-        let (stream2, matchers2, stream_value_type_2) = (
-            "str2",
-            Matchers::new(vec![Matcher::new(MatchOp::Equal, "c", "d")]),
-            ValueType::Integer64,
-        );
-        let s2id = indexer
-            .insert_new_id(stream2, &matchers2, stream_value_type_2)
-            .unwrap();
-
-        let (stream3, matchers3, stream_value_type_3) = (
-            "str3",
-            Matchers::new(vec![Matcher::new(MatchOp::Equal, "e", "f")]),
-            ValueType::Float64,
-        );
-        let s3id = indexer
-            .insert_new_id(stream3, &matchers3, stream_value_type_3)
-            .unwrap();
+        let ((s1id, s2id, s3id), indexer) = indexer_test_helper(dirs[0].clone());
 
         let all_streams = indexer.get_all_streams().unwrap();
         assert_eq!(all_streams.len(), 3);
@@ -922,5 +897,61 @@ mod tests {
         assert_eq!(all_streams[0].2, ValueType::UInteger64);
         assert_eq!(all_streams[1].2, ValueType::Integer64);
         assert_eq!(all_streams[2].2, ValueType::Float64);
+    }
+
+    #[test]
+    fn test_get_all_stream_names() {
+        set_up_dirs!(dirs, "db");
+        let ((s1id, s2id, s3id), indexer) = indexer_test_helper(dirs[0].clone());
+
+        let all_stream_names = indexer.get_all_stream_names().unwrap();
+        assert_eq!(all_stream_names.len(), 3);
+
+        assert_eq!(all_stream_names[0].0, s1id);
+        assert_eq!(all_stream_names[1].0, s2id);
+        assert_eq!(all_stream_names[2].0, s3id);
+
+        assert_eq!(all_stream_names[0].1, r#"str1{a="b"}"#);
+        assert_eq!(all_stream_names[1].1, r#"str2{c="d"}"#);
+        assert_eq!(all_stream_names[2].1, r#"str3{e="f"}"#);
+    }
+
+    #[test]
+    fn test_delete_stream_ids() {
+        set_up_dirs!(dirs, "db");
+        let ((s1id, s2id, s3id), mut indexer) = indexer_test_helper(dirs[0].clone());
+
+        // Add dummy data to "id to file" table
+        indexer
+            .insert_new_file(s1id, Path::new("a"), 10, Some(20))
+            .unwrap();
+        indexer
+            .insert_new_file(s2id, Path::new("b"), 10, Some(20))
+            .unwrap();
+        indexer
+            .insert_new_file(s3id, Path::new("c"), 10, Some(20))
+            .unwrap();
+
+        // Delete stream ids
+        let mut delete_ids = HashSet::new();
+        delete_ids.insert(s1id);
+        delete_ids.insert(s2id);
+        indexer.delete_stream_ids(delete_ids).unwrap();
+
+        // Check "stream to ids" table
+        let all_stream_names = indexer.get_all_stream_names().unwrap();
+        assert_eq!(all_stream_names.len(), 1);
+        assert_eq!(all_stream_names[0].0, s3id);
+        assert_eq!(all_stream_names[0].1, r#"str3{e="f"}"#);
+
+        // Check "id to file" table
+        assert_eq!(indexer.get_required_files(s1id, 0, 30).unwrap().len(), 0);
+        assert_eq!(indexer.get_required_files(s2id, 0, 30).unwrap().len(), 0);
+        assert_eq!(indexer.get_required_files(s3id, 0, 30).unwrap().len(), 1);
+
+        // Check "id to value type" table
+        assert!(indexer.get_stream_value_type(s1id).is_none());
+        assert!(indexer.get_stream_value_type(s2id).is_none());
+        assert!(indexer.get_stream_value_type(s3id).is_some());
     }
 }
