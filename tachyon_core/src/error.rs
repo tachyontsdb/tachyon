@@ -55,7 +55,11 @@ pub enum ConnectionErr {
     #[error("Failed to create stream: {stream}.")]
     StreamCreationErr { stream: String },
     #[error("Failed to create stream because it already exists: {stream}")]
-    StreamExistsErr { stream: String },
+    ExistingStreamCreationErr { stream: String },
+    #[error("Failed to delete stream: {stream}.")]
+    StreamDeletionErr { stream: String },
+    #[error("Failed to delete stream because it does not exist: {stream}")]
+    MissingStreamDeletionErr { stream: String },
     #[error("Failed to insert into stream: {stream}")]
     StreamInsertErr { stream: String },
     #[error("Failed to {op} on non-existent stream: {stream}.")]

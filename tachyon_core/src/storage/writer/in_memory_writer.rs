@@ -115,6 +115,14 @@ impl Writer for InMemoryWriter {
         Ok(())
     }
 
+    fn delete_stream(&self, stream_id: Uuid) -> Result<(), WriterErr> {
+        let stream = self.root.join(stream_id.to_string());
+        if stream.exists() {
+            fs::remove_dir_all(stream)?;
+        }
+        Ok(())
+    }
+
     fn flush_all(&mut self) -> Result<(), WriterErr> {
         for (stream_id, file) in self.open_data_files.iter_mut() {
             let file_path = InMemoryWriter::create_virtual_file_path(*stream_id, file);

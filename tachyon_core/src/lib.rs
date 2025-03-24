@@ -433,6 +433,33 @@ impl Connection {
             .get_stream_ids(selector.name.as_ref().unwrap(), &selector.matchers)
     }
 
+    pub fn get_matching_stream_names(
+        &self,
+        stream: impl AsRef<str>,
+    ) -> Result<Vec<String>, TachyonErr> {
+        let selector = self.parse_stream_for_insert(&stream)?;
+
+        let stream_ids = self.get_stream_ids_for_selector(&selector);
+        let all_stream_names = self.get_all_stream_names()?;
+
+        let mut stream_names: Vec<String> = Vec::new();
+        for (stream_id, stream_name) in all_stream_names {
+            if stream_ids.contains(&stream_id) {
+                stream_names.push(stream_name);
+            }
+        }
+
+        if stream_names.is_empty() {
+            return Err(TachyonErr::ConnectionErr(
+                ConnectionErr::MissingStreamDeletionErr {
+                    stream: stream.as_ref().to_string(),
+                },
+            ));
+        }
+
+        Ok(stream_names)
+    }
+
     pub fn create_stream(
         &mut self,
         stream: impl AsRef<str>,
@@ -441,9 +468,11 @@ impl Connection {
         let selector = self.parse_stream_for_insert(&stream)?;
 
         if !self.get_stream_ids_for_selector(&selector).is_empty() {
-            return Err(TachyonErr::ConnectionErr(ConnectionErr::StreamExistsErr {
-                stream: stream.as_ref().to_string(),
-            }));
+            return Err(TachyonErr::ConnectionErr(
+                ConnectionErr::ExistingStreamCreationErr {
+                    stream: stream.as_ref().to_string(),
+                },
+            ));
         }
 
         let stream_id = self
@@ -464,8 +493,34 @@ impl Connection {
         Ok(())
     }
 
-    pub fn delete_stream(&mut self, stream: impl AsRef<str>) {
-        todo!("Not deleting stream {:?}", stream.as_ref());
+    pub fn delete_stream(&mut self, stream: impl AsRef<str>) -> Result<(), TachyonErr> {
+        let selector = self.parse_stream_for_insert(&stream)?;
+
+        let stream_ids = self.get_stream_ids_for_selector(&selector);
+        if self.get_stream_ids_for_selector(&selector).is_empty() {
+            return Err(TachyonErr::ConnectionErr(
+                ConnectionErr::MissingStreamDeletionErr {
+                    stream: stream.as_ref().to_string(),
+                },
+            ));
+        }
+
+        // Delete physical files
+        for stream_id in &stream_ids {
+            self.writer.borrow_mut().delete_stream(*stream_id)?;
+        }
+
+        // Delete from indexer
+        self.indexer
+            .borrow_mut()
+            .delete_stream_ids(stream_ids)
+            .map_err(|_| {
+                TachyonErr::ConnectionErr(ConnectionErr::StreamDeletionErr {
+                    stream: stream.as_ref().to_string(),
+                })
+            })?;
+
+        Ok(())
     }
 
     pub fn check_stream_exists(&self, stream: impl AsRef<str>) -> Result<bool, TachyonErr> {
@@ -478,6 +533,13 @@ impl Connection {
         self.indexer
             .borrow()
             .get_all_streams()
+            .map_err(|_| TachyonErr::ConnectionErr(ConnectionErr::GetStreamsErr))
+    }
+
+    pub fn get_all_stream_names(&self) -> Result<Vec<(Uuid, String)>, TachyonErr> {
+        self.indexer
+            .borrow()
+            .get_all_stream_names()
             .map_err(|_| TachyonErr::ConnectionErr(ConnectionErr::GetStreamsErr))
     }
 

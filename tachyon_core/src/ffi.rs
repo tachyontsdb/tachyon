@@ -106,9 +106,23 @@ pub unsafe extern "C" fn tachyon_stream_create(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_stream_delete(connection: *mut Connection, stream: *const c_char) {
-    let stream = CStr::from_ptr(stream).to_str().unwrap();
-    (*connection).delete_stream(stream);
+pub unsafe extern "C" fn tachyon_stream_delete(
+    connection: *mut Connection,
+    stream: *const c_char,
+) -> u8 {
+    let stream_res = CStr::from_ptr(stream)
+        .to_str()
+        .map_err(|err| TachyonErr::MiscErr {
+            inner: Box::new(err),
+        });
+
+    match stream_res {
+        Ok(stream) => match (*connection).delete_stream(stream) {
+            Ok(()) => 0u8,
+            Err(tachyon_err) => get_error_code(&tachyon_err),
+        },
+        Err(tachyon_err) => get_error_code(&tachyon_err),
+    }
 }
 
 /// SAFETY: On success (code 0), this returns an `int *` (1 if stream exists, 0 otherwise) in the `out` parameter. Otherwise, it returns an error.

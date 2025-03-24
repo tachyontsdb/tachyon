@@ -148,6 +148,14 @@ impl Writer for PersistentWriter {
         }
         Ok(())
     }
+
+    fn delete_stream(&self, stream_id: Uuid) -> Result<(), WriterErr> {
+        let stream = self.root.join(stream_id.to_string());
+        if stream.exists() {
+            fs::remove_dir_all(stream)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
