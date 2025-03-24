@@ -2,16 +2,18 @@ use crate::{
     error::{print_error, TachyonErr},
     Connection, Inserter, Query, ReturnType, Timestamp, Value, ValueType, Vector,
 };
+use core::ffi;
 use std::ffi::{c_char, c_void, CStr};
 
 const FIRST_ERROR_CODE: u8 = 1;
-const LAST_ERROR_CODE: u8 = 4;
+const LAST_ERROR_CODE: u8 = 5;
 
 fn get_error_code(err: &TachyonErr) -> u8 {
     match err {
         TachyonErr::MiscErr { .. } => FIRST_ERROR_CODE,
         TachyonErr::ConnectionErr(_) => 2,
         TachyonErr::QueryErr(_) => 3,
+        TachyonErr::InserterErr(_) => 4,
         TachyonErr::WriterErr(_) => LAST_ERROR_CODE,
     }
 }
@@ -109,24 +111,55 @@ pub unsafe extern "C" fn tachyon_stream_delete(connection: *mut Connection, stre
     (*connection).delete_stream(stream);
 }
 
+/// SAFETY: On success (code 0), this returns an `int *` (1 if stream exists, 0 otherwise) in the `out` parameter. Otherwise, it returns an error.
+/// The caller is responsible for freeing the returned pointer in `out`.
+/// Success data can be freed by calling free on the returned `int *`.
+/// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_stream_check_exists(
     connection: *const Connection,
     stream: *const c_char,
-) -> bool {
+    out: *mut *mut c_void,
+) -> u8 {
     let stream = CStr::from_ptr(stream).to_str().unwrap();
-    (*connection).check_stream_exists(stream)
+
+    match (*connection).check_stream_exists(stream) {
+        Ok(exists) => {
+            let exists: ffi::c_int = if exists { 1 } else { 0 };
+            *out = Box::into_raw(Box::new(exists)) as *mut c_void;
+            0u8
+        }
+        Err(tachyon_err) => {
+            let return_value = get_error_code(&tachyon_err);
+            *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+            return_value
+        }
+    }
 }
 
-/// SAFETY: The caller is responsible for freeing the returned pointer by using the function `tachyon_inserter_close`.
+/// SAFETY: On success (code 0), this returns an `Inserter *` in the `out` parameter. Otherwise, it returns an error.
+/// The caller is responsible for freeing the returned pointer in `out`.
+/// Success data can be freed by using the function `tachyon_inserter_close`.
+/// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_inserter_create(
     connection: *mut Connection,
     stream: *const c_char,
-) -> *mut Inserter {
+    out: *mut *mut c_void,
+) -> u8 {
     let stream = CStr::from_ptr(stream).to_str().unwrap();
-    let inserter = (*connection).prepare_insert(stream);
-    Box::into_raw(Box::new(inserter))
+
+    match (*connection).prepare_insert(stream) {
+        Ok(inserter) => {
+            *out = Box::into_raw(Box::new(inserter)) as *mut c_void;
+            0u8
+        }
+        Err(tachyon_err) => {
+            let return_value = get_error_code(&tachyon_err);
+            *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+            return_value
+        }
+    }
 }
 
 #[no_mangle]

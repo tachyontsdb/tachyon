@@ -72,13 +72,11 @@ pub fn handle_command(
             stream,
             create,
         } => {
-            if create && !connection.check_stream_exists(&stream) {
-                connection
-                    .create_stream(&stream, config.value_type)
-                    .unwrap();
+            if create && !connection.check_stream_exists(&stream)? {
+                connection.create_stream(&stream, config.value_type)?;
             }
 
-            let mut inserter = connection.prepare_insert(&stream);
+            let mut inserter = connection.prepare_insert(&stream)?;
             println!("Reading from: {:?}", &path);
 
             let vectors = input::vector_input(&path, config.value_type)?;
@@ -105,7 +103,7 @@ pub fn handle_command(
             Ok(())
         }
         TachyonCommand::Create { stream } => {
-            connection.create_stream(stream, config.value_type).unwrap();
+            connection.create_stream(stream, config.value_type)?;
             Ok(())
         }
         TachyonCommand::Exit => {

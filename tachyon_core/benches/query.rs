@@ -62,13 +62,13 @@ fn vector_selector_benchmark(c: &mut Criterion) {
 
     let mut conn = Connection::new(root_dir.clone()).unwrap();
 
-    if !conn.check_stream_exists(STREAM) {
+    if !conn.check_stream_exists(STREAM).unwrap() {
         conn.create_stream(STREAM, ValueType::UInteger64).unwrap();
     }
 
     let (timestamps, values) = read_from_csv("../data/voltage_dataset.csv");
 
-    let mut inserter = conn.prepare_insert(STREAM);
+    let mut inserter = conn.prepare_insert(STREAM).unwrap();
 
     for i in 0..timestamps.len() {
         inserter

@@ -11,6 +11,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum CLIErr {
+    #[error(transparent)]
+    TachyonErr(#[from] TachyonErr),
     #[error("Input '{input}' could not be converted to stream type = {value_type}.")]
     InputValueTypeErr {
         input: String,
@@ -28,8 +30,6 @@ pub enum CLIErr {
     ReadLineErr(#[from] ReadlineError),
     #[error("IO Error.")]
     FileIOErr(#[from] std::io::Error),
-    #[error(transparent)]
-    TachyonErr(#[from] TachyonErr),
     #[error("Unsupported file format #{extension}.")]
     UnsupportedFileErr { extension: String },
     #[error("Output path not specified.")]
