@@ -32,6 +32,8 @@ pub enum CLIErr {
     TachyonErr(#[from] TachyonErr),
     #[error("Unsupported file format #{extension}.")]
     UnsupportedFileErr { extension: String },
+    #[error("Output path not specified.")]
+    OutputPathNotSpecified,
 }
 
 // fn export_as_csv(path: PathBuf, timeseries: &[(u64, f64)]) -> Result<(), CLIErr> {

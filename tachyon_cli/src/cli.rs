@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 
 use clap::{command, Parser, ValueEnum};
 use rustyline::{error::ReadlineError, history::FileHistory, DefaultEditor};
@@ -31,6 +31,16 @@ pub enum OutputMode {
     Graphical,
     Tabular,
     File,
+}
+
+impl fmt::Display for OutputMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            OutputMode::Graphical => write!(f, "graphical"),
+            OutputMode::Tabular => write!(f, "tabular"),
+            OutputMode::File => write!(f, "file"),
+        }
+    }
 }
 
 pub struct Config {

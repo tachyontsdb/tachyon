@@ -13,6 +13,7 @@ use crate::{
 
 mod debug;
 mod info;
+mod mode;
 
 #[derive(Debug, Parser)]
 #[command(name = "", version, about)]
@@ -52,6 +53,9 @@ pub enum TachyonCommand {
             _ => unreachable!()
         }), short, long)]
         value_type: Option<ValueType>, // Optional argument
+
+        #[command(subcommand)]
+        command: Option<mode::Mode>,
     },
 }
 
@@ -111,6 +115,7 @@ pub fn handle_command(
             output_mode,
             path: output_path,
             value_type,
+            command,
         } => {
             if let Some(output_mode) = output_mode {
                 config.output_mode = output_mode;
@@ -122,6 +127,10 @@ pub fn handle_command(
 
             if let Some(value_type) = value_type {
                 config.value_type = value_type;
+            }
+
+            if let Some(command) = command {
+                mode::handle_mode_get(command, config)?;
             }
 
             Ok(())
