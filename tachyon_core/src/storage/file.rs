@@ -19,6 +19,15 @@ const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
 const HEADER_SIZE: usize = 71;
 
+/*
+This structure is responsible for handling file-level locks.
+Currently, only Unix-based systems are supported. [shared] locks
+correspond to readers and [exclusive] locks correspond to writers.
+
+There can only be one process with an exclusive lock, but multiple
+processes can have shared locks. However, a shared lock and an
+exclusive lock cannot be held at the same time.
+*/
 pub struct FileLockGuard {
     fd: RawFd,
     released: bool,
@@ -400,10 +409,6 @@ impl CursorImpl {
         self.file_index += 1;
 
         if self.file_index == self.file_paths.len() {
-            // flush all pages from the last file
-            self.page_cache
-                .borrow_mut()
-                .flush_pages_for_file(self.file_id);
             return None;
         }
         self.file_id = self
@@ -454,6 +459,16 @@ impl CursorImpl {
         if self.values_read == self.header.count as u64 {
             if self.load_next_file().is_none() {
                 self.is_done = true;
+                // flush all pages from the last file - it's possible
+                // that the last file is not closed so it could be mutated
+                // by another process and so we do not want stale data
+                // TODO: Check if open
+                self.page_cache
+                    .borrow_mut()
+                    .flush_pages_for_file(self.file_id);
+
+                // release early just in case cursor isn't dropped right away
+                // to allow other processes to continue
                 self.file_lock.release().unwrap();
             }
             return Some(to_return);
@@ -465,6 +480,13 @@ impl CursorImpl {
         self.use_query_hint_for_value(self.value);
 
         if self.current_timestamp > self.end {
+            // flush all pages from the last file
+            self.page_cache
+                .borrow_mut()
+                .flush_pages_for_file(self.file_id);
+
+            // release early just in case cursor isn't dropped right away
+            // to allow other processes to continue
             self.file_lock.release().unwrap();
             self.is_done = true;
         }
@@ -784,6 +806,8 @@ impl Write for PartiallyPersistentDataFileWriter {
         self.file.write_all(&header_bytes)?;
         self.file.seek(SeekFrom::End(0))?;
         let written = self.file.write(buf)?;
+
+        // lock dropped via RAII
         Ok(written)
     }
 

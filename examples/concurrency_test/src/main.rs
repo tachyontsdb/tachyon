@@ -87,7 +87,7 @@ fn run_parent() -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = Connection::new(TEST_DIR)?;
 
     // Create a stream for timestamp and value
-    if !conn.check_stream_exists(STREAM_NAME) {
+    if !conn.check_stream_exists(STREAM_NAME).unwrap() {
         conn.create_stream(STREAM_NAME, ValueType::UInteger64)?;
         log_with_timestamp(
             &mut output_file,
@@ -101,7 +101,7 @@ fn run_parent() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Prepare an inserter to add data to the stream
-    let mut inserter = conn.prepare_insert(STREAM_NAME);
+    let mut inserter = conn.prepare_insert(STREAM_NAME).unwrap();
 
     let mut i = 1;
     let mut accum = 0;
@@ -173,7 +173,7 @@ fn run_child() -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = Connection::new(TEST_DIR)?;
 
     // Verify the stream exists
-    if !conn.check_stream_exists(STREAM_NAME) {
+    if !conn.check_stream_exists(STREAM_NAME).unwrap() {
         log_with_timestamp(
             &mut output_file,
             &format!("Stream {} does not exist", STREAM_NAME),

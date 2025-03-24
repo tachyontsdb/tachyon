@@ -167,6 +167,7 @@ impl PageCache {
             e.insert(File::open(path).unwrap());
         }
 
+        // SAFETY: we ensure that the file is inserted above, so this is guaranteed to be Some
         self.open_files.get(&file_id).unwrap()
     }
 
