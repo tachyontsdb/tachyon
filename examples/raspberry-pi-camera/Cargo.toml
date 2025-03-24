@@ -1,0 +1,11 @@
+[package]
+name = "raspberry-pi-camera"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libcamera = "0.2.2"
+image = "0.24.7"
+anyhow = "1.0.75"
+tachyon_core = { path = "../../tachyon_core" }
+chrono = "0.4"
