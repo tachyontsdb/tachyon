@@ -111,7 +111,7 @@ pub unsafe extern "C" fn tachyon_stream_delete(connection: *mut Connection, stre
     (*connection).delete_stream(stream);
 }
 
-/// SAFETY: On success (code 0), this returns an `int` (1 if stream exists, 0 otherwise) in the `out` parameter. Otherwise, it returns an error.
+/// SAFETY: On success (code 0), this returns an `int *` (1 if stream exists, 0 otherwise) in the `out` parameter. Otherwise, it returns an error.
 /// The caller is responsible for freeing the returned pointer in `out`.
 /// Success data can be freed by calling free on the returned `int *`.
 /// Error data can be freed by using the function `tachyon_error_free`.
