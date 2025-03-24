@@ -1,0 +1,11 @@
+# Ignore all files by default
+*
+
+# Allow specific files
+!main.c
+!Makefile
+!run.sh
+!.gitignore
+
+# Ignore directories explicitly
+!*/
