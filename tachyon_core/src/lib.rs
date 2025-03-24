@@ -442,7 +442,7 @@ impl Connection {
 
         if !self.get_stream_ids_for_selector(&selector).is_empty() {
             return Err(TachyonErr::ConnectionErr(
-                ConnectionErr::ExistingStreamErr {
+                ConnectionErr::StreamExistsErr {
                     stream: stream.as_ref().to_string(),
                 },
             ));
@@ -488,7 +488,7 @@ impl Connection {
             self.get_stream_ids_for_selector(&self.parse_stream_for_insert(stream.as_ref())?);
 
         if stream_ids.is_empty() {
-            return Err(TachyonErr::ConnectionErr(ConnectionErr::StreamNoExistErr {
+            return Err(TachyonErr::ConnectionErr(ConnectionErr::SteamNotFoundErr {
                 op: "insert".to_string(),
                 stream: stream.as_ref().to_string(),
             }));
@@ -545,7 +545,7 @@ macro_rules! create_inserter_insert {
         ) -> Result<(), crate::error::TachyonErr> {
             if self.value_type != $value_type {
                 return Err(crate::error::TachyonErr::InserterErr(
-                    crate::error::InserterErr::TypeErr {
+                    crate::error::InserterErr::TypeMismatchErr {
                         this_type: $value_type,
                         stream_type: self.value_type,
                     },

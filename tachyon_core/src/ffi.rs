@@ -2,6 +2,7 @@ use crate::{
     error::{print_error, TachyonErr},
     Connection, Inserter, Query, ReturnType, Timestamp, Value, ValueType, Vector,
 };
+use core::ffi;
 use std::ffi::{c_char, c_void, CStr};
 
 const FIRST_ERROR_CODE: u8 = 1;
@@ -110,6 +111,10 @@ pub unsafe extern "C" fn tachyon_stream_delete(connection: *mut Connection, stre
     (*connection).delete_stream(stream);
 }
 
+/// SAFETY: On success (code 0), this returns an `int` (1 if stream exists, 0 otherwise) in the `out` parameter. Otherwise, it returns an error.
+/// The caller is responsible for freeing the returned pointer in `out`.
+/// Success data can be freed by calling free on the returned `int *`.
+/// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_stream_check_exists(
     connection: *const Connection,
@@ -120,6 +125,7 @@ pub unsafe extern "C" fn tachyon_stream_check_exists(
 
     match (*connection).check_stream_exists(stream) {
         Ok(exists) => {
+            let exists: ffi::c_int = if exists { 1 } else { 0 };
             *out = Box::into_raw(Box::new(exists)) as *mut c_void;
             0u8
         }
@@ -131,7 +137,10 @@ pub unsafe extern "C" fn tachyon_stream_check_exists(
     }
 }
 
-/// SAFETY: The caller is responsible for freeing the returned pointer by using the function `tachyon_inserter_close`.
+/// SAFETY: On success (code 0), this returns an `Inserter *` in the `out` parameter. Otherwise, it returns an error.
+/// The caller is responsible for freeing the returned pointer in `out`.
+/// Success data can be freed by using the function `tachyon_inserter_close`.
+/// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
 pub unsafe extern "C" fn tachyon_inserter_create(
     connection: *mut Connection,
