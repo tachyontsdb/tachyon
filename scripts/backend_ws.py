@@ -7,7 +7,7 @@ import websockets
 
 async def perform_query():
     base_uri = "ws://localhost:8080/ws/query"
-    
+
     params = {
         "path": "./tmp",
         "queries": "profit{country=\"canada\",division=\"software\"}",
@@ -20,14 +20,14 @@ async def perform_query():
 
     # Remove keys with None values.
     params = {k: v for k, v in params.items() if v is not None}
-    
+
     # Encode parameters into a query string.
     query_string = urllib.parse.urlencode(params)
     uri = f"{base_uri}?{query_string}"
 
     async with websockets.connect(uri) as websocket:
         print("Connected to the backend with query parameters.")
-        
+
         try:
             while True:
                 response = await websocket.recv()

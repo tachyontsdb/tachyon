@@ -9,7 +9,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tachyon_core::{error::TachyonErr, Connection, Timestamp, ValueType, Vector};
 use tokio::{net::TcpListener, time};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -148,12 +148,22 @@ struct PerformQueryRequest {
 async fn perform_query(
     Json(request): Json<PerformQueryRequest>,
 ) -> Result<Json<QueryResponse>, (StatusCode, Json<ErrorResponse>)> {
+    println!("Got request at {:?}", Instant::now());
+
     let mut connection =
         Connection::new(request.path).map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
-    Ok(Json(
-        query(&mut connection, request.query, request.start, request.end)
-            .map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?,
-    ))
+    let response = query(&mut connection, request.query, request.start, request.end)
+        .map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
+
+    println!(
+        "Sending response at {:?} | # items: {} | min: {} | max: {}",
+        Instant::now(),
+        response.timestamps.len(),
+        response.timestamps.first().unwrap_or(&0),
+        response.timestamps.last().unwrap_or(&0)
+    );
+
+    Ok(Json(response))
 }
 
 #[derive(Deserialize)]
@@ -214,6 +224,8 @@ async fn handle_perform_query_socket(mut socket: WebSocket, request: BeginSocket
                 .collect::<Vec<_>>()
         };
         let responses_str = serde_json::to_string(&responses).unwrap();
+
+        println!("Sending response now");
 
         let message = Message::text(Utf8Bytes::from(&responses_str));
         if socket.send(message).await.is_err() {
