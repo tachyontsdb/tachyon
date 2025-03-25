@@ -327,9 +327,9 @@ impl CursorImpl {
         let mut page_cache_ref = page_cache.borrow_mut();
 
         let file_id = page_cache_ref.register_or_get_file_id(&file_paths[0]);
+        let file_lock = FileLockGuard::new_shared(page_cache_ref.get_file(file_id))?;
         let header = Header::parse(file_id, &mut page_cache_ref);
 
-        let file_lock = FileLockGuard::new_shared(page_cache_ref.get_file(file_id))?;
         drop(page_cache_ref);
 
         let decomp_engine = IntDecompressor::new(
@@ -415,6 +415,8 @@ impl CursorImpl {
             .page_cache
             .borrow_mut()
             .register_or_get_file_id(&self.file_paths[self.file_index]);
+        self.file_lock =
+            FileLockGuard::new_shared(self.page_cache.borrow_mut().get_file(self.file_id)).unwrap();
         self.header = Header::parse(self.file_id, &mut self.page_cache.borrow_mut());
 
         if self.header.min_timestamp > self.end {
@@ -432,9 +434,6 @@ impl CursorImpl {
             ),
             &self.header,
         );
-
-        self.file_lock =
-            FileLockGuard::new_shared(self.page_cache.borrow_mut().get_file(self.file_id)).unwrap();
 
         // Use the query hint if applicable on the next file
         if self.scan_hint != ScanHint::None
