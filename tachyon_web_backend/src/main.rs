@@ -1,7 +1,7 @@
 use axum::{
     extract::{
         ws::{Message, Utf8Bytes, WebSocket},
-        WebSocketUpgrade,
+        Query, WebSocketUpgrade,
     },
     http::StatusCode,
     response::Response,
@@ -9,8 +9,9 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tachyon_core::{error::TachyonErr, Connection, Timestamp, ValueType, Vector};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, time};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 #[derive(Serialize)]
@@ -137,16 +138,11 @@ fn query(
 }
 
 #[derive(Deserialize)]
-struct QueryRequest {
+struct PerformQueryRequest {
+    path: String,
     query: String,
     start: Option<Timestamp>,
     end: Option<Timestamp>,
-}
-
-#[derive(Deserialize)]
-struct PerformQueryRequest {
-    path: String,
-    inner: QueryRequest,
 }
 
 async fn perform_query(
@@ -155,58 +151,78 @@ async fn perform_query(
     let mut connection =
         Connection::new(request.path).map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?;
     Ok(Json(
-        query(
-            &mut connection,
-            request.inner.query,
-            request.inner.start,
-            request.inner.end,
-        )
-        .map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?,
+        query(&mut connection, request.query, request.start, request.end)
+            .map_err(|err| (StatusCode::BAD_REQUEST, Json(err.into())))?,
     ))
 }
 
 #[derive(Deserialize)]
 struct BeginSocketRequest {
     path: String,
-    begin_time: Timestamp,
-    end_time: Timestamp,
-    interval_ms: u64,
-    inners: Vec<QueryRequest>,
+    queries: String,
+    interval_milliseconds: u64,
+    time_begin: Option<Timestamp>,
+    time_end: Option<Timestamp>,
+    time_diff: Option<u64>,
 }
 
-async fn websocket_perform_query(ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(handle_perform_query_socket)
+async fn websocket_perform_query(
+    ws: WebSocketUpgrade,
+    Query(request): Query<BeginSocketRequest>,
+) -> Response {
+    ws.on_upgrade(move |socket| handle_perform_query_socket(socket, request))
 }
 
-async fn handle_perform_query_socket(mut socket: WebSocket) {
-    while let Some(message) = socket.recv().await {
-        if message.is_err() {
-            // Client disconnected
-            return;
-        }
+async fn handle_perform_query_socket(mut socket: WebSocket, request: BeginSocketRequest) {
+    let mut interval = time::interval(Duration::from_millis(request.interval_milliseconds));
+    let mut i = 0u64;
 
-        // SAFETY: Previously checked for Err variant
-        let message = message.unwrap();
+    let queries = request.queries.split('.').collect::<Vec<_>>();
 
-        let message = message.to_text().unwrap();
-        let request = serde_json::from_str::<BeginSocketRequest>(message).unwrap();
+    loop {
+        interval.tick().await;
 
-        let query_responses = {
-            let mut connection = Connection::new(request.path).unwrap();
-            request
-                .inners
-                .iter()
-                .map(|inner| query(&mut connection, &inner.query, inner.start, inner.end).unwrap())
-                .collect::<Vec<_>>()
+        let start_time = if let Some(time_begin) = request.time_begin {
+            Some(time_begin + request.interval_milliseconds * i)
+        } else {
+            None
         };
 
-        let response_str = serde_json::to_string(&query_responses).unwrap();
-        let response = Message::text(Utf8Bytes::from(&response_str));
+        let end_time = if let Some(time_diff) = request.time_diff {
+            if let Some(start_time) = start_time {
+                let end_time = start_time + time_diff;
 
-        if socket.send(response).await.is_err() {
+                if request.time_end.is_some_and(|time_end| end_time > time_end) {
+                    // Reached the end time
+                    println!("Reached the end time!");
+                    break;
+                }
+
+                Some(end_time)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let responses = {
+            let mut connection = Connection::new(&request.path).unwrap();
+            queries
+                .iter()
+                .map(|query_str| query(&mut connection, query_str, start_time, end_time).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let responses_str = serde_json::to_string(&responses).unwrap();
+
+        let message = Message::text(Utf8Bytes::from(&responses_str));
+        if socket.send(message).await.is_err() {
             // Client disconnected
+            println!("Client disconnected!");
             return;
         }
+
+        i += 1;
     }
 }
 
