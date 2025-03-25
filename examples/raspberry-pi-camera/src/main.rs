@@ -145,7 +145,7 @@ fn main() -> Result<()> {
         .expect("Unable to create output file");
 
     // Capture a set number of frames (here 60 frames, adjust as needed).
-    for frame_index in 0..60 {
+    for frame_index in 0..6000000 {
         println!("Waiting for frame {}", frame_index);
         let mut req = rx
             .recv_timeout(Duration::from_secs(2))
