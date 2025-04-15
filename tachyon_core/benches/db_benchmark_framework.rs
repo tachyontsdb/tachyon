@@ -250,9 +250,9 @@ impl DatabaseSource for TimescaleDB {
 
         let create_table_query = format!(
             "CREATE TABLE {} (
+                stream_id INT,
                 timestamp BIGINT,
-                value {},
-                stream_id INT
+                value {}
             )",
             self.table_name, value_type
         );
@@ -293,19 +293,19 @@ impl DatabaseSource for TimescaleDB {
                 ValueType::Integer64 => {
                     transaction.execute(
                         &format!("INSERT INTO {} VALUES ($1, $2, $3)", self.table_name),
-                        &[&(*ts as i64), &v.get_integer64(), &stream_id],
+                        &[&stream_id, &(*ts as i64), &v.get_integer64()],
                     )?;
                 }
                 ValueType::UInteger64 => {
                     transaction.execute(
                         &format!("INSERT INTO {} VALUES ($1, $2, $3)", self.table_name),
-                        &[&(*ts as i64), &(v.get_uinteger64() as i64), &stream_id],
+                        &[&stream_id, &(*ts as i64), &(v.get_uinteger64() as i64)],
                     )?;
                 }
                 ValueType::Float64 => {
                     transaction.execute(
                         &format!("INSERT INTO {} VALUES ($1, $2, $3)", self.table_name),
-                        &[&(*ts as i64), &v.get_float64(), &stream_id],
+                        &[&stream_id, &(*ts as i64), &v.get_float64()],
                     )?;
                 }
             }
