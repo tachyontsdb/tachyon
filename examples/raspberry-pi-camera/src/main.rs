@@ -40,7 +40,10 @@ fn main() -> Result<()> {
     let stream_name = "camera_brightness";
 
     // Create the stream if it doesn't exist
-    if !connection.check_stream_exists(stream_name).expect("Failed to check stream exists.") {
+    if !connection
+        .check_stream_exists(stream_name)
+        .expect("Failed to check stream exists.")
+    {
         println!("Creating stream '{}' for brightness data", stream_name);
         connection
             .create_stream(stream_name, ValueType::Float64)
@@ -53,15 +56,17 @@ fn main() -> Result<()> {
     }
 
     // Prepare inserter for the stream
-    let mut inserter = connection.prepare_insert(stream_name).expect("Failed to prepare insert.");
+    let mut inserter = connection
+        .prepare_insert(stream_name)
+        .expect("Failed to prepare insert.");
     println!("Tachyon database initialized successfully");
 
     // Get the output filename from the command-line arguments.
-    let filename = std::env::args().nth(1).unwrap_or_else(|| {
-        eprintln!("Error: missing file output parameter");
-        eprintln!("Usage: ./video_capture </path/to/output.yuyv>");
-        exit(1);
-    });
+    // let filename = std::env::args().nth(1).unwrap_or_else(|| {
+    //     eprintln!("Error: missing file output parameter");
+    //     eprintln!("Usage: ./video_capture </path/to/output.yuyv>");
+    //     exit(1);
+    // });
 
     // Initialize the CameraManager and get the first available camera.
     let mgr = CameraManager::new().expect("Failed to create CameraManager");
@@ -138,11 +143,11 @@ fn main() -> Result<()> {
     }
 
     // Open (or create) the output file in append mode.
-    let mut file = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(&filename)
-        .expect("Unable to create output file");
+    // let mut file = OpenOptions::new()
+    //     .append(true)
+    //     .create(true)
+    //     .open(&filename)
+    //     .expect("Unable to create output file");
 
     // Capture a set number of frames (here 60 frames, adjust as needed).
     for frame_index in 0..6000000 {
@@ -202,30 +207,32 @@ fn main() -> Result<()> {
             current_brightness
         );
 
-        inserter.insert_float64(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-                .try_into()
-                .unwrap(),
-            current_brightness,
-        ).expect("Failed to insert float.");
+        inserter
+            .insert_float64(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
+                    .try_into()
+                    .unwrap(),
+                current_brightness,
+            )
+            .expect("Failed to insert float.");
 
         // Write the valid frame data to the output file.
-        file.write_all(&frame_data[..bytes_used])
-            .expect("Failed to write frame data to file");
-        println!(
-            "Wrote {} bytes for frame {} to {}",
-            bytes_used, frame_index, filename
-        );
+        // file.write_all(&frame_data[..bytes_used])
+        //     .expect("Failed to write frame data to file");
+        // println!(
+        //     "Wrote {} bytes for frame {} to {}",
+        //     bytes_used, frame_index, filename
+        // );
 
         // Recycle the request to be reused for capturing the next frame.
         req.reuse(ReuseFlag::REUSE_BUFFERS);
         cam.queue_request(req).expect("Failed to requeue request");
     }
 
-    println!("Video capture complete. Output saved to {}", filename);
+    // println!("Video capture complete. Output saved to {}", filename);
 
     inserter.flush().expect("Failed to flush inserter.");
 
