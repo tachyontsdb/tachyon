@@ -2842,7 +2842,7 @@ dependencies = [
 
 [[package]]
 name = "tachyon_python_bindings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pyo3",
  "tachyon_core",

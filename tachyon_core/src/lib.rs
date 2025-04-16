@@ -607,6 +607,77 @@ impl Query<'_> {
     }
 }
 
+#[derive(Debug)]
+pub enum QueryUtilsResultData {
+    Integer64(Vec<i64>),
+    UInteger64(Vec<u64>),
+    Float64(Vec<f64>),
+}
+
+pub struct QueryUtils;
+
+impl QueryUtils {
+    pub fn perform(
+        connection: &mut Connection,
+        query: impl AsRef<str>,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
+    ) -> Result<
+        (
+            ReturnType,
+            ValueType,
+            Option<Vec<Timestamp>>,
+            QueryUtilsResultData,
+        ),
+        TachyonErr,
+    > {
+        let mut stmt = connection.prepare_query(query, start, end)?;
+
+        let return_type = stmt.return_type();
+        let value_type = stmt.value_type();
+
+        let mut values_u64 = Vec::<u64>::new();
+        let mut values_i64 = Vec::<i64>::new();
+        let mut values_f64 = Vec::<f64>::new();
+
+        let timestamps = if return_type == ReturnType::Scalar {
+            while let Some(value) = stmt.next_scalar() {
+                match value_type {
+                    ValueType::UInteger64 => values_u64.push(value.get_uinteger64()),
+                    ValueType::Integer64 => values_i64.push(value.get_integer64()),
+                    ValueType::Float64 => values_f64.push(value.get_float64()),
+                }
+            }
+
+            None
+        } else {
+            let mut timestamps = Vec::<Timestamp>::new();
+
+            while let Some(Vector { timestamp, value }) = stmt.next_vector() {
+                timestamps.push(timestamp);
+                match value_type {
+                    ValueType::UInteger64 => values_u64.push(value.get_uinteger64()),
+                    ValueType::Integer64 => values_i64.push(value.get_integer64()),
+                    ValueType::Float64 => values_f64.push(value.get_float64()),
+                }
+            }
+
+            Some(timestamps)
+        };
+
+        Ok((
+            return_type,
+            value_type,
+            timestamps,
+            match value_type {
+                ValueType::UInteger64 => QueryUtilsResultData::UInteger64(values_u64),
+                ValueType::Integer64 => QueryUtilsResultData::Integer64(values_i64),
+                ValueType::Float64 => QueryUtilsResultData::Float64(values_f64),
+            },
+        ))
+    }
+}
+
 #[cfg(feature = "tachyon_internals")]
 pub mod tachyon_internals {
     pub use crate::storage::file::*;
