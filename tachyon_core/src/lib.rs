@@ -614,6 +614,14 @@ pub enum QueryUtilsResultData {
     Float64(Vec<f64>),
 }
 
+pub type QueryUtilsPerformType = (
+    ReturnType,
+    ValueType,
+    Option<Vec<Timestamp>>,
+    QueryUtilsResultData,
+);
+
+#[derive(Debug)]
 pub struct QueryUtils;
 
 impl QueryUtils {
@@ -622,15 +630,7 @@ impl QueryUtils {
         query: impl AsRef<str>,
         start: Option<Timestamp>,
         end: Option<Timestamp>,
-    ) -> Result<
-        (
-            ReturnType,
-            ValueType,
-            Option<Vec<Timestamp>>,
-            QueryUtilsResultData,
-        ),
-        TachyonErr,
-    > {
+    ) -> Result<QueryUtilsPerformType, TachyonErr> {
         let mut stmt = connection.prepare_query(query, start, end)?;
 
         let return_type = stmt.return_type();
