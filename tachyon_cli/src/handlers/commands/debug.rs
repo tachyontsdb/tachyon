@@ -6,7 +6,7 @@ use std::{
 
 use clap::Subcommand;
 use tabled::{builder::Builder, settings::Style};
-use tachyon_core::{tachyon_benchmarks::TimeDataFile, FILE_EXTENSION};
+use tachyon_core::{tachyon_internals::TimeDataFile, FILE_EXTENSION};
 
 use crate::CLIErr;
 

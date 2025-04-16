@@ -4,6 +4,7 @@ members = [
     "tachyon_core",
     "tachyon_cli",
     "tachyon_web_backend",
+    "tachyon_python_bindings",
 ]
 resolver = "2"
 

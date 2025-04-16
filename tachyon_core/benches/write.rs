@@ -5,7 +5,7 @@ use pprof::{
     flamegraph::Options,
 };
 use std::{hint::black_box, iter::zip, path::Path};
-use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Version};
+use tachyon_core::{tachyon_internals::*, StreamId, ValueType, Version};
 
 const NUM_ITEMS: u64 = 100000;
 

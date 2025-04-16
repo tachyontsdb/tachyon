@@ -607,8 +607,8 @@ impl Query<'_> {
     }
 }
 
-#[cfg(feature = "tachyon_benchmarks")]
-pub mod tachyon_benchmarks {
+#[cfg(feature = "tachyon_internals")]
+pub mod tachyon_internals {
     pub use crate::storage::file::*;
     pub use crate::storage::page_cache::PageCache;
 }

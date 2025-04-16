@@ -4,7 +4,7 @@ use pprof::{
     flamegraph::Options,
 };
 use std::{cell::RefCell, hint::black_box, path::PathBuf, rc::Rc};
-use tachyon_core::{tachyon_benchmarks::*, StreamId, ValueType, Vector, Version};
+use tachyon_core::{tachyon_internals::*, StreamId, ValueType, Vector, Version};
 
 const NUM_ITEMS: u64 = 10000000;
 

@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 
 [features]
-tachyon_benchmarks = []
+tachyon_internals = []
 tachyon_memory_profiling = ["dep:dhat"]
 
 [lib]
