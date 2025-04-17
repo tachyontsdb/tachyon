@@ -7,6 +7,7 @@ use tachyon_core::{
     Timestamp, ValueType,
 };
 
+#[derive(Debug)]
 pub enum WrappedTachyonErr {
     MiscErr(String),
     TachyonErr(TachyonErr),
@@ -27,7 +28,7 @@ impl From<WrappedTachyonErr> for PyErr {
     }
 }
 
-#[pyclass(eq, eq_int)]
+#[pyclass(name = "ValueType", eq, eq_int)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum WrappedValueType {
@@ -56,7 +57,7 @@ impl From<WrappedValueType> for ValueType {
     }
 }
 
-#[pyclass(eq, eq_int)]
+#[pyclass(name = "ReturnType", eq, eq_int)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum WrappedReturnType {
@@ -82,7 +83,7 @@ impl From<WrappedReturnType> for ReturnType {
     }
 }
 
-#[pyclass]
+#[pyclass(name = "Inserter")]
 pub struct WrappedInserter {
     dummy_lock: Arc<Mutex<()>>,
     ptr: Arc<Mutex<Inserter>>,
@@ -167,7 +168,7 @@ impl WrappedInserter {
     }
 }
 
-#[pyclass]
+#[pyclass(name = "QueryResultData")]
 #[derive(Clone)]
 pub enum WrappedQueryResultData {
     SignedInteger(Vec<i64>),
@@ -185,7 +186,7 @@ impl From<QueryUtilsResultData> for WrappedQueryResultData {
     }
 }
 
-#[pyclass]
+#[pyclass(name = "QueryResult")]
 pub struct WrappedQueryResult {
     #[pyo3(get)]
     pub return_type: WrappedReturnType,
@@ -203,7 +204,8 @@ impl WrappedQueryResult {
     }
 }
 
-#[pyclass]
+/// SAFETY: A connection is only single-threaded
+#[pyclass(name = "Connection")]
 pub struct WrappedConnection {
     dummy_lock: Arc<Mutex<()>>,
     ptr: Arc<Mutex<Connection>>,
