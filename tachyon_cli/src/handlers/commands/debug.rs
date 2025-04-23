@@ -1,14 +1,12 @@
+use crate::CLIErr;
+use clap::Subcommand;
 use std::{
     fs::{self, File},
     os::unix::fs::MetadataExt,
     path::PathBuf,
 };
-
-use clap::Subcommand;
 use tabled::{builder::Builder, settings::Style};
-use tachyon_core::{tachyon_benchmarks::TimeDataFile, FILE_EXTENSION};
-
-use crate::CLIErr;
+use tachyon_core::{tachyon_internals::TimeDataFile, FILE_EXTENSION};
 
 #[derive(Debug, Subcommand)]
 pub enum Debug {

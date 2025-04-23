@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::{hint::black_box, path::PathBuf, str::FromStr};
-use tachyon_core::tachyon_benchmarks::PageCache;
+use tachyon_core::tachyon_internals::PageCache;
 
 fn bench_page_cache_init() -> u64 {
     let _ = black_box(PageCache::new(black_box(10000)));

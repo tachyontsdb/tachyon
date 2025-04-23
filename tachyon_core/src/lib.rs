@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 
+use crate::error::{ConnectionErr, QueryErr, TachyonErr};
 use crate::execution::node::{ExecutorNode, TNode};
 use crate::query::indexer::Indexer;
 use crate::query::planner::QueryPlanner;
 use crate::storage::page_cache::PageCache;
+use crate::storage::writer::persistent_writer::PersistentWriter;
 use crate::storage::writer::Writer;
-use error::{ConnectionErr, QueryErr, TachyonErr};
 use promql_parser::parser;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -15,7 +16,6 @@ use std::fs;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::path::Path;
 use std::rc::Rc;
-use storage::writer::persistent_writer::PersistentWriter;
 use uuid::Uuid;
 
 pub mod error;
@@ -42,7 +42,7 @@ pub struct StreamId(pub u128);
 
 impl From<StreamId> for Uuid {
     fn from(value: StreamId) -> Self {
-        Uuid::from_u128(value.0)
+        Self::from_u128(value.0)
     }
 }
 
@@ -86,7 +86,7 @@ impl TryFrom<u8> for ValueType {
 }
 
 impl Display for ValueType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::Integer64 => f.write_str("Integer64"),
             Self::UInteger64 => f.write_str("UInteger64"),
@@ -115,7 +115,7 @@ impl TryFrom<u8> for ReturnType {
 }
 
 impl Display for ReturnType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::Scalar => f.write_str("Scalar"),
             Self::Vector => f.write_str("Vector"),
@@ -235,16 +235,19 @@ macro_rules! create_value_primitive_fn_simplified {
 }
 
 impl Value {
+    /// SAFETY: The type must be a signed 64-bit integer
     #[inline]
     pub const fn get_integer64(&self) -> i64 {
         unsafe { self.integer64 }
     }
 
+    /// SAFETY: The type must be an unsigned 64-bit integer
     #[inline]
     pub const fn get_uinteger64(&self) -> u64 {
         unsafe { self.uinteger64 }
     }
 
+    /// SAFETY: The type must be a 64-bit floating point number
     #[inline]
     pub const fn get_float64(&self) -> f64 {
         unsafe { self.float64 }
@@ -282,9 +285,9 @@ impl Value {
     #[inline]
     pub const fn get_default(value_type: ValueType) -> Self {
         match value_type {
-            ValueType::Integer64 => Value { integer64: 0i64 },
-            ValueType::UInteger64 => Value { uinteger64: 0u64 },
-            ValueType::Float64 => Value { float64: 0f64 },
+            ValueType::Integer64 => Self { integer64: 0i64 },
+            ValueType::UInteger64 => Self { uinteger64: 0u64 },
+            ValueType::Float64 => Self { float64: 0f64 },
         }
     }
 
@@ -607,8 +610,79 @@ impl Query<'_> {
     }
 }
 
-#[cfg(feature = "tachyon_benchmarks")]
-pub mod tachyon_benchmarks {
+#[derive(Debug)]
+pub enum QueryUtilsResultData {
+    Integer64(Vec<i64>),
+    UInteger64(Vec<u64>),
+    Float64(Vec<f64>),
+}
+
+pub type QueryUtilsPerformType = (
+    ReturnType,
+    ValueType,
+    Option<Vec<Timestamp>>,
+    QueryUtilsResultData,
+);
+
+#[derive(Debug)]
+pub struct QueryUtils;
+
+impl QueryUtils {
+    pub fn perform(
+        connection: &mut Connection,
+        query: impl AsRef<str>,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
+    ) -> Result<QueryUtilsPerformType, TachyonErr> {
+        let mut stmt = connection.prepare_query(query, start, end)?;
+
+        let return_type = stmt.return_type();
+        let value_type = stmt.value_type();
+
+        let mut values_u64 = Vec::<u64>::new();
+        let mut values_i64 = Vec::<i64>::new();
+        let mut values_f64 = Vec::<f64>::new();
+
+        let timestamps = if return_type == ReturnType::Scalar {
+            while let Some(value) = stmt.next_scalar() {
+                match value_type {
+                    ValueType::UInteger64 => values_u64.push(value.get_uinteger64()),
+                    ValueType::Integer64 => values_i64.push(value.get_integer64()),
+                    ValueType::Float64 => values_f64.push(value.get_float64()),
+                }
+            }
+
+            None
+        } else {
+            let mut timestamps = Vec::<Timestamp>::new();
+
+            while let Some(Vector { timestamp, value }) = stmt.next_vector() {
+                timestamps.push(timestamp);
+                match value_type {
+                    ValueType::UInteger64 => values_u64.push(value.get_uinteger64()),
+                    ValueType::Integer64 => values_i64.push(value.get_integer64()),
+                    ValueType::Float64 => values_f64.push(value.get_float64()),
+                }
+            }
+
+            Some(timestamps)
+        };
+
+        Ok((
+            return_type,
+            value_type,
+            timestamps,
+            match value_type {
+                ValueType::UInteger64 => QueryUtilsResultData::UInteger64(values_u64),
+                ValueType::Integer64 => QueryUtilsResultData::Integer64(values_i64),
+                ValueType::Float64 => QueryUtilsResultData::Float64(values_f64),
+            },
+        ))
+    }
+}
+
+#[cfg(feature = "tachyon_internals")]
+pub mod tachyon_internals {
     pub use crate::storage::file::*;
     pub use crate::storage::page_cache::PageCache;
 }

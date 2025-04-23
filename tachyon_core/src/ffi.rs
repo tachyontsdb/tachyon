@@ -1,9 +1,6 @@
-use crate::{
-    error::{print_error, TachyonErr},
-    Connection, Inserter, Query, ReturnType, Timestamp, Value, ValueType, Vector,
-};
-use core::ffi;
-use std::ffi::{c_char, c_void, CStr};
+use crate::error::{print_error, TachyonErr};
+use crate::{Connection, Inserter, Query, ReturnType, Timestamp, Value, ValueType, Vector};
+use std::ffi::{c_char, c_int, c_void, CStr};
 
 const FIRST_ERROR_CODE: u8 = 1;
 const LAST_ERROR_CODE: u8 = 5;
@@ -36,10 +33,10 @@ pub unsafe extern "C" fn tachyon_error_free(code: u8, ptr: *mut c_void) {
 
 /// SAFETY: On success (code 0), this returns a `Connection *` in the `out` parameter. Otherwise, it returns an error.
 /// The caller is responsible for freeing the returned pointer in `out`.
-/// Success data can be freed by using the function `tachyon_close`.
+/// Success data can be freed by using the function `tachyon_free`.
 /// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_open(db_dir: *const c_char, out: *mut *mut c_void) -> u8 {
+pub unsafe extern "C" fn tachyon_new(db_dir: *const c_char, out: *mut *mut c_void) -> u8 {
     let db_dir_res = CStr::from_ptr(db_dir)
         .to_str()
         .map_err(|err| TachyonErr::MiscErr {
@@ -67,7 +64,7 @@ pub unsafe extern "C" fn tachyon_open(db_dir: *const c_char, out: *mut *mut c_vo
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_close(connection: *mut Connection) {
+pub unsafe extern "C" fn tachyon_free(connection: *mut Connection) {
     let connection = Box::from_raw(connection);
     drop(connection);
 }
@@ -125,7 +122,7 @@ pub unsafe extern "C" fn tachyon_stream_check_exists(
 
     match (*connection).check_stream_exists(stream) {
         Ok(exists) => {
-            let exists: ffi::c_int = if exists { 1 } else { 0 };
+            let exists: c_int = if exists { 1 } else { 0 };
             *out = Box::into_raw(Box::new(exists)) as *mut c_void;
             0u8
         }
@@ -139,10 +136,10 @@ pub unsafe extern "C" fn tachyon_stream_check_exists(
 
 /// SAFETY: On success (code 0), this returns an `Inserter *` in the `out` parameter. Otherwise, it returns an error.
 /// The caller is responsible for freeing the returned pointer in `out`.
-/// Success data can be freed by using the function `tachyon_inserter_close`.
+/// Success data can be freed by using the function `tachyon_insert_free`.
 /// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_inserter_create(
+pub unsafe extern "C" fn tachyon_insert_prepare(
     connection: *mut Connection,
     stream: *const c_char,
     out: *mut *mut c_void,
@@ -163,22 +160,22 @@ pub unsafe extern "C" fn tachyon_inserter_create(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_inserter_close(inserter: *mut Inserter) {
+pub unsafe extern "C" fn tachyon_insert_free(inserter: *mut Inserter) {
     let inserter = Box::from_raw(inserter);
     drop(inserter);
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_inserter_value_type(inserter: *const Inserter) -> ValueType {
+pub unsafe extern "C" fn tachyon_insert_value_type(inserter: *const Inserter) -> ValueType {
     (*inserter).value_type()
 }
 
-/// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
+/// SAFETY: The caller is responsible for calling `tachyon_insert_flush` after finishing all insertions.
 /// On error (not code 0), this returns an error in the `out` parameter.
 /// The caller is responsible for freeing the returned pointer in `out`.
 /// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_inserter_insert_integer64(
+pub unsafe extern "C" fn tachyon_insert_integer64(
     inserter: *mut Inserter,
     timestamp: Timestamp,
     value: i64,
@@ -196,12 +193,12 @@ pub unsafe extern "C" fn tachyon_inserter_insert_integer64(
     }
 }
 
-/// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
+/// SAFETY: The caller is responsible for calling `tachyon_insert_flush` after finishing all insertions.
 /// On error (not code 0), this returns an error in the `out` parameter.
 /// The caller is responsible for freeing the returned pointer in `out`.
 /// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_inserter_insert_uinteger64(
+pub unsafe extern "C" fn tachyon_insert_uinteger64(
     inserter: *mut Inserter,
     timestamp: Timestamp,
     value: u64,
@@ -219,12 +216,12 @@ pub unsafe extern "C" fn tachyon_inserter_insert_uinteger64(
     }
 }
 
-/// SAFETY: The caller is responsible for calling `tachyon_inserter_flush` after finishing all insertions.
+/// SAFETY: The caller is responsible for calling `tachyon_insert_flush` after finishing all insertions.
 /// On error (not code 0), this returns an error in the `out` parameter.
 /// The caller is responsible for freeing the returned pointer in `out`.
 /// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_inserter_insert_float64(
+pub unsafe extern "C" fn tachyon_insert_float64(
     inserter: *mut Inserter,
     timestamp: Timestamp,
     value: f64,
@@ -246,7 +243,7 @@ pub unsafe extern "C" fn tachyon_inserter_insert_float64(
 /// The caller is responsible for freeing the returned pointer in `out`.
 /// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_inserter_flush(
+pub unsafe extern "C" fn tachyon_insert_flush(
     inserter: *mut Inserter,
     out: *mut *mut c_void,
 ) -> u8 {
@@ -264,10 +261,10 @@ pub unsafe extern "C" fn tachyon_inserter_flush(
 
 /// SAFETY: On success (code 0), this returns a `Query *` in the `out` parameter. Otherwise, it returns an error.
 /// The caller is responsible for freeing the returned pointer in `out`.
-/// Success data can be freed using the function `tachyon_query_close`.
+/// Success data can be freed using the function `tachyon_query_free`.
 /// Error data can be freed using the function `tachyon_error_free`.
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_query_create(
+pub unsafe extern "C" fn tachyon_query_prepare(
     connection: *mut Connection,
     query: *const c_char,
     start: *const Timestamp,
@@ -294,7 +291,7 @@ pub unsafe extern "C" fn tachyon_query_create(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_query_close(query: *mut Query) {
+pub unsafe extern "C" fn tachyon_query_free(query: *mut Query) {
     let query = Box::from_raw(query);
     drop(query);
 }
