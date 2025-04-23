@@ -19,14 +19,14 @@ const MAGIC: [u8; MAGIC_SIZE] = [b'T', b'a', b'c', b'h'];
 
 const HEADER_SIZE: usize = 71;
 
-/*
-This structure is responsible for handling file-level locks.
-Currently, only Unix-based systems are supported. [shared] locks
-correspond to readers and [exclusive] locks correspond to writers.
+/**
+    This structure is responsible for handling file-level locks.
+    Currently, only Unix-based systems are supported. [shared] locks
+    correspond to readers and [exclusive] locks correspond to writers.
 
-There can only be one process with an exclusive lock, but multiple
-processes can have shared locks. However, a shared lock and an
-exclusive lock cannot be held at the same time.
+    There can only be one process with an exclusive lock, but multiple
+    processes can have shared locks. However, a shared lock and an
+    exclusive lock cannot be held at the same time.
 */
 pub struct FileLockGuard {
     fd: RawFd,
@@ -128,7 +128,7 @@ impl PartialEq for Header {
 }
 
 impl Debug for Header {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("Header")
             .field("version", &self.version)
             .field("stream_id", &self.stream_id)

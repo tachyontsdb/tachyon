@@ -7,6 +7,26 @@ use tachyon_core::{
     Timestamp, ValueType,
 };
 
+macro_rules! dummy_lock {
+    ($self: ident) => {
+        let _dummy_lock = $self.dummy_lock.lock().map_err(|_| {
+            crate::WrappedTachyonErr::MiscErr(::std::string::String::from(
+                "Failed to acquire lock!",
+            ))
+        })?;
+    };
+}
+
+macro_rules! ptr_lock {
+    ($self: ident) => {
+        $self.ptr.lock().map_err(|_| {
+            crate::WrappedTachyonErr::MiscErr(::std::string::String::from(
+                "Failed to acquire lock!",
+            ))
+        })?
+    };
+}
+
 #[derive(Debug)]
 pub enum WrappedTachyonErr {
     MiscErr(String),
@@ -22,8 +42,8 @@ impl From<TachyonErr> for WrappedTachyonErr {
 impl From<WrappedTachyonErr> for PyErr {
     fn from(err: WrappedTachyonErr) -> Self {
         match err {
-            WrappedTachyonErr::MiscErr(msg) => PyErr::new::<PyRuntimeError, _>(msg),
-            WrappedTachyonErr::TachyonErr(err) => PyErr::new::<PyRuntimeError, _>(err.to_string()),
+            WrappedTachyonErr::MiscErr(msg) => Self::new::<PyRuntimeError, _>(msg),
+            WrappedTachyonErr::TachyonErr(err) => Self::new::<PyRuntimeError, _>(err.to_string()),
         }
     }
 }
@@ -32,17 +52,17 @@ impl From<WrappedTachyonErr> for PyErr {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum WrappedValueType {
-    SignedInteger,
-    UnsignedInteger,
-    Float,
+    Integer64,
+    UInteger64,
+    Float64,
 }
 
 impl From<ValueType> for WrappedValueType {
     fn from(value_type: ValueType) -> Self {
         match value_type {
-            ValueType::Integer64 => Self::SignedInteger,
-            ValueType::UInteger64 => Self::UnsignedInteger,
-            ValueType::Float64 => Self::Float,
+            ValueType::Integer64 => Self::Integer64,
+            ValueType::UInteger64 => Self::UInteger64,
+            ValueType::Float64 => Self::Float64,
         }
     }
 }
@@ -50,9 +70,9 @@ impl From<ValueType> for WrappedValueType {
 impl From<WrappedValueType> for ValueType {
     fn from(wrapped_value_type: WrappedValueType) -> Self {
         match wrapped_value_type {
-            WrappedValueType::SignedInteger => Self::Integer64,
-            WrappedValueType::UnsignedInteger => Self::UInteger64,
-            WrappedValueType::Float => Self::Float64,
+            WrappedValueType::Integer64 => Self::Integer64,
+            WrappedValueType::UInteger64 => Self::UInteger64,
+            WrappedValueType::Float64 => Self::Float64,
         }
     }
 }
@@ -89,78 +109,48 @@ pub struct WrappedInserter {
     ptr: Arc<Mutex<Inserter>>,
 }
 
-// SAFETY: TODO
+// SAFETY: The `dummy_lock` is used to ensure access is thread-safe
 unsafe impl Send for WrappedInserter {}
 
-// SAFETY: TODO
+// SAFETY: The `dummy_lock` is used to ensure access is thread-safe
 unsafe impl Sync for WrappedInserter {}
 
 #[pymethods]
 impl WrappedInserter {
-    pub fn get_value_type(&self) -> PyResult<WrappedValueType> {
-        let _dummy_lock = self
-            .dummy_lock
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
-        let inserter = self
-            .ptr
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
+    pub fn value_type(&self) -> PyResult<WrappedValueType> {
+        dummy_lock!(self);
+        let inserter = ptr_lock!(self);
         Ok(inserter.value_type().into())
     }
 
     pub fn flush(&self) -> PyResult<()> {
-        let _dummy_lock = self
-            .dummy_lock
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
-        let mut inserter = self
-            .ptr
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
+        dummy_lock!(self);
+        let mut inserter = ptr_lock!(self);
         inserter.flush().map_err(WrappedTachyonErr::TachyonErr)?;
         Ok(())
     }
 
-    pub fn insert_signed_integer(&self, timestamp: Timestamp, value: i64) -> PyResult<()> {
-        let _dummy_lock = self
-            .dummy_lock
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
-        let mut inserter = self
-            .ptr
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
+    pub fn insert_integer64(&self, timestamp: Timestamp, value: i64) -> PyResult<()> {
+        dummy_lock!(self);
+        let mut inserter = ptr_lock!(self);
         inserter
             .insert_integer64(timestamp, value)
             .map_err(WrappedTachyonErr::TachyonErr)?;
         Ok(())
     }
 
-    pub fn insert_unsigned_integer(&self, timestamp: Timestamp, value: u64) -> PyResult<()> {
-        let _dummy_lock = self
-            .dummy_lock
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
-        let mut inserter = self
-            .ptr
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
+    pub fn insert_uinteger64(&self, timestamp: Timestamp, value: u64) -> PyResult<()> {
+        dummy_lock!(self);
+        let mut inserter = ptr_lock!(self);
         inserter
             .insert_uinteger64(timestamp, value)
             .map_err(WrappedTachyonErr::TachyonErr)?;
         Ok(())
     }
 
-    pub fn insert_float(&self, timestamp: Timestamp, value: f64) -> PyResult<()> {
-        let _dummy_lock = self
-            .dummy_lock
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
-        let mut inserter = self
-            .ptr
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
+    pub fn insert_float64(&self, timestamp: Timestamp, value: f64) -> PyResult<()> {
+        dummy_lock!(self);
+        let mut inserter = ptr_lock!(self);
         inserter
             .insert_float64(timestamp, value)
             .map_err(WrappedTachyonErr::TachyonErr)?;
@@ -171,17 +161,17 @@ impl WrappedInserter {
 #[pyclass(name = "QueryResultData")]
 #[derive(Clone)]
 pub enum WrappedQueryResultData {
-    SignedInteger(Vec<i64>),
-    UnsignedInteger(Vec<u64>),
-    Float(Vec<f64>),
+    Integer64(Vec<i64>),
+    UInteger64(Vec<u64>),
+    Float64(Vec<f64>),
 }
 
 impl From<QueryUtilsResultData> for WrappedQueryResultData {
     fn from(data: QueryUtilsResultData) -> Self {
         match data {
-            QueryUtilsResultData::Integer64(values) => Self::SignedInteger(values),
-            QueryUtilsResultData::UInteger64(values) => Self::UnsignedInteger(values),
-            QueryUtilsResultData::Float64(values) => Self::Float(values),
+            QueryUtilsResultData::Integer64(values) => Self::Integer64(values),
+            QueryUtilsResultData::UInteger64(values) => Self::UInteger64(values),
+            QueryUtilsResultData::Float64(values) => Self::Float64(values),
         }
     }
 }
@@ -211,10 +201,10 @@ pub struct WrappedConnection {
     ptr: Arc<Mutex<Connection>>,
 }
 
-// SAFETY: TODO
+// SAFETY: The `dummy_lock` is used to ensure access is thread-safe
 unsafe impl Send for WrappedConnection {}
 
-// SAFETY: TODO
+// SAFETY: The `dummy_lock` is used to ensure access is thread-safe
 unsafe impl Sync for WrappedConnection {}
 
 #[pymethods]
@@ -230,55 +220,31 @@ impl WrappedConnection {
     }
 
     pub fn create_stream(&self, name: String, value_type: WrappedValueType) -> PyResult<()> {
-        let _dummy_lock = self
-            .dummy_lock
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
-        let mut conn = self
-            .ptr
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
+        dummy_lock!(self);
+        let mut conn = ptr_lock!(self);
         conn.create_stream(name, value_type.into())
             .map_err(WrappedTachyonErr::TachyonErr)?;
         Ok(())
     }
 
     pub fn delete_stream(&self, name: String) -> PyResult<()> {
-        let _dummy_lock = self
-            .dummy_lock
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
-        let mut conn = self
-            .ptr
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
+        dummy_lock!(self);
+        let mut conn = ptr_lock!(self);
         conn.delete_stream(name);
         Ok(())
     }
 
     pub fn check_stream_exists(&self, name: String) -> PyResult<bool> {
-        let _dummy_lock = self
-            .dummy_lock
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
-        let conn = self
-            .ptr
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
+        dummy_lock!(self);
+        let conn = ptr_lock!(self);
         Ok(conn
             .check_stream_exists(name)
             .map_err(WrappedTachyonErr::TachyonErr)?)
     }
 
-    pub fn create_inserter(&self, stream: String) -> PyResult<WrappedInserter> {
-        let _dummy_lock = self
-            .dummy_lock
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
-        let mut conn = self
-            .ptr
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
+    pub fn prepare_insert(&self, stream: String) -> PyResult<WrappedInserter> {
+        dummy_lock!(self);
+        let mut conn = ptr_lock!(self);
         let inserter = conn
             .prepare_insert(stream)
             .map_err(WrappedTachyonErr::TachyonErr)?;
@@ -294,14 +260,8 @@ impl WrappedConnection {
         start: Option<Timestamp>,
         end: Option<Timestamp>,
     ) -> PyResult<WrappedQueryResult> {
-        let _dummy_lock = self
-            .dummy_lock
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
-        let mut conn = self
-            .ptr
-            .lock()
-            .map_err(|_| WrappedTachyonErr::MiscErr(String::from("Failed to acquire lock!")))?;
+        dummy_lock!(self);
+        let mut conn = ptr_lock!(self);
         let (return_type, value_type, timestamps, values) =
             QueryUtils::perform(&mut conn, query, start, end)
                 .map_err(WrappedTachyonErr::TachyonErr)?;
@@ -317,7 +277,7 @@ impl WrappedConnection {
 /// The TachyonDB Python bindings.
 /// This module provides a Python interface to a TachyonDB database.
 #[pymodule]
-fn tachyon_python_bindings(m: &Bound<PyModule>) -> PyResult<()> {
+fn tachyondb(m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<WrappedValueType>()?;
     m.add_class::<WrappedReturnType>()?;
 

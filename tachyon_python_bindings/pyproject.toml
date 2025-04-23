@@ -3,6 +3,6 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "tachyon_python_bindings"
+name = "tachyondb"
 version = "0.2.0"
 requires-python = ">=3.9"
