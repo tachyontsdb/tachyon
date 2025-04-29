@@ -1,6 +1,6 @@
 use crate::error::IndexerErr;
 use crate::{StreamSummaryType, Timestamp, ValueType};
-use promql_parser::label::Matchers;
+use promql_parser::label::{MatchOp, Matcher, Matchers};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -10,6 +10,7 @@ trait IndexerStore {
     fn drop_store(&mut self) -> Result<(), IndexerErr>;
 
     fn get_all_streams(&self) -> Result<Vec<StreamSummaryType>, IndexerErr>;
+    fn get_all_stream_names(&self) -> Result<Vec<(Uuid, String)>, IndexerErr>;
     fn get_value_type_for_stream_id(&self, stream_id: Uuid) -> Option<ValueType>;
 
     fn insert_new_id(
@@ -48,6 +49,7 @@ trait IndexerStore {
     ) -> Result<Vec<PathBuf>, IndexerErr>;
     fn get_open_files_for_stream_id(&self, stream_id: Uuid) -> Result<Vec<PathBuf>, IndexerErr>;
     fn get_max_timestamp(&self, stream_id: Uuid) -> Result<Option<Timestamp>, IndexerErr>;
+    fn delete_stream_ids(&mut self, delete_ids: HashSet<Uuid>) -> Result<(), IndexerErr>;
 }
 
 mod sqlite {
@@ -437,6 +439,29 @@ mod sqlite {
             Ok(streams)
         }
 
+        fn get_all_stream_names(&self) -> Result<Vec<(Uuid, String)>, IndexerErr> {
+            let streams = self.get_all_streams()?;
+            let mut stream_names: Vec<(Uuid, String)> = Vec::new();
+
+            for (stream_id, matcher_strings, _) in streams {
+                let mut stream_name = String::new();
+
+                let mut matchers: Vec<Matcher> = Vec::new();
+                for matcher in matcher_strings {
+                    if matcher.0 == Self::SQLITE_STREAM_NAME_COLUMN {
+                        stream_name = matcher.1;
+                    } else {
+                        matchers.push(Matcher::new(MatchOp::Equal, &matcher.0, &matcher.1));
+                    }
+                }
+                let matchers = Matchers::new(matchers);
+
+                stream_names.push((stream_id, format!("{}{{{}}}", stream_name, matchers)));
+            }
+
+            Ok(stream_names)
+        }
+
         fn get_open_files_for_stream_id(
             &self,
             stream_id: Uuid,
@@ -473,6 +498,91 @@ mod sqlite {
                 stmt.query_row([stream_id], |row| row.get::<_, Option<u64>>(0))?;
 
             Ok(max_value)
+        }
+
+        fn delete_stream_ids(&mut self, delete_ids: HashSet<Uuid>) -> Result<(), IndexerErr> {
+            // Read stream to ids table
+            let stream_to_ids = {
+                let mut stmt = self.conn.prepare_cached(&format!(
+                    "SELECT name, value, ids FROM {}",
+                    Self::SQLITE_STREAM_TO_IDS_TABLE
+                ))?;
+
+                // SAFETY: the row.get calls will only fail if we generated the table wrong, which is bad
+                let rows = stmt.query_map((), |row| {
+                    Ok((
+                        row.get::<usize, String>(0)
+                            .expect("Stream to ID table: row not valid at idx 0."),
+                        row.get::<usize, String>(1)
+                            .expect("Stream to ID table: row not valid at idx 1."),
+                        row.get::<usize, String>(2)
+                            .expect("Stream to ID table: row not valid at idx 2."),
+                    ))
+                })?;
+
+                let mut stream_to_ids = Vec::new();
+                for item in rows {
+                    // SAFETY: this will always be Ok based on implementation of .query_map above
+                    stream_to_ids.push(item.unwrap());
+                }
+                stream_to_ids
+            };
+
+            let transaction: rusqlite::Transaction<'_> = self.conn.transaction()?;
+
+            // Remove ids from "stream to ids" table
+            let mut delete_ids_stmt = transaction.prepare_cached(&format!(
+                "DELETE FROM {} WHERE name = ? AND value = ?",
+                Self::SQLITE_STREAM_TO_IDS_TABLE
+            ))?;
+            let mut update_ids_stmt = transaction.prepare_cached(&format!(
+                "UPDATE {} SET ids = ? WHERE name = ? AND value = ?",
+                Self::SQLITE_STREAM_TO_IDS_TABLE
+            ))?;
+
+            for (name, value, stream_ids_str) in stream_to_ids {
+                // SAFETY: the string is from our database, it should always convert properly
+                let stream_ids: HashSet<Uuid> = serde_json::from_str(&stream_ids_str)
+                    .expect("Stream to ID table: ID column not properly formatted.");
+                let new_stream_ids = &stream_ids - &delete_ids;
+
+                if new_stream_ids.is_empty() {
+                    delete_ids_stmt.execute((name, value))?;
+                } else if new_stream_ids.len() < stream_ids.len() {
+                    // SAFETY: should always be able to convert HashSet to string
+                    let stream_ids_str = serde_json::to_string(&new_stream_ids)
+                        .expect("Failed to serialize stream_ids to string.");
+                    update_ids_stmt.execute((stream_ids_str, name, value))?;
+                }
+            }
+
+            drop(delete_ids_stmt);
+            drop(update_ids_stmt);
+
+            // Remove ids from "id to filename" and "id to value type" tables
+            let mut delete_filenames_stmt = transaction.prepare_cached(&format!(
+                "DELETE FROM {} WHERE id = ?",
+                Self::SQLITE_ID_TO_FILENAME_TABLE
+            ))?;
+            let mut delete_value_types_stmt = transaction.prepare_cached(&format!(
+                "DELETE FROM {} WHERE id = ?",
+                Self::SQLITE_ID_TO_VALUE_TYPE_TABLE
+            ))?;
+
+            for stream_id in delete_ids {
+                delete_filenames_stmt.execute([stream_id])?;
+                // SAFETY: should always be able to convert Uuid to String
+                delete_value_types_stmt.execute([
+                    serde_json::to_string(&stream_id).expect("Failed to serialize new_id.")
+                ])?;
+            }
+
+            drop(delete_filenames_stmt);
+            drop(delete_value_types_stmt);
+
+            transaction.commit()?;
+
+            Ok(())
         }
     }
 }
@@ -535,6 +645,10 @@ impl Indexer {
         self.store.get_all_streams()
     }
 
+    pub fn get_all_stream_names(&self) -> Result<Vec<(Uuid, String)>, IndexerErr> {
+        self.store.get_all_stream_names()
+    }
+
     pub fn get_stream_ids(&self, stream: &str, matchers: &Matchers) -> HashSet<Uuid> {
         let mut id_lists = self.store.get_stream_and_matcher_ids(stream, matchers);
         self.compute_intersection(&mut id_lists)
@@ -589,6 +703,10 @@ impl Indexer {
     ) -> Result<Vec<PathBuf>, IndexerErr> {
         self.store.get_open_files_for_stream_id(stream_id)
     }
+
+    pub fn delete_stream_ids(&mut self, delete_ids: HashSet<Uuid>) -> Result<(), IndexerErr> {
+        self.store.delete_stream_ids(delete_ids)
+    }
 }
 
 #[cfg(test)]
@@ -598,7 +716,7 @@ mod tests {
     use crate::ValueType;
     use promql_parser::label::{MatchOp, Matcher, Matchers};
     use std::collections::HashSet;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use uuid::Uuid;
 
     #[test]
@@ -702,11 +820,8 @@ mod tests {
         indexer.drop_store().unwrap();
     }
 
-    #[test]
-    fn test_get_value_type_for_stream() {
-        set_up_dirs!(dirs, "db");
-
-        let mut indexer = Indexer::new(dirs[0].clone()).unwrap();
+    fn indexer_test_helper(root_dir: impl AsRef<Path>) -> ((Uuid, Uuid, Uuid), Indexer) {
+        let mut indexer = Indexer::new(root_dir).unwrap();
         indexer.drop_store().unwrap();
         indexer.create_store().unwrap();
 
@@ -736,6 +851,14 @@ mod tests {
         let s3id = indexer
             .insert_new_id(stream3, &matchers3, stream_value_type_3)
             .unwrap();
+
+        ((s1id, s2id, s3id), indexer)
+    }
+
+    #[test]
+    fn test_get_value_type_for_stream() {
+        set_up_dirs!(dirs, "db");
+        let ((s1id, s2id, s3id), indexer) = indexer_test_helper(dirs[0].clone());
 
         assert_eq!(
             indexer.get_stream_value_type(s1id),
@@ -754,37 +877,7 @@ mod tests {
     #[test]
     fn test_get_all_streams() {
         set_up_dirs!(dirs, "db");
-
-        let mut indexer = Indexer::new(dirs[0].clone()).unwrap();
-        indexer.drop_store().unwrap();
-        indexer.create_store().unwrap();
-
-        let (stream1, matchers1, stream_value_type_1) = (
-            "str1",
-            Matchers::new(vec![Matcher::new(MatchOp::Equal, "a", "b")]),
-            ValueType::UInteger64,
-        );
-        let s1id = indexer
-            .insert_new_id(stream1, &matchers1, stream_value_type_1)
-            .unwrap();
-
-        let (stream2, matchers2, stream_value_type_2) = (
-            "str2",
-            Matchers::new(vec![Matcher::new(MatchOp::Equal, "c", "d")]),
-            ValueType::Integer64,
-        );
-        let s2id = indexer
-            .insert_new_id(stream2, &matchers2, stream_value_type_2)
-            .unwrap();
-
-        let (stream3, matchers3, stream_value_type_3) = (
-            "str3",
-            Matchers::new(vec![Matcher::new(MatchOp::Equal, "e", "f")]),
-            ValueType::Float64,
-        );
-        let s3id = indexer
-            .insert_new_id(stream3, &matchers3, stream_value_type_3)
-            .unwrap();
+        let ((s1id, s2id, s3id), indexer) = indexer_test_helper(dirs[0].clone());
 
         let all_streams = indexer.get_all_streams().unwrap();
         assert_eq!(all_streams.len(), 3);
@@ -804,5 +897,61 @@ mod tests {
         assert_eq!(all_streams[0].2, ValueType::UInteger64);
         assert_eq!(all_streams[1].2, ValueType::Integer64);
         assert_eq!(all_streams[2].2, ValueType::Float64);
+    }
+
+    #[test]
+    fn test_get_all_stream_names() {
+        set_up_dirs!(dirs, "db");
+        let ((s1id, s2id, s3id), indexer) = indexer_test_helper(dirs[0].clone());
+
+        let all_stream_names = indexer.get_all_stream_names().unwrap();
+        assert_eq!(all_stream_names.len(), 3);
+
+        assert_eq!(all_stream_names[0].0, s1id);
+        assert_eq!(all_stream_names[1].0, s2id);
+        assert_eq!(all_stream_names[2].0, s3id);
+
+        assert_eq!(all_stream_names[0].1, r#"str1{a="b"}"#);
+        assert_eq!(all_stream_names[1].1, r#"str2{c="d"}"#);
+        assert_eq!(all_stream_names[2].1, r#"str3{e="f"}"#);
+    }
+
+    #[test]
+    fn test_delete_stream_ids() {
+        set_up_dirs!(dirs, "db");
+        let ((s1id, s2id, s3id), mut indexer) = indexer_test_helper(dirs[0].clone());
+
+        // Add dummy data to "id to file" table
+        indexer
+            .insert_new_file(s1id, Path::new("a"), 10, Some(20))
+            .unwrap();
+        indexer
+            .insert_new_file(s2id, Path::new("b"), 10, Some(20))
+            .unwrap();
+        indexer
+            .insert_new_file(s3id, Path::new("c"), 10, Some(20))
+            .unwrap();
+
+        // Delete stream ids
+        let mut delete_ids = HashSet::new();
+        delete_ids.insert(s1id);
+        delete_ids.insert(s2id);
+        indexer.delete_stream_ids(delete_ids).unwrap();
+
+        // Check "stream to ids" table
+        let all_stream_names = indexer.get_all_stream_names().unwrap();
+        assert_eq!(all_stream_names.len(), 1);
+        assert_eq!(all_stream_names[0].0, s3id);
+        assert_eq!(all_stream_names[0].1, r#"str3{e="f"}"#);
+
+        // Check "id to file" table
+        assert_eq!(indexer.get_required_files(s1id, 0, 30).unwrap().len(), 0);
+        assert_eq!(indexer.get_required_files(s2id, 0, 30).unwrap().len(), 0);
+        assert_eq!(indexer.get_required_files(s3id, 0, 30).unwrap().len(), 1);
+
+        // Check "id to value type" table
+        assert!(indexer.get_stream_value_type(s1id).is_none());
+        assert!(indexer.get_stream_value_type(s2id).is_none());
+        assert!(indexer.get_stream_value_type(s3id).is_some());
     }
 }

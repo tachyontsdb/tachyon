@@ -148,6 +148,14 @@ impl Writer for PersistentWriter {
         }
         Ok(())
     }
+
+    fn delete_stream(&self, stream_id: Uuid) -> Result<(), WriterErr> {
+        let stream = self.root.join(stream_id.to_string());
+        if stream.exists() {
+            fs::remove_dir_all(stream)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -544,5 +552,36 @@ mod tests {
 
             assert!(result.is_err(), "Expected an error, but got {:?}", result);
         }
+    }
+
+    #[test]
+    fn test_delete_stream() {
+        set_up_dirs!(dirs, "db");
+        let stream_id = Uuid::new_v4();
+
+        let indexer = Rc::new(RefCell::new(Indexer::new(dirs[0].clone()).unwrap()));
+        indexer.borrow_mut().create_store().unwrap();
+        let batch_size: u64 = 12801;
+
+        {
+            let mut writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
+            writer.create_stream(stream_id).unwrap();
+            for i in 0..batch_size {
+                let ts = i as Timestamp;
+                let v = (i * 1000).into();
+                writer
+                    .write(stream_id, ts, v, ValueType::UInteger64)
+                    .unwrap();
+            }
+        }
+
+        assert!(fs::exists(dirs[0].join(stream_id.to_string())).unwrap());
+
+        {
+            let writer = PersistentWriter::new(dirs[0].clone(), indexer.clone(), Version(0));
+            writer.delete_stream(stream_id).unwrap();
+        }
+
+        assert!(!fs::exists(dirs[0].join(stream_id.to_string())).unwrap());
     }
 }

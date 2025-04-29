@@ -20,4 +20,5 @@ pub trait Writer {
     ) -> Result<(), WriterErr>;
     fn flush_all(&mut self) -> Result<(), WriterErr>;
     fn create_stream(&self, stream_id: Uuid) -> Result<(), WriterErr>;
+    fn delete_stream(&self, stream_id: Uuid) -> Result<(), WriterErr>;
 }

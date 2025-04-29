@@ -115,6 +115,10 @@ impl Writer for InMemoryWriter {
         Ok(())
     }
 
+    fn delete_stream(&self, _stream_id: Uuid) -> Result<(), WriterErr> {
+        panic!("Not implemented.");
+    }
+
     fn flush_all(&mut self) -> Result<(), WriterErr> {
         for (stream_id, file) in self.open_data_files.iter_mut() {
             let file_path = InMemoryWriter::create_virtual_file_path(*stream_id, file);

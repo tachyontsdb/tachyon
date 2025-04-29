@@ -102,10 +102,36 @@ pub unsafe extern "C" fn tachyon_stream_create(
     }
 }
 
+/// SAFETY: On error (not code 0), this returns an error in the `out` parameter.
+/// The caller is responsible for freeing the returned pointer in `out`.
+/// Error data can be freed by using the function `tachyon_error_free`.
 #[no_mangle]
-pub unsafe extern "C" fn tachyon_stream_delete(connection: *mut Connection, stream: *const c_char) {
-    let stream = CStr::from_ptr(stream).to_str().unwrap();
-    (*connection).delete_stream(stream);
+pub unsafe extern "C" fn tachyon_stream_delete(
+    connection: *mut Connection,
+    stream: *const c_char,
+    out: *mut *mut c_void,
+) -> u8 {
+    let stream_res = CStr::from_ptr(stream)
+        .to_str()
+        .map_err(|err| TachyonErr::MiscErr {
+            inner: Box::new(err),
+        });
+
+    match stream_res {
+        Ok(stream) => match (*connection).delete_stream(stream) {
+            Ok(()) => 0u8,
+            Err(tachyon_err) => {
+                let return_value = get_error_code(&tachyon_err);
+                *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+                return_value
+            }
+        },
+        Err(tachyon_err) => {
+            let return_value = get_error_code(&tachyon_err);
+            *out = Box::into_raw(Box::new(tachyon_err)) as *mut c_void;
+            return_value
+        }
+    }
 }
 
 /// SAFETY: On success (code 0), this returns an `int *` (1 if stream exists, 0 otherwise) in the `out` parameter. Otherwise, it returns an error.

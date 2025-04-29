@@ -444,9 +444,11 @@ impl Connection {
         let selector = self.parse_stream_for_insert(&stream)?;
 
         if !self.get_stream_ids_for_selector(&selector).is_empty() {
-            return Err(TachyonErr::ConnectionErr(ConnectionErr::StreamExistsErr {
-                stream: stream.as_ref().to_string(),
-            }));
+            return Err(TachyonErr::ConnectionErr(
+                ConnectionErr::ExistingStreamCreationErr {
+                    stream: stream.as_ref().to_string(),
+                },
+            ));
         }
 
         let stream_id = self
@@ -467,8 +469,34 @@ impl Connection {
         Ok(())
     }
 
-    pub fn delete_stream(&mut self, stream: impl AsRef<str>) {
-        todo!("Not deleting stream {:?}", stream.as_ref());
+    pub fn delete_stream(&mut self, stream: impl AsRef<str>) -> Result<(), TachyonErr> {
+        let selector = self.parse_stream_for_insert(&stream)?;
+
+        let stream_ids = self.get_stream_ids_for_selector(&selector);
+        if self.get_stream_ids_for_selector(&selector).is_empty() {
+            return Err(TachyonErr::ConnectionErr(
+                ConnectionErr::MissingStreamDeletionErr {
+                    stream: stream.as_ref().to_string(),
+                },
+            ));
+        }
+
+        // Delete physical files
+        for stream_id in &stream_ids {
+            self.writer.borrow_mut().delete_stream(*stream_id)?;
+        }
+
+        // Delete from indexer
+        self.indexer
+            .borrow_mut()
+            .delete_stream_ids(stream_ids)
+            .map_err(|_| {
+                TachyonErr::ConnectionErr(ConnectionErr::StreamDeletionErr {
+                    stream: stream.as_ref().to_string(),
+                })
+            })?;
+
+        Ok(())
     }
 
     pub fn check_stream_exists(&self, stream: impl AsRef<str>) -> Result<bool, TachyonErr> {
@@ -482,6 +510,40 @@ impl Connection {
             .borrow()
             .get_all_streams()
             .map_err(|_| TachyonErr::ConnectionErr(ConnectionErr::GetStreamsErr))
+    }
+
+    pub fn get_all_stream_names(&self) -> Result<Vec<(Uuid, String)>, TachyonErr> {
+        self.indexer
+            .borrow()
+            .get_all_stream_names()
+            .map_err(|_| TachyonErr::ConnectionErr(ConnectionErr::GetStreamsErr))
+    }
+
+    pub fn get_matching_stream_names(
+        &self,
+        stream: impl AsRef<str>,
+    ) -> Result<Vec<String>, TachyonErr> {
+        let selector = self.parse_stream_for_insert(&stream)?;
+
+        let stream_ids = self.get_stream_ids_for_selector(&selector);
+        let all_stream_names = self.get_all_stream_names()?;
+
+        let mut stream_names: Vec<String> = Vec::new();
+        for (stream_id, stream_name) in all_stream_names {
+            if stream_ids.contains(&stream_id) {
+                stream_names.push(stream_name);
+            }
+        }
+
+        if stream_names.is_empty() {
+            return Err(TachyonErr::ConnectionErr(
+                ConnectionErr::MissingStreamDeletionErr {
+                    stream: stream.as_ref().to_string(),
+                },
+            ));
+        }
+
+        Ok(stream_names)
     }
 
     pub fn prepare_insert(&mut self, stream: impl AsRef<str>) -> Result<Inserter, TachyonErr> {
@@ -689,11 +751,18 @@ pub mod tachyon_internals {
 
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
+
     use crate::{
         utils::test::set_up_dirs, Connection, Inserter, Query, ReturnType, Timestamp, Value,
         ValueType, Vector,
     };
-    use std::{borrow::Borrow, collections::HashSet, iter::zip, path::PathBuf};
+    use std::{
+        borrow::Borrow,
+        collections::HashSet,
+        iter::zip,
+        path::{Path, PathBuf},
+    };
 
     fn create_stream_helper(
         conn: &mut Connection,
@@ -914,6 +983,88 @@ mod tests {
         }
 
         assert_eq!(i, 4);
+    }
+
+    #[test]
+    fn test_e2e_get_stream_names() {
+        set_up_dirs!(dirs, "db");
+        let mut conn = Connection::new(dirs[0].clone()).unwrap();
+
+        let stream_names = vec![
+            r#"stream1{matcher="a"}"#,
+            r#"stream1{matcher="b"}"#,
+            r#"stream2{matcher="a"}"#,
+            r#"stream2{matcher="b"}"#,
+        ];
+
+        for stream in &stream_names {
+            let mut inserter = create_stream_helper(&mut conn, stream, ValueType::Integer64);
+            inserter.flush().unwrap();
+        }
+
+        let all_string_names: Vec<String> = conn
+            .get_all_stream_names()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.1)
+            .collect();
+        assert!(all_string_names.len() == 4);
+        assert!(all_string_names.contains(&String::from(r#"stream1{matcher="a"}"#)));
+        assert!(all_string_names.contains(&String::from(r#"stream1{matcher="b"}"#)));
+        assert!(all_string_names.contains(&String::from(r#"stream2{matcher="a"}"#)));
+        assert!(all_string_names.contains(&String::from(r#"stream2{matcher="b"}"#)));
+
+        let matching_string_names = conn.get_matching_stream_names(r#"stream1"#).unwrap();
+        assert!(matching_string_names.len() == 2);
+        assert!(matching_string_names.contains(&String::from(r#"stream1{matcher="a"}"#)));
+        assert!(matching_string_names.contains(&String::from(r#"stream1{matcher="b"}"#)));
+    }
+
+    #[test]
+    fn test_e2e_delete_streams() {
+        set_up_dirs!(dirs, "db");
+        let mut conn = Connection::new(dirs[0].clone()).unwrap();
+
+        let deleted_stream_names = vec![r#"stream1{matcher="a"}"#, r#"stream1{matcher="b"}"#];
+        let remaining_stream_names = vec![r#"stream2{matcher="a"}"#, r#"stream2{matcher="b"}"#];
+
+        for stream in &deleted_stream_names {
+            let mut inserter = create_stream_helper(&mut conn, stream, ValueType::Integer64);
+            inserter.flush().unwrap();
+        }
+        for stream in &remaining_stream_names {
+            let mut inserter = create_stream_helper(&mut conn, stream, ValueType::Integer64);
+            inserter.flush().unwrap();
+        }
+
+        let streams_before = conn.get_all_streams().unwrap();
+        conn.delete_stream(r#"stream1"#).unwrap();
+
+        // Check correct streams were deleted from indexer
+        let streams_after = conn.get_all_streams().unwrap();
+        assert!(streams_after.len() == remaining_stream_names.len());
+        for stream in &deleted_stream_names {
+            assert!(!conn.check_stream_exists(stream).unwrap());
+        }
+        for stream in &remaining_stream_names {
+            assert!(conn.check_stream_exists(stream).unwrap());
+        }
+
+        // Check correct streams were deleted physically
+        let stream_ids_after: Vec<Uuid> = streams_after.iter().map(|x| x.0).collect();
+        for (stream_id, _, _) in streams_before {
+            let path = format!(
+                "{}/{}",
+                dirs[0].clone().into_os_string().into_string().unwrap(),
+                stream_id
+            );
+            println!("{}", path);
+            if stream_ids_after.contains(&stream_id) {
+                assert!(Path::new(&path).exists());
+            } else {
+                assert!(!Path::new(&path).exists());
+            }
+        }
     }
 
     fn execution_test_helper(

@@ -4,6 +4,7 @@ use clap::{
     builder::{NonEmptyStringValueParser, PossibleValuesParser, TypedValueParser},
     command, Parser,
 };
+use dialoguer::Confirm;
 use tachyon_core::{Connection, ValueType, Vector};
 
 use crate::{
@@ -36,6 +37,10 @@ pub enum TachyonCommand {
         create: bool,
     },
     Create {
+        #[arg(value_parser = NonEmptyStringValueParser::new())]
+        stream: String,
+    },
+    Delete {
         #[arg(value_parser = NonEmptyStringValueParser::new())]
         stream: String,
     },
@@ -104,6 +109,22 @@ pub fn handle_command(
         }
         TachyonCommand::Create { stream } => {
             connection.create_stream(stream, config.value_type)?;
+            Ok(())
+        }
+        TachyonCommand::Delete { stream } => {
+            let stream_names = connection.get_matching_stream_names(&stream)?;
+
+            println!("This will delete the following streams:");
+            for stream_name in stream_names {
+                println!("{}", stream_name);
+            }
+
+            let confirmation = Confirm::new()
+                .with_prompt("Do you want to continue?")
+                .interact();
+            if confirmation.is_ok_and(|x| x) {
+                connection.delete_stream(stream)?;
+            }
             Ok(())
         }
         TachyonCommand::Exit => {
